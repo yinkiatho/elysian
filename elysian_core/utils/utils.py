@@ -4,8 +4,6 @@ import re
 import pandas as pd
 from typing import Iterator
 from argparse import Namespace  
-from torch.utils.data import Dataset, DataLoader
-import torch
 
 ##########################################################################################################################
 ################################################# Config Arguments #######################################################
@@ -112,23 +110,3 @@ class DataFrameIterator:
 
         return batch
     
-
-
-class TensorKeyDataset(Dataset):
-    def __init__(self, all_tensors):
-        
-        
-        # all_tensors is a list of (X, y, unique_keys)
-        self.X_all = torch.cat([x for x, _, _ in all_tensors], dim=0)
-        self.y_all = torch.cat([y for _, y, _ in all_tensors], dim=0)
-        self.keys_all = sum([keys for _, _, keys in all_tensors], [])
-        
-        assert len(self.X_all) == len(self.y_all) == len(self.keys_all), \
-            f"Mismatch between X, y, and keys length X: {len(self.X_all)}, Y: {len(self.y_all)}, Keys_all: {len(self.keys_all)}"
-        
-    def __len__(self):
-        return len(self.X_all)
-
-    def __getitem__(self, idx):
-        return self.X_all[idx], self.y_all[idx], self.keys_all[idx]
-

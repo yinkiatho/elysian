@@ -136,29 +136,6 @@ class StrategyEngine(ABC):
 
         return None, None
 
-    # ── SUI / cross-chain price ───────────────────────────────────────────────
-
-    async def get_to_sui_price(self, token: str) -> Optional[float]:
-        """
-        Return how many SUI one unit of `token` is worth.
-        Tries direct SUI pair first, then constructs via USDT.
-        """
-        try:
-            direct = self._feeds.get(f"SUI{token}")
-            if direct and direct.data:
-                return 1.0 / direct.latest_price
-
-            token_usdt = self._feeds.get(f"{token}USDT")
-            sui_usdt = self._feeds.get("SUIUSDT")
-            if token_usdt and token_usdt.data and sui_usdt and sui_usdt.data:
-                return token_usdt.latest_price / sui_usdt.latest_price
-
-            logger.warning(f"[StrategyEngine] No SUI price for {token}")
-            return None
-        except Exception as e:
-            logger.error(f"[StrategyEngine] get_to_sui_price({token}) error: {e}")
-            return None
-
     # ── Strategy hook ─────────────────────────────────────────────────────────
 
     @abstractmethod

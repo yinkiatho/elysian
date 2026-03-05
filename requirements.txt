@@ -1,0 +1,18 @@
+# ── Exchange connectivity ──────────────────────────────────────────────────────
+python-binance>=1.0.19
+requests>=2.31.0
+websockets>=12.0           # Bybit / OKX WebSocket feeds
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+pandas>=2.0.0
+numpy>=1.26.0
+
+# ── Database ──────────────────────────────────────────────────────────────────
+peewee>=3.17.0
+psycopg2-binary>=2.9.9     # PostgreSQL driver for Peewee
+python-dotenv>=1.0.0
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+pylru>=1.2.0
+loguru>=0.7.0              # used in VolatiltyFeed
+redis>=5.0.0               # used in VolatiltyFeed

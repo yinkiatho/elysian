@@ -68,7 +68,6 @@ class AbstractDataFeed(ABC):
         return self._historical_ob[-1].best_ask_price
 
     # ── Slippage pricing ──────────────────────────────────────────────────────
-
     def executed_buy_price(self, amount: float, amount_in_base: bool = True) -> float:
         """VWAP ask price for a buy of `amount` (base or quote)."""
         ob = self._data
