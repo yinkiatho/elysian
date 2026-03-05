@@ -1,0 +1,74 @@
+{
+    "Pools": [  ["SUI_USDC_POOL_ID", "0xb8d7d9e66a60c239e7a60110efcf8de6c705580ed924d0dde141f4a0e2c90105", "CETUS PROTOCOL"],
+                ["SUI_USDC_POOL_ID_2", "0x51e883ba7c0b566a26cbc8a94cd33eb0abd418a77cc1e60ad22fd9b1f29cd2ab", "CETUS PROTOCOL"],
+                ["CETUS_USDT_POOL_ID", "0x91ba432e39602d12c2f3d95c7c7f890e1f1c7c8e7d0b9c6d6035a33d1f93e1cb", "CETUS PROTOCOL"],
+                ["CETUS_USDC_POOL_ID", "0x3b13ac70030d587624e407bbe791160b459c48f1049e04269eb8ee731f5442b4", "CETUS PROTOCOL"],
+                ["CETUS_SUI_POOL_ID", "0x2e041f3fd93646dcc877f783c1f2b7fa62d30271bdef1f21ef002cebf857bded", "CETUS PROTOCOL"],
+                ["SUI_USDT_POOL_ID","0x06d8af9e6afd27262db436f0d37b304a041f710c3ea1fa4c3a9bab36b3569ad3", "CETUS PROTOCOL"],
+                ["SUI_USDT_POOL_ID_2", "0x4eed0ec3402f2e728eec4d7f6c6649084f2aa243e13d585ac67e3bf81c34039b", "CETUS PROTOCOL"],
+                ["DEEP_SUI_POOL_ID", "0xe01243f37f712ef87e556afb9b1d03d0fae13f96d324ec912daffc339dfdcbd2", "CETUS PROTOCOL"],
+                ["DEEP_USDC_POOL_ID", "0xd8642c113cfac11073219b0edae99c87e87b8a1141877f31dfd5bf60cfea7c1f", "CETUS PROTOCOL"],
+                
+                ["MEMEFI_SUI_POOL_ID", "0x2f47d887c4ca1640c48946676dc3ccb40025cdb0aa52f21d6b043568a7c39ffe", "CETUS PROTOCOL"],
+                ["MEMEFI_USDC_POOL_ID", "0x9a3902e2d39e9a1d7b7643171f2f0fdced054aa48ad7132dcbf48a6bd62b56fa", "CETUS PROTOCOL"],
+                
+                ["NAVX_SUI_POOL_ID", "0x0254747f5ca059a1972cd7f6016485d51392a3fde608107b93bbaebea550f703", "CETUS PROTOCOL"], 
+                ["USDC_NAVX_POOL_ID", "0x81dd52b540d2f48925b733ac2341030754315d56c60c27872a16a224f2bab03e", "CETUS PROTOCOL"],
+                
+                ["NS_SUI_POOL_ID", "0x763f63cbada3a932c46972c6c6dcf1abd8a9a73331908a1d7ef24c2232d85520", "CETUS PROTOCOL"],
+                ["USDC_NS_POOL_ID", "0x736889ae2162e14ee875c18f5500ce2307e44c6e8750cd9d92732b04e4928144", "CETUS PROTOCOL"],
+                
+                ["USDC_SCA_POOL_ID", "0x5f755af8da348ef9f00ad339a26e24491b99ebef7cb5431ba76432245db33db5", "CETUS PROTOCOL"],
+                ["SCA_SUI_POOL_ID", "0xaa72bd551b25715b8f9d72f226fa02526bdf2e085a86faec7184230c5209bb6e", "CETUS PROTOCOL"]
+                ],
+    
+    "Trading Pairs": {
+      "Binance Pairs": ["SUIUSDC", "SUIUSDT", "CETUSUSDT", "CETUSUSDC"],
+      "Binance Symbols": ["SUIUSDC", "SUIUSDT", "CETUSUSDT", "CETUSUSDC"],
+      "Bybit Pairs": [
+        "DEEPUSDT",
+        "MEMEFIUSDT",
+        "NAVXUSDT",
+        "NSUSDT",
+        "SCAUSDT"
+      ],
+      "Bybit Symbols": [
+        "DEEPUSDT",
+        "MEMEFIUSDT",
+        "NAVXUSDT",
+        "NSUSDT",
+        "SCAUSDT"
+      ],
+      "OKX Pairs": ["SUIUSDC", "SUIUSDT", "CETUSUSDT", "CETUSUSDC"],
+      "OKX Symbols": ["SUI-USDC", "SUI-USDT", "CETUS-USDT", "CETUS-USDC"]
+    },
+    "Total Tokens": ["SUI", "CETUS", "USDC", "USDT"],
+    "Package Targets": 
+            [
+            "0x6f5e582ede61fe5395b50c4a449ec11479a54d7ff8e0158247adfda60d98970b::pool_script_v2::swap_b2a",
+            "0x6f5e582ede61fe5395b50c4a449ec11479a54d7ff8e0158247adfda60d98970b::pool_script_v2::swap_a2b",
+            "0x1889977f0fb56ae730e7bda8e8e32859ce78874458c74910d36121a81a615123::auctioneer::submit_bid",
+            "0x2::coin::into_balance",
+            "0x2::coin::zero"
+            ]
+        ,
+
+    "Static Object IDs": [
+            ["GLOBAL_CONFIG_OBJ_ID", "0xdaa46292632c3c4d8f31f23ea0f9b36a28ff3677e9684980e4438403a67a3d8f"],
+            ["CONFIG_CLOCK_ADDRESS", "0x0000000000000000000000000000000000000000000000000000000000000006"],
+            ["MUTABLE_GLOBAL_STATE", "0xc32ce42eac951759666cbc993646b72387ec2708a2917c2c6fb7d21f00108c18"]
+    ],
+
+    "Shio Addresses": {
+        "RPC URL": "https://rpc.getshio.com",
+        "Package Address": "0x1889977f0fb56ae730e7bda8e8e32859ce78874458c74910d36121a81a615123",
+        "Feed URL": "wss://rpc.getshio.com/feed"
+    },
+
+    "TOC Config": {
+      "URL": "https://prod.mo.api.intra.tokkalabs.com/onchain-transaction-service/trade",
+      "T2X Account ID": 7007
+    }
+
+            
+}
