@@ -8,11 +8,17 @@ from peewee import (
     FloatField,
     IntegerField,
     TextField,
+    OperationalError
 )
 from playhouse.postgres_ext import JSONField
 
 from elysian_core.core.enums import OrderStatus, Side, SwapType, TradeType
 from elysian_core.db.database import BaseModel
+from elysian_core.db.database import DATABASE
+from elysian_core.utils.logger import setup_custom_logger
+
+
+logger = setup_custom_logger('root')
 
 _UTC8 = datetime.timezone(datetime.timedelta(hours=8))
 
@@ -96,6 +102,5 @@ ALL_TABLES = [
 
 def create_tables(safe: bool = True):
     """Create all tables. Pass safe=True to skip existing tables."""
-    from elysian_core.db.database import DATABASE
     with DATABASE:
         DATABASE.create_tables(ALL_TABLES, safe=safe)

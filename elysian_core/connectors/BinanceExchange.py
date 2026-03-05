@@ -101,7 +101,6 @@ class BinanceKlineClientManager:
         logger.info("BinanceKlineClientManager: Stopped shared kline client")
 
 
-
     def register_feed(self, feed: 'BinanceKlineFeed'):
         self._active_feeds[feed._name] = feed
 
@@ -501,7 +500,7 @@ class BinanceOrderBookFeed(AbstractDataFeed):
             ask_orders=asks,
         )
         
-        logger.info(f"[{self._name}] OB update id={ob.last_update_id} best_bid={ob.best_bid_price:.2f} best_ask={ob.best_ask_price:.2f}")
+        #logger.info(f"[{self._name}] OB update id={ob.last_update_id} best_bid={ob.best_bid_price:.5f} best_ask={ob.best_ask_price:.5f}")
         return 
 
     async def __call__(self):
@@ -517,6 +516,7 @@ class BinanceOrderBookFeed(AbstractDataFeed):
         # Start the shared manager if not already running
         if not _ob_client_manager._running:
             await _ob_client_manager.start()
+            
             # Start the multiplex feed runner in background
             asyncio.create_task(_ob_client_manager.run_multiplex_feeds())
 
@@ -558,26 +558,18 @@ class BinanceSpotExchange:
         api_secret: str,
         symbols: List[str],
         file_path: Optional[str] = None,
-        save_data: bool = False,
+        binance_kline_manager: Optional[BinanceKlineClientManager] = None,
+        binance_ob_manager: Optional[BinanceOrderBookClientManager] = None,
     ):
         self._api_key = api_key
         self._api_secret = api_secret
         self._symbols = symbols
         self._file_path = file_path
-        self._client: Any = None
 
         # Per-symbol feeds
-        self._kline_feeds: Dict[str, BinanceKlineFeed] = {}
-        self._ob_feeds: Dict[str, BinanceOrderBookFeed] = {}
-        for sym in symbols:
-            kf = BinanceKlineFeed(save_data=save_data, file_dir=file_path)
-            kf.create_new(asset=sym)
-            self._kline_feeds[sym] = kf
-
-            obf = BinanceOrderBookFeed(save_data=save_data, file_dir=file_path)
-            obf.create_new(asset=sym)
-            self._ob_feeds[sym] = obf
-
+        self.kline_manager = binance_kline_manager or _kline_client_manager
+        self.ob_manager = binance_ob_manager or _ob_client_manager
+        
         # Account state
         self._balances: Dict[str, float] = {}
         self._open_orders: Dict[str, list] = collections.defaultdict(list)
@@ -588,10 +580,10 @@ class BinanceSpotExchange:
 
     # ── Feed accessors ────────────────────────────────────────────────────────
     def kline_feed(self, symbol: str) -> BinanceKlineFeed:
-        return self._kline_feeds[symbol]
+        return self.kline_manager.get_feed(symbol)
 
     def ob_feed(self, symbol: str) -> BinanceOrderBookFeed:
-        return self._ob_feeds[symbol]
+        return self.ob_manager.get_feed(symbol)
 
     def last_price(self, symbol: str) -> Optional[float]:
         """Best available mid-price: OB mid → last kline close → None."""
@@ -607,10 +599,13 @@ class BinanceSpotExchange:
     # ── Initialisation ────────────────────────────────────────────────────────
     async def initialize(self):
         """Create authenticated client and fetch symbol metadata."""
+        
         self._client = await AsyncClient.create(self._api_key, self._api_secret)
         for sym in self._symbols:
             await self._fetch_symbol_info(sym)
         logger.info("BinanceExchange initialised.")
+        
+        
 
     async def _fetch_symbol_info(self, symbol: str):
         info = await self._client.get_symbol_info(symbol)
@@ -683,6 +678,8 @@ class BinanceSpotExchange:
         except Exception as e:
             logger.error(f"[{symbol}] place_limit_order error: {e}")
 
+
+
     async def cancel_order(self, symbol: str, order_id: int):
         """Cancel an active order by id."""
         try:
@@ -694,10 +691,14 @@ class BinanceSpotExchange:
         except Exception as e:
             logger.error(f"[{symbol}] cancel_order error: {e}")
 
+
+
     async def cancel_all_orders(self, symbol: str):
         orders = list(self._open_orders.get(symbol, []))
         for order in orders:
             await self.cancel_order(symbol, order["orderId"])
+
+
 
     async def get_open_orders(self):
         """Refresh open orders for all tracked symbols."""
@@ -710,10 +711,14 @@ class BinanceSpotExchange:
         except Exception as e:
             logger.error(f"get_open_orders error: {e}")
 
+
+
     async def monitor_open_orders(self):
         while True:
             await self.get_open_orders()
             await asyncio.sleep(1)
+
+
 
     async def place_market_order(
         self,
@@ -771,6 +776,8 @@ class BinanceSpotExchange:
         except Exception as e:
             logger.error(f"[{symbol}] place_market_order error: {e}")
 
+
+
     @staticmethod
     def _average_fill_price(resp: dict):
         fills = resp["fills"]
@@ -778,6 +785,8 @@ class BinanceSpotExchange:
         total_notional = sum(float(f["qty"]) * float(f["price"]) for f in fills)
         total_comm = sum(float(f["commission"]) for f in fills)
         return total_notional / total_qty, total_comm
+    
+    
     
 
     # ──  Withdrawals ─────────────────────────────────────────────
@@ -800,6 +809,7 @@ class BinanceSpotExchange:
             await self.withdraw_asset(token, round(bal / 2, 2), address, network)
 
     # ── Enum helpers ──────────────────────────────────────────────────────────
+
 
     # Binance sends uppercase "BUY"/"SELL"; map to our Side enum.
     _BINANCE_SIDE: Dict[str, Side] = {
