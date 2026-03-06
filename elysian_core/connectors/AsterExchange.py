@@ -551,5 +551,10 @@ class AsterOrderBookFeed(AbstractDataFeed):
             await asyncio.sleep(1)
 
 
+# Global client managers
+aster_spot_kline_client_manager = AsterKlineClientManager()
+aster_spot_ob_client_manager = AsterOrderBookClientManager()
+
+
 
 
