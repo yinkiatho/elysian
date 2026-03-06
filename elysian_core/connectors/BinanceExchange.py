@@ -37,7 +37,7 @@ class BinanceKlineClientManager:
         self._client: Optional[AsyncClient] = None
         self._manager: Optional[BinanceSocketManager] = None
         self._socket: Optional[Any] = None
-        self._queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
+        self._queue: asyncio.Queue = asyncio.Queue(maxsize=100000)
         self._active_feeds: Dict[str, BinanceKlineFeed] = {}
         self._running = False
         self._reader_task: Optional[asyncio.Task] = None
@@ -362,8 +362,8 @@ class BinanceOrderBookClientManager:
 
 
 # Global client managers
-_kline_client_manager = BinanceKlineClientManager()
-_ob_client_manager = BinanceOrderBookClientManager()
+binance_spot_kline_client_manager = BinanceKlineClientManager()
+binance_spot_ob_client_manager = BinanceOrderBookClientManager()
 
 class BinanceKlineFeed(AbstractDataFeed):
     """
@@ -418,16 +418,16 @@ class BinanceKlineFeed(AbstractDataFeed):
 
     async def __call__(self):
         """Register with shared client manager and wait for multiplex events."""
-        global _kline_client_manager
+        global binance_spot_kline_client_manager
 
         # Register this feed with the shared manager
-        _kline_client_manager.register_feed(self)
+        binance_spot_kline_client_manager.register_feed(self)
 
         # Start the shared manager if not already running
-        if not _kline_client_manager._running:
-            await _kline_client_manager.start()
+        if not binance_spot_kline_client_manager._running:
+            await binance_spot_kline_client_manager.start()
             # Start the multiplex feed runner in background
-            asyncio.create_task(_kline_client_manager.run_multiplex_feeds())
+            asyncio.create_task(binance_spot_kline_client_manager.run_multiplex_feeds())
 
         # Keep the feed alive
         while True:
@@ -481,7 +481,7 @@ class BinanceOrderBookFeed(AbstractDataFeed):
             bid_orders=bids,
             ask_orders=asks,
         )
-        logger.info(f"[{self._name}] OB snapshot id={raw['lastUpdateId']}")
+        #logger.info(f"[{self._name}] OB snapshot id={raw['lastUpdateId']}")
 
     def _process_depth_event(self, event: dict) -> OrderBook:
         ts = int(time.time() * 1000)
@@ -505,20 +505,20 @@ class BinanceOrderBookFeed(AbstractDataFeed):
 
     async def __call__(self):
         """Register with shared client manager and wait for multiplex events."""
-        global _ob_client_manager
+        global binance_spot_ob_client_manager
 
         # Get initial snapshot
         await self.get_initial_snapshot()
 
         # Register this feed with the shared manager
-        _ob_client_manager.register_feed(self)
+        binance_spot_ob_client_manager.register_feed(self)
 
         # Start the shared manager if not already running
-        if not _ob_client_manager._running:
-            await _ob_client_manager.start()
+        if not binance_spot_ob_client_manager._running:
+            await binance_spot_ob_client_manager.start()
             
             # Start the multiplex feed runner in background
-            asyncio.create_task(_ob_client_manager.run_multiplex_feeds())
+            asyncio.create_task(binance_spot_ob_client_manager.run_multiplex_feeds())
 
         # Keep the feed alive
         while True:
@@ -567,8 +567,8 @@ class BinanceSpotExchange:
         self._file_path = file_path
 
         # Per-symbol feeds
-        self.kline_manager = binance_kline_manager or _kline_client_manager
-        self.ob_manager = binance_ob_manager or _ob_client_manager
+        self.kline_manager = binance_kline_manager or binance_spot_kline_client_manager
+        self.ob_manager = binance_ob_manager or binance_spot_ob_client_manager
         
         # Account state
         self._balances: Dict[str, float] = {}
@@ -886,11 +886,11 @@ class BinanceSpotExchange:
         Cleanup shared client managers and authenticated client.
         Call this before shutting down the exchange.
         """
-        global _kline_client_manager, _ob_client_manager
+        global binance_spot_kline_client_manager, binance_spot_ob_client_manager
 
         # Stop shared client managers
-        await _kline_client_manager.stop()
-        await _ob_client_manager.stop()
+        await binance_spot_kline_client_manager.stop()
+        await binance_spot_ob_client_manager.stop()
 
         # Close authenticated client
         if self._client:

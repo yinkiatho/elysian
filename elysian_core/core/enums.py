@@ -38,6 +38,7 @@ class Venue(Enum):
     CETUS = "Cetus Protocol"
     TURBOS = "Turbos"
     DEEPBOOK = "Deepbook"
+    ASTER = "Aster"
 
 
 class Chain(Enum):

@@ -12,7 +12,7 @@ from peewee import (
 )
 from playhouse.postgres_ext import JSONField
 
-from elysian_core.core.enums import OrderStatus, Side, SwapType, TradeType
+from elysian_core.core.enums import OrderStatus, Side, SwapType, TradeType, Venue, OrderType
 from elysian_core.db.database import BaseModel
 from elysian_core.db.database import DATABASE
 from elysian_core.utils.logger import setup_custom_logger
@@ -49,7 +49,7 @@ class BinanceTrade(BaseModel):
     """One CEX fill recorded by BinanceExchange._record_trade."""
     id = AutoField(primary_key=True)
     datetime = DateTimeField(default=lambda: datetime.datetime.now(_UTC8))
-    tx_digest = TextField(null=True)               # source DEX tx that triggered hedge
+    venue = EnumField(Venue, default=Venue.BINANCE)
     symbol = TextField(null=False)                 # e.g. "ETHUSDT"
     side = EnumField(Side, null=False)             # Side.BUY | Side.SELL
     amount = FloatField(null=False)                # signed base amount requested
@@ -61,17 +61,43 @@ class BinanceTrade(BaseModel):
     order_id = TextField(null=False)
     status = EnumField(OrderStatus, null=False)    # OrderStatus.FILLED etc.
     order_side = EnumField(Side, null=False)       # Side from Binance response
-    trade_type = EnumField(TradeType, default=TradeType.REAL)
+    order_type = EnumField(OrderType, null=False) # OrderType from Binance response
 
     class Meta:
         table_name = "binance_trades"
 
 
-# ── DEX swap events ───────────────────────────────────────────────────────────
 
+class CexTrade(BaseModel):
+    """One CEX fill recorded by CEX Exchanges"""
+    id = AutoField(primary_key=True)
+    datetime = DateTimeField(default=lambda: datetime.datetime.now(_UTC8))
+    venue = EnumField(Venue)
+    symbol = TextField(null=False)                 # e.g. "ETHUSDT"
+    side = EnumField(Side, null=False)             # Side.BUY | Side.SELL
+    amount = FloatField(null=False)                # signed base amount requested
+    executed_qty = FloatField(null=False)
+    price = FloatField(null=False)                 # average fill price
+    commission_asset = TextField(null=True)
+    total_commission = FloatField(null=False)
+    total_commission_quote = FloatField(null=False)
+    order_id = TextField(null=False)
+    status = EnumField(OrderStatus, null=False)    # OrderStatus.FILLED etc.
+    order_type = EnumField(OrderType, null=False) # OrderType from Binance response
+    order_side = EnumField(Side, null=False)       # Side from Binance response
+
+    class Meta:
+        table_name = "cex_trades"
+        
+        
+    
+
+
+# ── DEX swap events ───────────────────────────────────────────────────────────
 class DexTrade(BaseModel):
     tx_digest = TextField(primary_key=True)
     datetime = DateTimeField(default=lambda: datetime.datetime.now(_UTC8))
+    venue = EnumField(Venue, default=Venue.ASTER)
     a_to_b = BooleanField(null=False)
     sender = TextField(null=False)
     pool_address = TextField(null=False)
