@@ -170,16 +170,62 @@ class AsterOrderBook(OrderBook):
     
     async def apply_both_updates(
         self,
+        last_timestamp: int,
+        new_update_id: int, 
         bid_levels: Optional[list[list]],
         ask_levels: Optional[list[list]],
     ) -> None:
         """
         Apply both bid and ask updates concurrently.
         """
+        self.last_update_id = new_update_id
+        self.last_timestamp = last_timestamp
         await asyncio.gather(
             self.apply_update_lists("bid", bid_levels or []),
             self.apply_update_lists("ask", ask_levels or []),
         )
+        
+                
+
+class BinanceOrderBook(OrderBook):
+    """
+    Binance-specific order book with additional fields and methods.
+    Inherits from the generic OrderBook dataclass.
+    """
+    
+    async def apply_update_lists(self, side: str, price_levels: list) -> None:
+        """
+        Apply multiple level updates from a list of [price, qty] pairs.
+        """
+        side_to_update = self.bid_orders if side == "bid" else self.ask_orders
+        for price, qty in price_levels:
+            price, qty = float(price), float(qty)
+            if qty == 0.0:
+                side_to_update.pop(price, None)
+            else:
+                side_to_update[price] = qty
+                
+
+                
+    
+    async def apply_both_updates(
+        self,
+        last_timestamp: int,
+        new_update_id: int, 
+        bid_levels: Optional[list[list]],
+        ask_levels: Optional[list[list]],
+    ) -> None:
+        """
+        Apply both bid and ask updates concurrently.
+        """
+        self.last_update_id = new_update_id
+        self.last_timestamp = last_timestamp
+        await asyncio.gather(
+            self.apply_update_lists("bid", bid_levels or []),
+            self.apply_update_lists("ask", ask_levels or []),
+        )
+        
+                
         
                 
         

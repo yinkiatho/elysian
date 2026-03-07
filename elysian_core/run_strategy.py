@@ -229,7 +229,7 @@ class StrategyRunner:
     async def _setup_binance_data_feeds(self) -> None:
         """Initialize all data feeds with multiplex architecture"""
         
-        logger.info("Setting up data feeds with multiplex architecture...")
+        logger.info("Setting up Binance data feeds with multiplex architecture...")
         
         # Create kline feeds that register with shared client manager
         for i, token in enumerate(self.binance_token_symbols):
@@ -241,21 +241,22 @@ class StrategyRunner:
 
                     
         # Create order book feeds if needed (for exchange operations)
+        ob_feeds = []
         for i, token in enumerate(self.binance_token_symbols):
             ob_feed = BinanceOrderBookFeed(save_data=False)
             ob_feed.create_new(asset=token, interval="100ms")
             
             # Register the feed in the client manager
             self.binance_ob_manager.register_feed(ob_feed)
+            ob_feeds.append(ob_feed)
         
         logger.info(f"Initialized {len(self.binance_kline_manager._active_feeds)} Binance kline feeds and {len(self.binance_ob_manager._active_feeds)} order book feeds")
         
-        # Start the multiplex managers
+        # Start the multiplex managers (begins WebSocket connection and buffering)
         await self.binance_kline_manager.start()
         await self.binance_ob_manager.start()
         
-        
-        # Add the multiplex tasks to a list for concurrent execution later
+        # Start multiplex reader/worker tasks (WebSocket now connecting and buffering events)
         multiplex_tasks = []
         if self.binance_kline_manager._active_feeds:
             logger.info(f"Starting Binance Kline multiplex feeds ({len(self.binance_kline_manager._active_feeds)} feeds)")
@@ -264,6 +265,17 @@ class StrategyRunner:
         if self.binance_ob_manager._active_feeds:
             logger.info(f"Starting Binance Order Book multiplex feeds ({len(self.binance_ob_manager._active_feeds)} feeds)")
             multiplex_tasks.append(asyncio.create_task(self.binance_ob_manager.run_multiplex_feeds()))
+        
+        # Give WebSocket a moment to connect and start buffering events
+        await asyncio.sleep(10.0)
+        
+        # NOW fetch snapshots on all order book feeds
+        # This will trigger _process_buffered_events() which finds the sync point
+        if ob_feeds:
+            logger.info(f"Fetching initial snapshots for {len(ob_feeds)} Binance order book feeds...")
+            snapshot_tasks = [feed.get_initial_snapshot() for feed in ob_feeds]
+            await asyncio.gather(*snapshot_tasks)
+            logger.info(f"All Binance order book snapshots fetched and synced")
             
         if multiplex_tasks:
             logger.info(f"Worker process running {len(multiplex_tasks)} feed task(s)...")
@@ -294,21 +306,22 @@ class StrategyRunner:
 
                     
         # Create order book feeds if needed (for exchange operations)
+        ob_feeds = []
         for i, token in enumerate(self.binance_futures_token_symbols):
             ob_feed = BinanceFuturesOrderBookFeed(save_data=False)
             ob_feed.create_new(asset=token, interval="100ms")
             
             # Register the feed in the client manager
             self.binance_futures_ob_manager.register_feed(ob_feed)
+            ob_feeds.append(ob_feed)
         
         logger.info(f"Initialized {len(self.binance_futures_kline_manager._active_feeds)} Binance futures kline feeds and {len(self.binance_futures_ob_manager._active_feeds)} order book feeds")
         
-        # Start the multiplex managers
+        # Start the multiplex managers (begins WebSocket connection and buffering)
         await self.binance_futures_kline_manager.start()
         await self.binance_futures_ob_manager.start()
         
-        
-        # Add the multiplex tasks to a list for concurrent execution later
+        # Start multiplex reader/worker tasks (WebSocket now connecting and buffering events)
         multiplex_tasks = []
         if self.binance_futures_kline_manager._active_feeds:
             logger.info(f"Starting Binance Futures Kline multiplex feeds ({len(self.binance_futures_kline_manager._active_feeds)} feeds)")
@@ -317,6 +330,17 @@ class StrategyRunner:
         if self.binance_futures_ob_manager._active_feeds:
             logger.info(f"Starting Binance Futures Order Book multiplex feeds ({len(self.binance_futures_ob_manager._active_feeds)} feeds)")
             multiplex_tasks.append(asyncio.create_task(self.binance_futures_ob_manager.run_multiplex_feeds()))
+        
+        # Give WebSocket a moment to connect and start buffering events
+        await asyncio.sleep(0.2)
+        
+        # NOW fetch snapshots on all order book feeds
+        # This will trigger _process_buffered_events() which finds the sync point
+        if ob_feeds:
+            logger.info(f"Fetching initial snapshots for {len(ob_feeds)} Binance futures order book feeds...")
+            snapshot_tasks = [feed.get_initial_snapshot() for feed in ob_feeds]
+            await asyncio.gather(*snapshot_tasks)
+            logger.info(f"All Binance futures order book snapshots fetched and synced")
             
         if multiplex_tasks:
             logger.info(f"Worker process running {len(multiplex_tasks)} futures feed task(s)...")
@@ -442,8 +466,8 @@ class StrategyRunner:
             # Compile Process Jobs
             #process_jobs = [(self.setup_and_run_binance_feeds, [], "binance_feeds")]
             process_jobs = [
-                #(self.setup_and_run_binance_feeds, [], "binance_feeds"),
-                (self.setup_and_run_aster_feeds, [], "aster_feeds")
+                (self.setup_and_run_binance_feeds, [], "binance_feeds"),
+                #(self.setup_and_run_aster_feeds, [], "aster_feeds")
                 #(self.setup_and_run_binance_futures_feeds, [], "binance_futures_feeds")
             ]
             

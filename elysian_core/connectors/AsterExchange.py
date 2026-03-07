@@ -555,9 +555,8 @@ class AsterOrderBookFeed(AbstractDataFeed):
     async def _apply_depth_update(self, event: dict):
         """Apply depth update to order book."""
         ts = int(time.time() * 1000)
-        await self._data.apply_both_updates(bid_levels=event.get("b", []), ask_levels=event.get("a", []))
-        self._data.last_update_id = event['u']
-        self._data.last_timestamp = ts
+        await self._data.apply_both_updates(ts, event['u'], 
+                                            bid_levels=event.get("b", []), ask_levels=event.get("a", []))
         logger.info(f"[{self._name}] OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
 
 

@@ -1,8 +1,8 @@
 {
     "Pools": [],   
     "Spot Trading Pairs": {
-      "Binance Pairs": ["SUIUSDC", "SUIUSDT", "CETUSUSDT", "CETUSUSDC"],
-      "Binance Symbols": ["SUIUSDC", "SUIUSDT", "CETUSUSDT", "CETUSUSDC"],
+      "Binance Pairs": ["SUIUSDC"],
+      "Binance Symbols": ["SUIUSDC"],
       "Bybit Pairs": [],
       "Bybit Symbols": [],
       "OKX Pairs": [],
@@ -20,7 +20,7 @@
       "OKX Futures Pairs": [],
       "OKX Futures Symbols": []
     },
-    "Spot Total Tokens": ["USDT", "ASTER"],
+    "Spot Total Tokens": ["SUI", "USDC"],
     "Futures Total Tokens": ["SUI", "CETUS", "BTC", "ETH"],
     "Package Targets": 
             [

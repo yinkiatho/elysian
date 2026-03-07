@@ -451,6 +451,12 @@ class BinanceFuturesOrderBookFeed(AbstractDataFeed):
 
     def __init__(self, save_data: bool = False, file_dir: Optional[str] = None):
         super().__init__(save_data=save_data, file_dir=file_dir)
+        
+        # Binance Futures Specific Parameters
+        self.last_update_id: Optional[int] = None
+        self.snapshot_ready: bool = False
+        self.event_buffer: List[dict] = []  # Buffer events while waiting for snapshot
+        self.first_update_processed: bool = False  # Track if we've synced with snapshot
 
     def create_new(self, asset: str, interval: str = "100ms"):
         self._name = asset
@@ -465,6 +471,7 @@ class BinanceFuturesOrderBookFeed(AbstractDataFeed):
         return resp.json()
 
     async def get_initial_snapshot(self):
+        """Fetch snapshot and process any buffered events that cover it."""
         raw = self._fetch_rest_snapshot(100)
         ts = int(time.time() * 1000)
         bids = [[float(b[0]), float(b[1])] for b in raw["bids"]]
@@ -481,44 +488,105 @@ class BinanceFuturesOrderBookFeed(AbstractDataFeed):
             bid_orders=bids,
             ask_orders=asks,
         )
+        self.last_update_id = raw["lastUpdateId"]
+        self.snapshot_ready = True
+        self.first_update_processed = False  # Reset for new snapshot sync
         logger.info(f"[{self._name}] Futures OB snapshot id={raw['lastUpdateId']}")
+        
+        # Process any buffered events now that snapshot is ready
+        if self.event_buffer:
+            logger.info(f"[{self._name}] Processing {len(self.event_buffer)} buffered depth events")
+            await self._process_buffered_events()
 
+    async def _process_buffered_events(self):
+        """Process buffered events after snapshot is ready."""
+        buffered_events = self.event_buffer[:]
+        self.event_buffer.clear()
+        
+        for buffered_event in buffered_events:
+            # Skip events that are too old (u < lastUpdateId)
+            if buffered_event['u'] < self.last_update_id:
+                logger.debug(f"[{self._name}] Skipping old buffered event u={buffered_event['u']}")
+                continue
+            
+            # Find first event that covers the snapshot
+            if buffered_event['U'] <= self.last_update_id and buffered_event['u'] >= self.last_update_id:
+                logger.info(f"[{self._name}] Found sync point: buffered event u={buffered_event['u']} covers snapshot id={self.last_update_id}")
+                self._apply_depth_update(buffered_event)
+                self.first_update_processed = True
+                break
+            elif buffered_event['U'] > self.last_update_id:
+                # This event is ahead of snapshot with gap - re-fetch snapshot
+                logger.warning(f"[{self._name}] Gap detected: buffered event U={buffered_event['U']} > snapshot id={self.last_update_id}")
+                self.snapshot_ready = False
+                asyncio.create_task(self.get_initial_snapshot())
+                return
+    
     def _process_depth_event(self, event: dict) -> OrderBook:
+        """Process depth updates following Binance Futures API spec."""
+        
+        # Phase 1: Buffer events while snapshot is being fetched
+        if not self.snapshot_ready:
+            self.event_buffer.append(event)
+            logger.debug(f"[{self._name}] Buffering depth event (snapshot not ready). Buffer size: {len(self.event_buffer)}")
+            return self._data if self._data else None
+        
+        # Phase 2: Normal event processing after snapshot is ready
+        if not self.first_update_processed:
+            # This shouldn't happen if _process_buffered_events ran, but handle edge case
+            logger.warning(f"[{self._name}] First event after snapshot, validating sync")
+            if event['U'] <= self.last_update_id and event['u'] >= self.last_update_id:
+                self._apply_depth_update(event)
+                self.first_update_processed = True
+                return self._data
+            else:
+                logger.error(f"[{self._name}] First event after snapshot doesn't cover it. Retrying snapshot...")
+                self.snapshot_ready = False
+                asyncio.create_task(self.get_initial_snapshot())
+                raise ValueError("First event doesn't cover snapshot")
+        
+        # Phase 3: Normal sequential event processing
+        # Validate U and u according to Binance spec
+        if event['u'] < self.last_update_id:
+            logger.debug(f"[{self._name}] Skipping old event u={event['u']} < last_update_id={self.last_update_id}")
+            return self._data
+        
+        if event['U'] > self.last_update_id + 1:
+            logger.error(f"[{self._name}] Gap detected: event U={event['U']} > last_update_id+1={self.last_update_id+1}. Re-fetching snapshot...")
+            self.snapshot_ready = False
+            asyncio.create_task(self.get_initial_snapshot())
+            raise ValueError("Gap in event sequence")
+        
+        self._apply_depth_update(event)
+        return self._data
+    
+    def _apply_depth_update(self, event: dict):
+        """Apply depth update to order book."""
         ts = int(time.time() * 1000)
-        bids = [[float(b[0]), float(b[1])] for b in event["bids"]]
-        asks = [[float(a[0]), float(a[1])] for a in event["asks"]]
-        ob = OrderBook(
-            last_update_id=ts,
-            last_timestamp=ts,
-            ticker=self._name,
-            interval=self._interval,
-            best_bid_price=bids[0][0],
-            best_bid_amount=bids[0][1],
-            best_ask_price=asks[0][0],
-            best_ask_amount=asks[0][1],
-            bid_orders=bids,
-            ask_orders=asks,
-        )
-
-        #logger.info(f"[{self._name}] Futures OB update id={ob.last_update_id} best_bid={ob.best_bid_price:.5f} best_ask={ob.best_ask_price:.5f}")
-        return ob
+        self._data.apply_both_updates(bid_levels=event.get("bids", []), ask_levels=event.get("asks", []))
+        self._data.last_update_id = event['u']
+        self._data.last_timestamp = ts
+        logger.info(f"[{self._name}] Futures OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
 
     async def __call__(self):
         """Register with shared client manager and wait for multiplex events."""
         global binance_futures_ob_client_manager
 
-        # Get initial snapshot
-        await self.get_initial_snapshot()
-
-        # Register this feed with the shared manager
+        # Register this feed with the shared manager (WebSocket will start buffering)
         binance_futures_ob_client_manager.register_feed(self)
 
         # Start the shared manager if not already running
         if not binance_futures_ob_client_manager._running:
             await binance_futures_ob_client_manager.start()
 
-            # Start the multiplex feed runner in background
+            # Start the multiplex feed runner in background (WebSocket reader/workers)
             asyncio.create_task(binance_futures_ob_client_manager.run_multiplex_feeds())
+
+        # Give WebSocket a moment to start buffering events
+        await asyncio.sleep(0.1)
+        
+        # NOW fetch the snapshot while events are being buffered
+        await self.get_initial_snapshot()
 
         # Keep the feed alive
         while True:
