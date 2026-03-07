@@ -3,7 +3,6 @@ Pools:
 
 version_name: "v0.0.0_test"
 
-
 Database:
   postgres:
     Host: "localhost"

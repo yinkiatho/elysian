@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Elysian Trading System Architecture</title>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: true });
+    </script>
+</head>
+<body>
+    <h1>Elysian Trading System Architecture</h1>
+    <p>This diagram represents the detailed architecture of the Elysian automated trading system, showing class names, functions, and the event flow.</p>
+    <div class="mermaid">
+        graph TD
+            subgraph "Entry Point Layer"
+                SR[StrategyRunner\n__init__()\nrun()\n_setup_config()\n_setup_data_feeds()\nsetup_binance_feeds()]
+            end
+
+            subgraph "Market Data Layer"
+                BKM[BinanceKlineClientManager\nstart()\nregister_feed()\nrun_multiplex_feeds()\n_reader_coroutine()\n_worker_coroutine()]
+                BOBM[BinanceOrderBookClientManager\nstart()\nregister_feed()\nrun_multiplex_feeds()]
+                BKF[BinanceKlineFeed\ncreate_new()\n_process_kline_event()]
+                BOBF[BinanceOrderBookFeed\ncreate_new()\n_process_depth_event()]
+                AKM[AsterKlineClientManager\nstart()\nregister_feed()]
+                AOBM[AsterOrderBookClientManager]
+                AKF[AsterKlineFeed\ncreate_new()\n_process_kline_event()]
+                AOBF[AsterOrderBookFeed\ncreate_new()\n_process_depth_event()]
+                VF[VolatilityFeed\nupdate_current_stats()]
+            end
+
+            subgraph "Order Management Layer"
+                OMS[AbstractOMS\nplace_order()\ncancel_order()\nget_balance()]
+                OT[OrderTracker\ntrack_order()\nget_status()\nfill_history()]
+            end
+
+            subgraph "Core Models Layer"
+                KLINE[Kline\nticker, interval, OHLCV]
+                OB[OrderBook\nbid_orders, ask_orders\nspread, mid_price]
+                ORDER[Order\nLimitOrder, RangeOrder]
+                ENUMS[Enums\nOrderStatus, Side, TradeType]
+                TRADE[Trade]
+                PORTFOLIO[Portfolio\nbalances, positions, pnl]
+            end
+
+            subgraph "Strategy Layer"
+                SE[StrategyEngine\non_event()\nget_feed()\nget_price()\nplace_order()\ncancel_order()]
+                PROC[Processor\nprocess()\nevent chain\nsignal processing]
+            end
+
+            subgraph "Market Maker Layer"
+                OBOOK[order_book.py\nOrderBook\nspread calc\nlevel extraction]
+                OMAN[order_management.py\ncreate range order\nupdate positions\nmanage lifecycle]
+                OTRACK[order_tracker.py\ntrack MM orders\nmonitor fills\nadjust levels]
+            end
+
+            subgraph "Event Flow"
+                EVT1[1. Market Data Event\n(from feed)]
+                EVT2[2. Strategy.on_event()]
+                EVT3[3. Processor.process()\n(signal generation)]
+                EVT4[4. OMS.place_order()\n(via exchange)]
+                EVT5[5. OrderTracker.track()\n(status + history)]
+                EVT6[6. Portfolio.update()\n(balance + pnl)]
+                EVT7[7. DB.save()]
+                EVT8[8. Next Event...]
+            end
+
+            subgraph "Persistence Layer"
+                DB[database.py\nPostgreSQL connection\nconnection pooling]
+                MODELS[models.py\nBinanceTrade\nOrderHistory\nPortfolioState]
+                REDIS[Redis\nvolatility cache\nlive order tracking\nbalance cache]
+                FS[File System\nlogs, config\nbacktesting data]
+            end
+
+            SR --> BKM
+            SR --> BOBM
+            SR --> AKM
+            SR --> AOBM
+            SR --> VF
+            SR --> OMS
+            SR --> OT
+            SR --> KLINE
+            SR --> OB
+            SR --> ORDER
+            SR --> ENUMS
+            SR --> TRADE
+            SR --> PORTFOLIO
+
+            BKM --> BKF
+            BOBM --> BOBF
+            AKM --> AKF
+            AOBM --> AOBF
+
+            BKF --> SE
+            BOBF --> SE
+            AKF --> SE
+            AOBF --> SE
+            VF --> SE
+            OMS --> SE
+            OT --> SE
+            KLINE --> SE
+            OB --> SE
+            ORDER --> SE
+            ENUMS --> SE
+            TRADE --> SE
+            PORTFOLIO --> SE
+
+            SE --> PROC
+            PROC --> OBOOK
+            PROC --> OMAN
+            PROC --> OTRACK
+
+            OBOOK --> EVT1
+            OMAN --> EVT1
+            OTRACK --> EVT1
+
+            EVT1 --> EVT2
+            EVT2 --> EVT3
+            EVT3 --> EVT4
+            EVT4 --> EVT5
+            EVT5 --> EVT6
+            EVT6 --> EVT7
+            EVT7 --> EVT8
+            EVT8 --> EVT1
+
+            EVT7 --> DB
+            EVT7 --> MODELS
+            EVT7 --> REDIS
+            EVT7 --> FS
+    </div>
+</body>
+</html>

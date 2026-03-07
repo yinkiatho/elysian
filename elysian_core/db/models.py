@@ -12,7 +12,7 @@ from peewee import (
 )
 from playhouse.postgres_ext import JSONField
 
-from elysian_core.core.enums import OrderStatus, Side, SwapType, TradeType, Venue, OrderType
+from elysian_core.core.enums import OrderStatus, Side, SwapType, TradeType, Venue, OrderType, AssetType
 from elysian_core.db.database import BaseModel
 from elysian_core.db.database import DATABASE
 from elysian_core.utils.logger import setup_custom_logger
@@ -45,12 +45,13 @@ class EnumField(CharField):
 
 # ── Binance CEX trades ────────────────────────────────────────────────────────
 
-class BinanceTrade(BaseModel):
+class CexTrade(BaseModel):
     """One CEX fill recorded by BinanceExchange._record_trade."""
     id = AutoField(primary_key=True)
     datetime = DateTimeField(default=lambda: datetime.datetime.now(_UTC8))
     venue = EnumField(Venue, default=Venue.BINANCE)
     symbol = TextField(null=False)                 # e.g. "ETHUSDT"
+    asset_type = EnumField(AssetType, null=False) # AssetType.SPOT or AssetType.PERPETUAL
     side = EnumField(Side, null=False)             # Side.BUY | Side.SELL
     amount = FloatField(null=False)                # signed base amount requested
     executed_qty = FloatField(null=False)
@@ -62,35 +63,10 @@ class BinanceTrade(BaseModel):
     status = EnumField(OrderStatus, null=False)    # OrderStatus.FILLED etc.
     order_side = EnumField(Side, null=False)       # Side from Binance response
     order_type = EnumField(OrderType, null=False) # OrderType from Binance response
-
-    class Meta:
-        table_name = "binance_trades"
-
-
-
-class CexTrade(BaseModel):
-    """One CEX fill recorded by CEX Exchanges"""
-    id = AutoField(primary_key=True)
-    datetime = DateTimeField(default=lambda: datetime.datetime.now(_UTC8))
-    venue = EnumField(Venue)
-    symbol = TextField(null=False)                 # e.g. "ETHUSDT"
-    side = EnumField(Side, null=False)             # Side.BUY | Side.SELL
-    amount = FloatField(null=False)                # signed base amount requested
-    executed_qty = FloatField(null=False)
-    price = FloatField(null=False)                 # average fill price
-    commission_asset = TextField(null=True)
-    total_commission = FloatField(null=False)
-    total_commission_quote = FloatField(null=False)
-    order_id = TextField(null=False)
-    status = EnumField(OrderStatus, null=False)    # OrderStatus.FILLED etc.
-    order_type = EnumField(OrderType, null=False) # OrderType from Binance response
-    order_side = EnumField(Side, null=False)       # Side from Binance response
 
     class Meta:
         table_name = "cex_trades"
-        
-        
-    
+
 
 
 # ── DEX swap events ───────────────────────────────────────────────────────────
@@ -121,7 +97,7 @@ class DexTrade(BaseModel):
 # ── Schema management ─────────────────────────────────────────────────────────
 
 ALL_TABLES = [
-    BinanceTrade,
+    CexTrade,
     DexTrade,
 ]
 

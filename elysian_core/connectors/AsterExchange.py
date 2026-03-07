@@ -17,7 +17,7 @@ import websockets
 
 from elysian_core.connectors.base import AbstractDataFeed
 from elysian_core.core.enums import OrderStatus, Side, TradeType
-from elysian_core.core.market_data import Kline, OrderBook
+from elysian_core.core.market_data import Kline, OrderBook, AsterOrderBook
 from elysian_core.db.database import DATABASE
 from elysian_core.db.models import CexTrade
 import elysian_core.utils.logger as log
@@ -218,6 +218,7 @@ class AsterOrderBookClientManager:
         self._running = True
         logger.info("AsterOrderBookClientManager: Started shared orderbook client")
 
+
     async def stop(self):
         if not self._running:
             return
@@ -247,11 +248,14 @@ class AsterOrderBookClientManager:
 
         logger.info("AsterOrderBookClientManager: Stopped shared orderbook client")
 
+
     def register_feed(self, feed: 'AsterOrderBookFeed'):
         self._active_feeds[feed._name] = feed
 
+
     def unregister_feed(self, symbol: str):
         self._active_feeds.pop(symbol, None)
+
 
     async def _reader_coroutine(self):
         """Network reader: connects WebSocket and reads messages."""
@@ -302,6 +306,7 @@ class AsterOrderBookClientManager:
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, 60)
 
+
     async def _worker_coroutine(self, worker_id: int):
         """Worker coroutine: processes messages from queue."""
         logger.debug(f"AsterOrderBookClientManager: Worker {worker_id} started")
@@ -311,10 +316,7 @@ class AsterOrderBookClientManager:
                 msg = await self._queue.get()
 
                 # Aster wraps data in {"stream": "...", "data": {...}} or direct depth event
-                if "data" in msg and "stream" in msg:
-                    data = msg.get("data", {})
-                    stream = msg.get("stream", "")
-                elif "e" in msg and msg["e"] == "depthUpdate":
+                if "e" in msg and msg["e"] == "depthUpdate":
                     data = msg
                     stream = f"{msg.get('s', '').lower()}@depth"
                 else:
@@ -326,7 +328,7 @@ class AsterOrderBookClientManager:
                     symbol = stream.split("@")[0].upper()
                     feed = self._active_feeds.get(symbol)
                     if feed:
-                        feed._data = feed._process_depth_event(data)
+                        feed._data = await feed._process_depth_event(data)
 
                         if feed.save_data:
                             asyncio.create_task(feed._append_to_df(feed._data))
@@ -338,6 +340,7 @@ class AsterOrderBookClientManager:
                 await asyncio.sleep(0.1)
 
         logger.debug(f"AsterOrderBookClientManager: Worker {worker_id} stopped")
+
 
     async def run_multiplex_feeds(self):
         """Run multiplex socket with reader and worker pool."""
@@ -356,7 +359,6 @@ class AsterOrderBookClientManager:
         ]
 
         logger.info(f"AsterOrderBookClientManager: Started with {num_workers} workers")
-
         await self._reader_task
 
 
@@ -455,6 +457,12 @@ class AsterOrderBookFeed(AbstractDataFeed):
 
     def __init__(self, save_data: bool = False, file_dir: Optional[str] = None):
         super().__init__(save_data=save_data, file_dir=file_dir)
+        
+        # Aster Specific Parameters
+        self.last_update_id: Optional[int] = None
+        self.snapshot_ready: bool = False
+        self.event_buffer: List[dict] = []  # Buffer events while waiting for snapshot
+        self.first_update_processed: bool = False  # Track if we've synced with snapshot
 
     def create_new(self, asset: str, interval: str = "100ms"):
         self._name = asset
@@ -469,92 +477,110 @@ class AsterOrderBookFeed(AbstractDataFeed):
         return resp.json()
 
     async def get_initial_snapshot(self):
+        """Fetch snapshot and process any buffered events that cover it."""
         raw = self._fetch_rest_snapshot(100)
         ts = int(time.time() * 1000)
         bids = [[float(b[0]), float(b[1])] for b in raw["bids"]]
         asks = [[float(a[0]), float(a[1])] for a in raw["asks"]]
-        self._data = OrderBook(
+        
+        self._data = AsterOrderBook.from_lists(
             last_update_id=raw["lastUpdateId"],
             last_timestamp=ts,
             ticker=self._name,
             interval=self._interval,
-            best_bid_price=bids[0][0],
-            best_bid_amount=bids[0][1],
-            best_ask_price=asks[0][0],
-            best_ask_amount=asks[0][1],
-            bid_orders=bids,
-            ask_orders=asks,
+            bid_levels=bids,
+            ask_levels=asks,
         )
-        #logger.info(f"[{self._name}] OB snapshot id={raw['lastUpdateId']}")
+        
+        self.last_update_id = raw["lastUpdateId"]
+        self.snapshot_ready = True
+        self.first_update_processed = False  # Reset for new snapshot sync
+        logger.info(f"Fetched initial snapshot for [{self._name}] OB snapshot id={raw['lastUpdateId']}")
+        
+        # Process any buffered events now that snapshot is ready
+        if self.event_buffer:
+            logger.info(f"[{self._name}] Processing {len(self.event_buffer)} buffered depth events")
+            await self._process_buffered_events()
 
-    def _process_depth_event(self, event: dict) -> OrderBook:
+    async def _process_buffered_events(self):
+        """Process buffered events after snapshot is ready."""
+        buffered_events = self.event_buffer[:]
+        self.event_buffer.clear()
+        
+        logger.info(f"[{self._name}] Processing {len(buffered_events)} buffered events for snapshot sync")
+        for buffered_event in buffered_events:
+            # Skip events that are too old (u < lastUpdateId)
+            if buffered_event['u'] < self.last_update_id:
+                logger.info(f"[{self._name}] Skipping old buffered event u={buffered_event['u']}")
+                continue
+            
+            # Find first event that covers the snapshot
+            if buffered_event['U'] <= self.last_update_id and buffered_event['u'] >= self.last_update_id:
+                logger.info(f"[{self._name}] Found sync point: buffered event u={buffered_event['u']} covers snapshot id={self.last_update_id}")
+                await self._apply_depth_update(buffered_event)
+                self.first_update_processed = True
+                self.last_update_id = buffered_event['u']
+                
+            elif buffered_event['U'] > self.last_update_id:
+                # This event is ahead of snapshot with gap - re-fetch snapshot
+                logger.warning(f"[{self._name}] Gap detected: buffered event U={buffered_event['U']} > snapshot id={self.last_update_id}")
+                self.snapshot_ready = False
+                asyncio.create_task(self.get_initial_snapshot())
+                return
+    
+    async def _process_depth_event(self, event: dict) -> OrderBook:
+        """Process depth updates following Binance/Aster API spec."""
+        
+        # Phase 1: Buffer events while snapshot is being fetched
+        if not self.snapshot_ready:
+            self.event_buffer.append(event)
+            logger.warning(f"[{self._name}] Buffering depth event (snapshot not ready). Buffer size: {len(self.event_buffer)}")
+            return self._data if self._data else None
+        
+        # Phase 2: Normal sequential event processing
+        # Validate pu (previous update id)
+        if event.get('pu') != self.last_update_id:
+            logger.error(f"[{self._name}] Sequence break: event pu={event.get('pu')} != last_update_id={self.last_update_id}")
+            self.snapshot_ready = False
+            await asyncio.sleep(3.0)
+            asyncio.create_task(self.get_initial_snapshot())
+            raise ValueError("Invalid event sequence")
+        else:
+            logger.info(f"[{self._name}] Processing depth event: U={event['U']} u={event['u']} (last_update_id={self.last_update_id})")
+            self.last_update_id = event['u']
+            await self._apply_depth_update(event)
+        return self._data
+    
+    
+    async def _apply_depth_update(self, event: dict):
+        """Apply depth update to order book."""
         ts = int(time.time() * 1000)
-        bids = [[float(b[0]), float(b[1])] for b in event.get("bids", [])]
-        asks = [[float(a[0]), float(a[1])] for a in event.get("asks", [])]
-        
-        # Handle both "bids"/"asks" and "b"/"a" key formats
-        if not bids:
-            bids = [[float(b[0]), float(b[1])] for b in event.get("b", [])]
-        if not asks:
-            asks = [[float(a[0]), float(a[1])] for a in event.get("a", [])]
-        
-        if not bids or not asks:
-            logger.warning(f"[{self._name}] Empty depth update")
-            return self._data if self._data else OrderBook(
-                last_update_id=0,
-                last_timestamp=ts,
-                ticker=self._name,
-                interval=self._interval,
-                best_bid_price=0,
-                best_bid_amount=0,
-                best_ask_price=0,
-                best_ask_amount=0,
-                bid_orders=[],
-                ask_orders=[],
-            )
-        
-        ob = OrderBook(
-            last_update_id=event.get("u", ts),
-            last_timestamp=ts,
-            ticker=self._name,
-            interval=self._interval,
-            best_bid_price=bids[0][0],
-            best_bid_amount=bids[0][1],
-            best_ask_price=asks[0][0],
-            best_ask_amount=asks[0][1],
-            bid_orders=bids,
-            ask_orders=asks,
-        )
-        
-        #logger.info(f"[{self._name}] OB update id={ob.last_update_id} best_bid={ob.best_bid_price:.5f} best_ask={ob.best_ask_price:.5f}")
-        return ob
+        await self._data.apply_both_updates(bid_levels=event.get("b", []), ask_levels=event.get("a", []))
+        self._data.last_update_id = event['u']
+        self._data.last_timestamp = ts
+        logger.info(f"[{self._name}] OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
+
 
     async def __call__(self):
         """Register with shared client manager and wait for multiplex events."""
         global aster_spot_ob_client_manager
 
-        # Get initial snapshot
-        await self.get_initial_snapshot()
-
-        # Register this feed with the shared manager
+        # Register this feed with the shared manager (WebSocket will start buffering)
         aster_spot_ob_client_manager.register_feed(self)
 
         # Start the shared manager if not already running
         if not aster_spot_ob_client_manager._running:
             await aster_spot_ob_client_manager.start()
             
-            # Start the multiplex feed runner in background
+            # Start the multiplex feed runner in background (WebSocket reader/workers)
             asyncio.create_task(aster_spot_ob_client_manager.run_multiplex_feeds())
+
+        # Give WebSocket a moment to start buffering events
+        await asyncio.sleep(0.1)
+        
+        # NOW fetch the snapshot while events are being buffered
+        await self.get_initial_snapshot()
 
         # Keep the feed alive
         while True:
             await asyncio.sleep(1)
-
-
-# Global client managers
-aster_spot_kline_client_manager = AsterKlineClientManager()
-aster_spot_ob_client_manager = AsterOrderBookClientManager()
-
-
-
-

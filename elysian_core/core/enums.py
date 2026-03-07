@@ -1,5 +1,5 @@
 from enum import Enum
-
+from typing import Dict
 
 # ── Order / Execution ─────────────────────────────────────────────────────────
 
@@ -11,6 +11,11 @@ class Side(Enum):
         return Side.SELL if self == Side.BUY else Side.BUY
 
 
+class AssetType(Enum):
+    SPOT= "Spot"
+    PERPETUAL = "Perpetuals"
+    
+    
 class OrderType(Enum):
     LIMIT = "Limit"
     MARKET = "Market"
@@ -27,6 +32,24 @@ class OrderStatus(Enum):
 
     def is_active(self) -> bool:
         return self in (OrderStatus.PENDING, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED)
+
+
+    # Binance sends uppercase "BUY"/"SELL"; map to our Side enum.
+_BINANCE_SIDE: Dict[str, Side] = {
+        "BUY": Side.BUY,
+        "SELL": Side.SELL,
+    }
+
+    # Binance order status strings → OrderStatus enum.
+_BINANCE_STATUS: Dict[str, OrderStatus] = {
+        "NEW": OrderStatus.OPEN,
+        "PARTIALLY_FILLED": OrderStatus.PARTIALLY_FILLED,
+        "FILLED": OrderStatus.FILLED,
+        "CANCELED": OrderStatus.CANCELLED,
+        "PENDING_CANCEL": OrderStatus.PENDING,
+        "REJECTED": OrderStatus.REJECTED,
+        "EXPIRED": OrderStatus.CANCELLED,
+    }
 
 
 # ── Venues / Chains ───────────────────────────────────────────────────────────

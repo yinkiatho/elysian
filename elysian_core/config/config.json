@@ -8,10 +8,20 @@
       "OKX Pairs": [],
       "OKX Symbols": [],
 
-      "Aster Pairs": ["SUIUSDC", "SUIUSDT", "CETUSUSDT", "CETUSUSDC"],
+      "Aster Pairs": ["ASTERUSDT", "BTCUSDT", "ETHUSDT"],
       "Aster Symbols": ["ASTERUSDT", "BTCUSDT", "ETHUSDT"]
     },
-    "Spot Total Tokens": ["SUI", "CETUS", "USDC", "USDT", "ASTER", "BTC", "ETH"],
+
+    "Futures Trading Pairs": {
+      "Binance Futures Pairs": ["BTCUSDT", "ETHUSDT", "SUIUSDT", "CETUSUSDT"],
+      "Binance Futures Symbols": ["SUIUSDT", "CETUSUSDT" , "BTCUSDT", "ETHUSDT"],
+      "Bybit Futures Pairs": [],
+      "Bybit Futures Symbols": [],
+      "OKX Futures Pairs": [],
+      "OKX Futures Symbols": []
+    },
+    "Spot Total Tokens": ["USDT", "ASTER"],
+    "Futures Total Tokens": ["SUI", "CETUS", "BTC", "ETH"],
     "Package Targets": 
             [
             "0x6f5e582ede61fe5395b50c4a449ec11479a54d7ff8e0158247adfda60d98970b::pool_script_v2::swap_b2a",

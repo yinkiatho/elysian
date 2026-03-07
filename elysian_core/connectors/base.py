@@ -36,6 +36,8 @@ class AbstractDataFeed(ABC):
         self._full_df: pd.DataFrame = pd.DataFrame()
         self.save_data: bool = save_data
         self.file_dir: Optional[str] = file_dir
+        
+        self.fetched_initial_snapshot = False
 
     # ── Properties ────────────────────────────────────────────────────────────
 
