@@ -550,12 +550,14 @@ class BinanceOrderBookFeed(AbstractDataFeed):
             await self._apply_depth_update(event)
         return self._data
     
+    
     async def _apply_depth_update(self, event: dict):
         """Apply depth update to order book."""
         ts = int(time.time() * 1000)
         await self._data.apply_both_updates(ts, event['u'], 
                                             bid_levels=event.get("bids", []), ask_levels=event.get("asks", []))
-        logger.info(f"[{self._name}] OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}") 
+        logger.success(f"[{self._name}] OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}") 
+
 
     async def __call__(self):
         """Register with shared client manager and wait for multiplex events."""

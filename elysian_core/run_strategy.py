@@ -332,7 +332,7 @@ class StrategyRunner:
             multiplex_tasks.append(asyncio.create_task(self.binance_futures_ob_manager.run_multiplex_feeds()))
         
         # Give WebSocket a moment to connect and start buffering events
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(5.0)
         
         # NOW fetch snapshots on all order book feeds
         # This will trigger _process_buffered_events() which finds the sync point
@@ -466,9 +466,9 @@ class StrategyRunner:
             # Compile Process Jobs
             #process_jobs = [(self.setup_and_run_binance_feeds, [], "binance_feeds")]
             process_jobs = [
-                (self.setup_and_run_binance_feeds, [], "binance_feeds"),
+                #(self.setup_and_run_binance_feeds, [], "binance_feeds"),
                 #(self.setup_and_run_aster_feeds, [], "aster_feeds")
-                #(self.setup_and_run_binance_futures_feeds, [], "binance_futures_feeds")
+                (self.setup_and_run_binance_futures_feeds, [], "binance_futures_feeds")
             ]
             
             # Run all task groups concurrently using ProcessPoolExecutor

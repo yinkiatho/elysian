@@ -13,15 +13,15 @@
     },
 
     "Futures Trading Pairs": {
-      "Binance Futures Pairs": ["BTCUSDT", "ETHUSDT", "SUIUSDT", "CETUSUSDT"],
-      "Binance Futures Symbols": ["SUIUSDT", "CETUSUSDT" , "BTCUSDT", "ETHUSDT"],
+      "Binance Futures Pairs": ["BTCUSDT"],
+      "Binance Futures Symbols": ["BTCUSDT"],
       "Bybit Futures Pairs": [],
       "Bybit Futures Symbols": [],
       "OKX Futures Pairs": [],
       "OKX Futures Symbols": []
     },
     "Spot Total Tokens": ["SUI", "USDC"],
-    "Futures Total Tokens": ["SUI", "CETUS", "BTC", "ETH"],
+    "Futures Total Tokens": ["SUI", "USDT", "BTC", "ETH"],
     "Package Targets": 
             [
             "0x6f5e582ede61fe5395b50c4a449ec11479a54d7ff8e0158247adfda60d98970b::pool_script_v2::swap_b2a",

@@ -18,7 +18,7 @@ from binance.helpers import round_step_size
 
 from elysian_core.connectors.base import AbstractDataFeed
 from elysian_core.core.enums import OrderStatus, Side, TradeType, _BINANCE_SIDE, _BINANCE_STATUS, AssetType, Venue
-from elysian_core.core.market_data import Kline, OrderBook
+from elysian_core.core.market_data import Kline, OrderBook, BinanceOrderBook
 from elysian_core.db.database import DATABASE
 from elysian_core.db.models import CexTrade
 import elysian_core.utils.logger as log
@@ -283,8 +283,8 @@ class BinanceFuturesOrderBookClientManager:
             return
 
         # Create multiplex socket for all symbols (futures depth streams)
-        streams = [f"{symbol.lower()}@depth20@100ms" for symbol in self._active_feeds.keys()]
-        self._socket = self._manager.multiplex_socket(streams)
+        streams = [f"{symbol.lower()}@depth@100ms" for symbol in self._active_feeds.keys()]
+        self._socket = self._manager.futures_multiplex_socket(streams)
 
         reconnect_delay = 1
         while self._running:
@@ -325,7 +325,7 @@ class BinanceFuturesOrderBookClientManager:
                     symbol = stream.split("@")[0].upper()
                     feed = self._active_feeds.get(symbol)
                     if feed:
-                        feed._data = feed._process_depth_event(data)
+                        feed._data = await feed._process_depth_event(data)
 
                         if feed.save_data:
                             asyncio.create_task(feed._append_to_df(feed._data))
@@ -453,7 +453,6 @@ class BinanceFuturesOrderBookFeed(AbstractDataFeed):
         super().__init__(save_data=save_data, file_dir=file_dir)
         
         # Binance Futures Specific Parameters
-        self.last_update_id: Optional[int] = None
         self.snapshot_ready: bool = False
         self.event_buffer: List[dict] = []  # Buffer events while waiting for snapshot
         self.first_update_processed: bool = False  # Track if we've synced with snapshot
@@ -476,19 +475,14 @@ class BinanceFuturesOrderBookFeed(AbstractDataFeed):
         ts = int(time.time() * 1000)
         bids = [[float(b[0]), float(b[1])] for b in raw["bids"]]
         asks = [[float(a[0]), float(a[1])] for a in raw["asks"]]
-        self._data = OrderBook(
+        self._data = BinanceOrderBook.from_lists(
             last_update_id=raw["lastUpdateId"],
             last_timestamp=ts,
             ticker=self._name,
             interval=self._interval,
-            best_bid_price=bids[0][0],
-            best_bid_amount=bids[0][1],
-            best_ask_price=asks[0][0],
-            best_ask_amount=asks[0][1],
-            bid_orders=bids,
-            ask_orders=asks,
+            bid_levels=bids,
+            ask_levels=asks,
         )
-        self.last_update_id = raw["lastUpdateId"]
         self.snapshot_ready = True
         self.first_update_processed = False  # Reset for new snapshot sync
         logger.info(f"[{self._name}] Futures OB snapshot id={raw['lastUpdateId']}")
@@ -497,6 +491,9 @@ class BinanceFuturesOrderBookFeed(AbstractDataFeed):
         if self.event_buffer:
             logger.info(f"[{self._name}] Processing {len(self.event_buffer)} buffered depth events")
             await self._process_buffered_events()
+            logger.info(f"[{self._name}] Finished processing buffered events. Buffer cleared.")
+            
+            
 
     async def _process_buffered_events(self):
         """Process buffered events after snapshot is ready."""
@@ -504,69 +501,68 @@ class BinanceFuturesOrderBookFeed(AbstractDataFeed):
         self.event_buffer.clear()
         
         for buffered_event in buffered_events:
+
             # Skip events that are too old (u < lastUpdateId)
-            if buffered_event['u'] < self.last_update_id:
+            if buffered_event['u'] < self._data.last_update_id:
                 logger.debug(f"[{self._name}] Skipping old buffered event u={buffered_event['u']}")
                 continue
             
             # Find first event that covers the snapshot
-            if buffered_event['U'] <= self.last_update_id and buffered_event['u'] >= self.last_update_id:
-                logger.info(f"[{self._name}] Found sync point: buffered event u={buffered_event['u']} covers snapshot id={self.last_update_id}")
-                self._apply_depth_update(buffered_event)
+            if buffered_event['U'] <= self._data.last_update_id and buffered_event['u'] == self._data.last_update_id:
+                logger.info(f"[{self._name}] Found sync point: buffered event u={buffered_event['u']} covers snapshot id={self._data.last_update_id}")
+                await self._apply_depth_update(buffered_event)
                 self.first_update_processed = True
-                break
-            elif buffered_event['U'] > self.last_update_id:
+
+            elif self.first_update_processed and buffered_event['U'] <= self._data.last_update_id + 1:
+                # This event is in sequence after the snapshot - apply it
+                #logger.info(f"[{self._name}] Applying buffered event u={buffered_event['u']} after snapshot id={self._data.last_update_id}")
+                await self._apply_depth_update(buffered_event)
+            
+            elif buffered_event['U'] > self._data.last_update_id:
                 # This event is ahead of snapshot with gap - re-fetch snapshot
-                logger.warning(f"[{self._name}] Gap detected: buffered event U={buffered_event['U']} > snapshot id={self.last_update_id}")
+                logger.warning(f"[{self._name}] Gap detected: buffered event U={buffered_event['U']} > snapshot id={self._data.last_update_id}")
                 self.snapshot_ready = False
                 asyncio.create_task(self.get_initial_snapshot())
                 return
+
+            
     
-    def _process_depth_event(self, event: dict) -> OrderBook:
+    async def _process_depth_event(self, event: dict) -> OrderBook:
         """Process depth updates following Binance Futures API spec."""
         
+        #logger.info(f'Received depth event: U={event["U"]} u={event["u"]} pu={event["pu"]} bids={len(event.get("b", []))} asks={len(event.get("a", []))}')
         # Phase 1: Buffer events while snapshot is being fetched
         if not self.snapshot_ready:
             self.event_buffer.append(event)
-            logger.debug(f"[{self._name}] Buffering depth event (snapshot not ready). Buffer size: {len(self.event_buffer)}")
+            logger.warning(f"[{self._name}] Buffering depth event (snapshot not ready). Buffer size: {len(self.event_buffer)}")
             return self._data if self._data else None
         
-        # Phase 2: Normal event processing after snapshot is ready
-        if not self.first_update_processed:
-            # This shouldn't happen if _process_buffered_events ran, but handle edge case
-            logger.warning(f"[{self._name}] First event after snapshot, validating sync")
-            if event['U'] <= self.last_update_id and event['u'] >= self.last_update_id:
-                self._apply_depth_update(event)
-                self.first_update_processed = True
-                return self._data
-            else:
-                logger.error(f"[{self._name}] First event after snapshot doesn't cover it. Retrying snapshot...")
-                self.snapshot_ready = False
-                asyncio.create_task(self.get_initial_snapshot())
-                raise ValueError("First event doesn't cover snapshot")
-        
-        # Phase 3: Normal sequential event processing
         # Validate U and u according to Binance spec
-        if event['u'] < self.last_update_id:
-            logger.debug(f"[{self._name}] Skipping old event u={event['u']} < last_update_id={self.last_update_id}")
+        elif event['pu'] < self._data.last_update_id:
+            #logger.warning(f"[{self._name}] Skipping old event pu={event['pu']} < last_update_id={self._data.last_update_id}")
             return self._data
         
-        if event['U'] > self.last_update_id + 1:
-            logger.error(f"[{self._name}] Gap detected: event U={event['U']} > last_update_id+1={self.last_update_id+1}. Re-fetching snapshot...")
+        
+        elif event['pu'] != self._data.last_update_id:
+            logger.error(f"[{self._name}] Gap detected: event pu={event['pu']} != last_update_id={self._data.last_update_id}. Re-fetching snapshot...")
             self.snapshot_ready = False
             asyncio.create_task(self.get_initial_snapshot())
             raise ValueError("Gap in event sequence")
         
-        self._apply_depth_update(event)
+        else:
+            await self._apply_depth_update(event)
+            
         return self._data
     
-    def _apply_depth_update(self, event: dict):
+    
+    
+    async def _apply_depth_update(self, event: dict):
         """Apply depth update to order book."""
         ts = int(time.time() * 1000)
-        self._data.apply_both_updates(bid_levels=event.get("bids", []), ask_levels=event.get("asks", []))
-        self._data.last_update_id = event['u']
-        self._data.last_timestamp = ts
-        logger.info(f"[{self._name}] Futures OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
+        await self._data.apply_both_updates(ts, event['u'], 
+                                            bid_levels=event.get("b", []), ask_levels=event.get("a", []))
+        logger.success(f"[{self._name}] Futures OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
+
 
     async def __call__(self):
         """Register with shared client manager and wait for multiplex events."""

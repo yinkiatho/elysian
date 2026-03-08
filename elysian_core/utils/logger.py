@@ -4,16 +4,26 @@ import pathlib
 from pathlib import Path
 
 loggers = {}
+SUCCESS_LEVEL = 25
+logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
 
+
+def success(self, message, *args, **kwargs):
+    if self.isEnabledFor(SUCCESS_LEVEL):
+        self._log(SUCCESS_LEVEL, message, args, **kwargs)
+        
+
+logging.Logger.success = success  # ← this line was missing
 # ANSI escape codes for coloring text in terminal
 class ColoredFormatter(logging.Formatter):
     COLORS = {
-        'WARNING': '\033[33m',  # Yellow
-        'ERROR': '\033[31m',    # Red
-        'CRITICAL': '\033[41m', # White on red background
-        'DEBUG': '\033[34m',    # Blue
-        'INFO': '\033[32m',     # Green
-        'RESET': '\033[0m'      # Reset to default color
+        'DEBUG':    '\033[34m',   # Blue
+        'INFO':     '\033[97m',   # Bright white
+        'SUCCESS':  '\033[92m',   # Bright green
+        'WARNING':  '\033[33m',   # Yellow
+        'ERROR':    '\033[31m',   # Red
+        'CRITICAL': '\033[41m',   # White on red background
+        'RESET':    '\033[0m'     # Reset
     }
 
     def format(self, record):
