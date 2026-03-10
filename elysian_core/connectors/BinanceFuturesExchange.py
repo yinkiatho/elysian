@@ -19,7 +19,7 @@ from binance.helpers import round_step_size
 from elysian_core.connectors.base import AbstractDataFeed
 from elysian_core.core.enums import OrderStatus, Side, TradeType, _BINANCE_SIDE, _BINANCE_STATUS, AssetType, Venue
 from elysian_core.core.market_data import Kline, OrderBook, BinanceOrderBook
-from elysian_core.db.database import DATABASE
+from elysian_core.db.database import DATelysiABASE
 from elysian_core.db.models import CexTrade
 import elysian_core.utils.logger as log
 
