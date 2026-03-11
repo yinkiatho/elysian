@@ -67,7 +67,7 @@ class BinanceFuturesKlineClientManager:
             return
 
         self._client = await self._create_client()
-        self._manager = BinanceSocketManager(self._client)
+        self._manager = BinanceSocketManager(self._client, max_queue_size=10000)
         self._running = True
         logger.info("BinanceFuturesKlineClientManager: Started shared futures kline client")
         
@@ -191,7 +191,7 @@ class BinanceFuturesKlineClientManager:
         self._reader_task = asyncio.create_task(self._reader_coroutine())
 
         # Start worker pool (4 workers for parallel processing)
-        num_workers = min(4, len(self._active_feeds))
+        num_workers = min(8, len(self._active_feeds))
         self._worker_tasks = [
             asyncio.create_task(self._worker_coroutine(i))
             for i in range(num_workers)
@@ -236,7 +236,7 @@ class BinanceFuturesOrderBookClientManager:
             return
 
         self._client = await self._create_client()
-        self._manager = BinanceSocketManager(self._client)
+        self._manager = BinanceSocketManager(self._client, max_queue_size=10000)
         self._running = True
         logger.info("BinanceFuturesOrderBookClientManager: Started shared futures orderbook client")
 
@@ -350,7 +350,7 @@ class BinanceFuturesOrderBookClientManager:
         self._reader_task = asyncio.create_task(self._reader_coroutine())
 
         # Start worker pool (4 workers for parallel processing)
-        num_workers = min(4, len(self._active_feeds))
+        num_workers = min(8, len(self._active_feeds))
         self._worker_tasks = [
             asyncio.create_task(self._worker_coroutine(i))
             for i in range(num_workers)

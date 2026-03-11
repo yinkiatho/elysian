@@ -4,7 +4,7 @@ import pathlib
 from pathlib import Path
 
 loggers = {}
-SUCCESS_LEVEL = 25
+SUCCESS_LEVEL = 21
 logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
 
 
@@ -50,6 +50,7 @@ def setup_custom_logger(name, log_level=logging.INFO):
 
     logger.setLevel(log_level)
     utc_plus_8 = datetime.timezone(datetime.timedelta(hours=8))
+    
     # Log file setup
     timestamp = datetime.datetime.now(utc_plus_8).strftime('%Y-%m-%d_%H-%M-%S')
     log = Path(f'{path}/logs/{timestamp}.log')

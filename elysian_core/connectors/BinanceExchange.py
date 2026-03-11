@@ -65,7 +65,7 @@ class BinanceKlineClientManager:
             return
 
         self._client = await self._create_client()
-        self._manager = BinanceSocketManager(self._client)
+        self._manager = BinanceSocketManager(self._client, max_queue_size=10000)
         self._running = True
         logger.info("BinanceKlineClientManager: Started shared kline client")
 
@@ -191,7 +191,7 @@ class BinanceKlineClientManager:
         self._reader_task = asyncio.create_task(self._reader_coroutine())
 
         # Start worker pool (4 workers for parallel processing)
-        num_workers = min(4, len(self._active_feeds))
+        num_workers = min(8, len(self._active_feeds))
         self._worker_tasks = [
             asyncio.create_task(self._worker_coroutine(i))
             for i in range(num_workers)
@@ -236,7 +236,7 @@ class BinanceOrderBookClientManager:
             return
 
         self._client = await self._create_client()
-        self._manager = BinanceSocketManager(self._client)
+        self._manager = BinanceSocketManager(self._client, max_queue_size=10000)
         self._running = True
         logger.info("BinanceOrderBookClientManager: Started shared orderbook client")
 
@@ -351,7 +351,7 @@ class BinanceOrderBookClientManager:
         self._reader_task = asyncio.create_task(self._reader_coroutine())
 
         # Start worker pool (4 workers for parallel processing)
-        num_workers = min(4, len(self._active_feeds))
+        num_workers = min(8, len(self._active_feeds))
         self._worker_tasks = [
             asyncio.create_task(self._worker_coroutine(i))
             for i in range(num_workers)
@@ -506,24 +506,26 @@ class BinanceOrderBookFeed(AbstractDataFeed):
         for buffered_event in buffered_events:
             #print(buffered_event)
             # Skip events that are too old (u < lastUpdateId)
-            if buffered_event['u'] < self.last_update_id:
+            if buffered_event['u'] < self._data.last_update_id:
                 logger.debug(f"[{self._name}] Skipping old buffered event u={buffered_event['u']}")
                 continue
             
             # Find first event that covers the snapshot
-            if buffered_event['U'] <= self.last_update_id and buffered_event['u'] >= self.last_update_id:
-                logger.info(f"[{self._name}] Found sync point: buffered event u={buffered_event['u']} covers snapshot id={self.last_update_id}")
+            elif buffered_event['U'] <= self._data.last_update_id and buffered_event['u'] >= self._data.last_update_id:
+                logger.info(f"[{self._name}] Found sync point: buffered event u={buffered_event['u']} covers snapshot id={self._data.last_update_id}")
                 await self._apply_depth_update(buffered_event)
                 self.first_update_processed = True
-                self.last_update_id = buffered_event['u']
                 
 
-            elif buffered_event['U'] > self.last_update_id:
+            elif buffered_event['U'] > self._data.last_update_id:
                 # This event is ahead of snapshot with gap - re-fetch snapshot
-                logger.warning(f"[{self._name}] Gap detected: buffered event U={buffered_event['U']} > snapshot id={self.last_update_id}")
+                logger.warning(f"[{self._name}] Gap detected: buffered event U={buffered_event['U']} > snapshot id={self._data.last_update_id}")
                 self.snapshot_ready = False
                 asyncio.create_task(self.get_initial_snapshot())
                 return
+            
+            elif self.first_update_processed:
+                await self._apply_depth_update(buffered_event)
             
             
     
@@ -537,18 +539,17 @@ class BinanceOrderBookFeed(AbstractDataFeed):
             return self._data if self._data else None
         
         # Validate U and u according to Binance spec
-        if event['u'] < self.last_update_id:
-            logger.debug(f"[{self._name}] Skipping old event u={event['u']} < last_update_id={self.last_update_id}")
+        if event['u'] < self._data.last_update_id:
+            logger.debug(f"[{self._name}] Skipping old event u={event['u']} < last_update_id={self._data.last_update_id}")
             return self._data
         
-        if event['U'] > self.last_update_id + 1:
-            logger.error(f"[{self._name}] Gap detected: event U={event['U']} > last_update_id+1={self.last_update_id+1}. Re-fetching snapshot...")
+        if event['U'] > self._data.last_update_id + 1:
+            logger.error(f"[{self._name}] Gap detected: event U={event['U']} > last_update_id+1={self._data.last_update_id+1}. Re-fetching snapshot...")
             self.snapshot_ready = False
             asyncio.create_task(self.get_initial_snapshot())
             raise ValueError("Gap in event sequence")
         
         else:
-            self.last_update_id = event['u']
             await self._apply_depth_update(event)
         return self._data
     

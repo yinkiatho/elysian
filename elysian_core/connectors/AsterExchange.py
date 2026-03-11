@@ -189,7 +189,7 @@ class AsterKlineClientManager:
         self._reader_task = asyncio.create_task(self._reader_coroutine())
 
         # Start worker pool
-        num_workers = min(4, len(self._active_feeds))
+        num_workers = min(8, len(self._active_feeds))
         self._worker_tasks = [
             asyncio.create_task(self._worker_coroutine(i))
             for i in range(num_workers)
@@ -351,7 +351,7 @@ class AsterOrderBookClientManager:
         self._reader_task = asyncio.create_task(self._reader_coroutine())
 
         # Start worker pool
-        num_workers = min(4, len(self._active_feeds))
+        num_workers = min(8, len(self._active_feeds))
         self._worker_tasks = [
             asyncio.create_task(self._worker_coroutine(i))
             for i in range(num_workers)
@@ -463,9 +463,11 @@ class AsterOrderBookFeed(AbstractDataFeed):
         self.event_buffer: List[dict] = []  # Buffer events while waiting for snapshot
         self.first_update_processed: bool = False  # Track if we've synced with snapshot
 
+
     def create_new(self, asset: str, interval: str = "100ms"):
         self._name = asset
         self._interval = interval
+
 
     def _fetch_rest_snapshot(self, limit: int = 100) -> dict:
         resp = requests.get(
@@ -474,6 +476,7 @@ class AsterOrderBookFeed(AbstractDataFeed):
         )
         resp.raise_for_status()
         return resp.json()
+
 
     async def get_initial_snapshot(self):
         """Fetch snapshot and process any buffered events that cover it."""
@@ -552,7 +555,7 @@ class AsterOrderBookFeed(AbstractDataFeed):
                 asyncio.create_task(self.get_initial_snapshot())
                 raise ValueError("Invalid event sequence")
         else:
-            logger.info(f"[{self._name}] Processing perpetual depth event: U={event['U']} u={event['u']} (last_update_id={self._data.last_update_id})")
+            #logger.info(f"[{self._name}] Processing perpetual depth event: U={event['U']} u={event['u']} (last_update_id={self._data.last_update_id})")
             await self._apply_depth_update(event)
         return self._data
     
@@ -563,7 +566,7 @@ class AsterOrderBookFeed(AbstractDataFeed):
         ts = int(time.time() * 1000)
         await self._data.apply_both_updates(ts, event['u'], 
                                             bid_levels=event.get("b", []), ask_levels=event.get("a", []))
-        logger.info(f"[{self._name}] OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
+        logger.success(f"[{self._name}] OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
 
 
     async def __call__(self):

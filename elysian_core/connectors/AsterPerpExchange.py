@@ -179,7 +179,7 @@ class AsterPerpKlineClientManager:
         self._reader_task = asyncio.create_task(self._reader_coroutine())
 
         # Start worker pool
-        num_workers = min(4, len(self._active_feeds))
+        num_workers = min(8, len(self._active_feeds))
         self._worker_tasks = [
             asyncio.create_task(self._worker_coroutine(i))
             for i in range(num_workers)
@@ -324,7 +324,7 @@ class AsterPerpOrderBookClientManager:
 
         # Start reader coroutine
         self._reader_task = asyncio.create_task(self._reader_coroutine())
-        num_workers = min(4, len(self._active_feeds))
+        num_workers = min(8, len(self._active_feeds))
         self._worker_tasks = [
             asyncio.create_task(self._worker_coroutine(i))
             for i in range(num_workers)
@@ -524,7 +524,7 @@ class AsterPerpOrderBookFeed(AbstractDataFeed):
                 asyncio.create_task(self.get_initial_snapshot())
                 raise ValueError("Invalid event sequence")
         else:
-            logger.info(f"[{self._name}] Processing perpetual depth event: U={event['U']} u={event['u']} (last_update_id={self._data.last_update_id})")
+            #logger.info(f"[{self._name}] Processing perpetual depth event: U={event['U']} u={event['u']} (last_update_id={self._data.last_update_id})")
             await self._apply_depth_update(event)
         return self._data
     
@@ -534,7 +534,7 @@ class AsterPerpOrderBookFeed(AbstractDataFeed):
         ts = int(time.time() * 1000)
         await self._data.apply_both_updates(ts, event['u'], 
                                             bid_levels=event.get("b", []), ask_levels=event.get("a", []))
-        logger.info(f"[{self._name}] Perpetual OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
+        logger.success(f"[{self._name}] Perpetual OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
 
 
     async def __call__(self):

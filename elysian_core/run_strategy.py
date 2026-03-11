@@ -552,9 +552,9 @@ class StrategyRunner:
             # Compile Process Jobs
             #process_jobs = [(self.setup_and_run_binance_feeds, [], "binance_feeds")]
             process_jobs = [
-                #(self.setup_and_run_binance_feeds, [], "binance_feeds"),
-                #(self.setup_and_run_aster_feeds, [], "aster_feeds")
-                #(self.setup_and_run_binance_futures_feeds, [], "binance_futures_feeds")
+                (self.setup_and_run_binance_feeds, [], "binance_feeds"),
+                (self.setup_and_run_aster_feeds, [], "aster_feeds"),
+                (self.setup_and_run_binance_futures_feeds, [], "binance_futures_feeds"),
                 (self.setup_and_run_aster_futures_feeds, [], "aster_futures_feeds")
             ]
             
