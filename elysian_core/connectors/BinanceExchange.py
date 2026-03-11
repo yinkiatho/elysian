@@ -524,6 +524,8 @@ class BinanceOrderBookFeed(AbstractDataFeed):
                 self.snapshot_ready = False
                 asyncio.create_task(self.get_initial_snapshot())
                 return
+            
+            
     
     async def _process_depth_event(self, event: dict) -> OrderBook:
         """Process depth updates following Binance API spec."""

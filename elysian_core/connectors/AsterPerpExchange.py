@@ -24,21 +24,21 @@ import elysian_core.utils.logger as log
 
 logger = log.setup_custom_logger("root")
 
-SPOT_BASE_ENDPOINT = "https://sapi.asterdex.com"
-WEBSOCKET_SPOT_ENDPOINT = "wss://sstream.asterdex.com/ws"
+FUTURES_BASE_ENDPOINT = "https://fapi.asterdex.com"
+WEBSOCKET_FUTURES_ENDPOINT = "wss://fstream.asterdex.com"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Shared Client Managers
+# Shared Client Managers for Perpetual/Futures
 # ──────────────────────────────────────────────────────────────────────────────
 
-class AsterKlineClientManager:
-    """Shared WebSocket client for multiplex kline streams with queue-based processing."""
+class AsterPerpKlineClientManager:
+    """Shared WebSocket client for multiplex kline streams on perpetual market."""
 
     def __init__(self):
         self._websocket: Optional[Any] = None
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
-        self._active_feeds: Dict[str, 'AsterKlineFeed'] = {}
+        self._active_feeds: Dict[str, 'AsterPerpKlineFeed'] = {}
         self._running = False
         self._reader_task: Optional[asyncio.Task] = None
         self._worker_tasks: List[asyncio.Task] = []
@@ -48,7 +48,7 @@ class AsterKlineClientManager:
         if self._running:
             return
         self._running = True
-        logger.info("AsterKlineClientManager: Started shared kline client")
+        logger.info("AsterPerpKlineClientManager: Started shared perpetual kline client")
 
     async def stop(self):
         if not self._running:
@@ -77,9 +77,9 @@ class AsterKlineClientManager:
             await self._websocket.close()
             self._websocket = None
 
-        logger.info("AsterKlineClientManager: Stopped shared kline client")
+        logger.info("AsterPerpKlineClientManager: Stopped shared perpetual kline client")
 
-    def register_feed(self, feed: 'AsterKlineFeed'):
+    def register_feed(self, feed: 'AsterPerpKlineFeed'):
         self._active_feeds[feed._name] = feed
 
     def unregister_feed(self, symbol: str):
@@ -88,29 +88,19 @@ class AsterKlineClientManager:
     async def _reader_coroutine(self):
         """Network reader: connects WebSocket and reads messages."""
         if not self._active_feeds:
-            logger.warning("AsterKlineClientManager: No feeds registered for reader")
+            logger.warning("AsterPerpKlineClientManager: No feeds registered for reader")
             return
 
-        # Create stream params for all symbols
+        # Create stream params for all symbols (1m klines)
         streams = [f"{symbol.lower()}@kline_1m" for symbol in self._active_feeds.keys()]
         
         reconnect_delay = 1
         while self._running:
             try:
-                async with websockets.connect(WEBSOCKET_SPOT_ENDPOINT) as websocket:
+                async with websockets.connect(f"{WEBSOCKET_FUTURES_ENDPOINT}/stream?streams={'/'.join(streams)}") as websocket:
                     self._websocket = websocket
-                    logger.info(f"AsterKlineClientManager: WebSocket connected for {len(streams)} streams")
-                    reconnect_delay = 1  # Reset delay on successful connection
-
-                    # Subscribe to streams
-                    subscription_msg = {
-                        "method": "SUBSCRIBE",
-                        "params": streams,
-                        "id": self._subscription_id
-                    }
-                    await websocket.send(json.dumps(subscription_msg))
-                    logger.debug(f"AsterKlineClientManager: Subscribed to {len(streams)} kline streams")
-                    self._subscription_id += 1
+                    logger.info(f"AsterPerpKlineClientManager: WebSocket connected for {len(streams)} streams")
+                    reconnect_delay = 1
 
                     while self._running:
                         try:
@@ -123,20 +113,20 @@ class AsterKlineClientManager:
                             except:
                                 pass
                         except Exception as e:
-                            logger.error(f"AsterKlineClientManager: Error in reader: {e}")
+                            logger.error(f"AsterPerpKlineClientManager: Error in reader: {e}")
                             await asyncio.sleep(0.1)
 
             except Exception as e:
-                logger.error(f"AsterKlineClientManager: WebSocket connection error: {e}", exc_info=False)
+                logger.error(f"AsterPerpKlineClientManager: WebSocket connection error: {e}", exc_info=False)
 
             if self._running:
-                logger.warning(f"AsterKlineClientManager: Reconnecting in {reconnect_delay}s...")
+                logger.warning(f"AsterPerpKlineClientManager: Reconnecting in {reconnect_delay}s...")
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, 60)
 
     async def _worker_coroutine(self, worker_id: int):
         """Worker coroutine: processes messages from queue."""
-        logger.debug(f"AsterKlineClientManager: Worker {worker_id} started")
+        logger.debug(f"AsterPerpKlineClientManager: Worker {worker_id} started")
 
         while self._running:
             try:
@@ -169,20 +159,20 @@ class AsterKlineClientManager:
                                     for i in range(1, len(feed._historical))
                                 ]
                                 feed._vol = statistics.stdev(returns) * math.sqrt(12)
-                                logger.info(f"[{symbol}] Volatility: {feed._vol * 1e4:.2f} bps (60-candle window)")
+                                logger.info(f"[{symbol}] Perpetual Volatility: {feed._vol * 1e4:.2f} bps (60-candle window)")
 
                 self._queue.task_done()
 
             except Exception as e:
-                logger.error(f"AsterKlineClientManager: Worker {worker_id} error: {e}")
+                logger.error(f"AsterPerpKlineClientManager: Worker {worker_id} error: {e}")
                 await asyncio.sleep(0.1)
 
-        logger.debug(f"AsterKlineClientManager: Worker {worker_id} stopped")
+        logger.debug(f"AsterPerpKlineClientManager: Worker {worker_id} stopped")
 
     async def run_multiplex_feeds(self):
         """Run multiplex socket with reader and worker pool."""
         if not self._active_feeds:
-            logger.warning("AsterKlineClientManager: No feeds registered")
+            logger.warning("AsterPerpKlineClientManager: No feeds registered")
             return
 
         # Start reader coroutine
@@ -195,17 +185,17 @@ class AsterKlineClientManager:
             for i in range(num_workers)
         ]
 
-        logger.info(f"AsterKlineClientManager: Started with {num_workers} workers")
+        logger.info(f"AsterPerpKlineClientManager: Started with {num_workers} workers")
         await self._reader_task
 
 
-class AsterOrderBookClientManager:
-    """Shared WebSocket client for multiplex orderbook streams with queue-based processing."""
+class AsterPerpOrderBookClientManager:
+    """Shared WebSocket client for multiplex orderbook streams on perpetual market."""
 
     def __init__(self):
         self._websocket: Optional[Any] = None
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
-        self._active_feeds: Dict[str, 'AsterOrderBookFeed'] = {}
+        self._active_feeds: Dict[str, 'AsterPerpOrderBookFeed'] = {}
         self._running = False
         self._reader_task: Optional[asyncio.Task] = None
         self._worker_tasks: List[asyncio.Task] = []
@@ -215,8 +205,7 @@ class AsterOrderBookClientManager:
         if self._running:
             return
         self._running = True
-        logger.info("AsterOrderBookClientManager: Started shared orderbook client")
-
+        logger.info("AsterPerpOrderBookClientManager: Started shared perpetual orderbook client")
 
     async def stop(self):
         if not self._running:
@@ -245,43 +234,30 @@ class AsterOrderBookClientManager:
             await self._websocket.close()
             self._websocket = None
 
-        logger.info("AsterOrderBookClientManager: Stopped shared orderbook client")
+        logger.info("AsterPerpOrderBookClientManager: Stopped shared perpetual orderbook client")
 
-
-    def register_feed(self, feed: 'AsterOrderBookFeed'):
+    def register_feed(self, feed: 'AsterPerpOrderBookFeed'):
         self._active_feeds[feed._name] = feed
-
 
     def unregister_feed(self, symbol: str):
         self._active_feeds.pop(symbol, None)
 
-
     async def _reader_coroutine(self):
         """Network reader: connects WebSocket and reads messages."""
         if not self._active_feeds:
-            logger.warning("AsterOrderBookClientManager: No feeds registered for reader")
+            logger.warning("AsterPerpOrderBookClientManager: No feeds registered for reader")
             return
 
-        # Create stream params for all symbols (20-level depth updates)
-        streams = [f"{symbol.lower()}@depth20@100ms" for symbol in self._active_feeds.keys()]
+        # Create stream params for all symbols (20-level depth updates at 100ms)
+        streams = [f"{symbol.lower()}@depth@100ms" for symbol in self._active_feeds.keys()]
         
         reconnect_delay = 1
         while self._running:
             try:
-                async with websockets.connect(WEBSOCKET_SPOT_ENDPOINT) as websocket:
+                async with websockets.connect(f"{WEBSOCKET_FUTURES_ENDPOINT}/stream?streams={'/'.join(streams)}") as websocket:
                     self._websocket = websocket
-                    logger.info(f"AsterOrderBookClientManager: WebSocket connected for {len(streams)} streams")
+                    logger.info(f"AsterPerpOrderBookClientManager: WebSocket connected for {len(streams)} streams")
                     reconnect_delay = 1
-
-                    # Subscribe to streams
-                    subscription_msg = {
-                        "method": "SUBSCRIBE",
-                        "params": streams,
-                        "id": self._subscription_id
-                    }
-                    await websocket.send(json.dumps(subscription_msg))
-                    logger.debug(f"AsterOrderBookClientManager: Subscribed to {len(streams)} depth streams")
-                    self._subscription_id += 1
 
                     while self._running:
                         try:
@@ -294,30 +270,30 @@ class AsterOrderBookClientManager:
                             except:
                                 pass
                         except Exception as e:
-                            logger.error(f"AsterOrderBookClientManager: Error in reader: {e}")
+                            logger.error(f"AsterPerpOrderBookClientManager: Error in reader: {e}")
                             await asyncio.sleep(0.1)
 
             except Exception as e:
-                logger.error(f"AsterOrderBookClientManager: WebSocket connection error: {e}", exc_info=False)
+                logger.error(f"AsterPerpOrderBookClientManager: WebSocket connection error: {e}", exc_info=False)
 
             if self._running:
-                logger.warning(f"AsterOrderBookClientManager: Reconnecting in {reconnect_delay}s...")
+                logger.warning(f"AsterPerpOrderBookClientManager: Reconnecting in {reconnect_delay}s...")
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, 60)
 
-
     async def _worker_coroutine(self, worker_id: int):
         """Worker coroutine: processes messages from queue."""
-        logger.debug(f"AsterOrderBookClientManager: Worker {worker_id} started")
+        logger.debug(f"AsterPerpOrderBookClientManager: Worker {worker_id} started")
 
         while self._running:
             try:
                 msg = await self._queue.get()
-
-                # Aster wraps data in {"stream": "...", "data": {...}} or direct depth event
                 if "e" in msg and msg["e"] == "depthUpdate":
                     data = msg
                     stream = f"{msg.get('s', '').lower()}@depth"
+                elif "data" in msg and "stream" in msg:
+                    data = msg.get("data", {})
+                    stream = msg.get("stream", "")
                 else:
                     self._queue.task_done()
                     continue
@@ -335,49 +311,46 @@ class AsterOrderBookClientManager:
                 self._queue.task_done()
 
             except Exception as e:
-                logger.error(f"AsterOrderBookClientManager: Worker {worker_id} error: {e}")
+                logger.error(f"AsterPerpOrderBookClientManager: Worker {worker_id} error: {e}")
                 await asyncio.sleep(0.1)
 
-        logger.debug(f"AsterOrderBookClientManager: Worker {worker_id} stopped")
-
+        logger.debug(f"AsterPerpOrderBookClientManager: Worker {worker_id} stopped")
 
     async def run_multiplex_feeds(self):
         """Run multiplex socket with reader and worker pool."""
         if not self._active_feeds:
-            logger.warning("AsterOrderBookClientManager: No feeds registered")
+            logger.warning("AsterPerpOrderBookClientManager: No feeds registered")
             return
 
         # Start reader coroutine
         self._reader_task = asyncio.create_task(self._reader_coroutine())
-
-        # Start worker pool
         num_workers = min(4, len(self._active_feeds))
         self._worker_tasks = [
             asyncio.create_task(self._worker_coroutine(i))
             for i in range(num_workers)
         ]
 
-        logger.info(f"AsterOrderBookClientManager: Started with {num_workers} workers")
+        logger.info(f"AsterPerpOrderBookClientManager: Started with {num_workers} workers")
         await self._reader_task
 
 
-# Global client managers
-aster_spot_kline_client_manager = AsterKlineClientManager()
-aster_spot_ob_client_manager = AsterOrderBookClientManager()
+# Global client managers for perpetual market
+aster_perp_kline_client_manager = AsterPerpKlineClientManager()
+aster_perp_ob_client_manager = AsterPerpOrderBookClientManager()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# AsterKlineFeed
+# AsterPerpKlineFeed
 # ──────────────────────────────────────────────────────────────────────────────
 
-class AsterKlineFeed(AbstractDataFeed):
+class AsterPerpKlineFeed(AbstractDataFeed):
     """
-    Real-time closed kline (candle) feed for a single Aster DEX symbol.
+    Real-time closed kline (candle) feed for a single Aster Perpetual DEX symbol.
     Produces Kline objects and maintains a 60-candle rolling close-price window
     for realised volatility.
 
     Usage:
-        feed = AsterKlineFeed()
+        feed = AsterPerpKlineFeed()
         feed.create_new(asset="BTCUSDT", interval="1m")
         await feed()
     """
@@ -418,21 +391,20 @@ class AsterKlineFeed(AbstractDataFeed):
             close=float(k["c"]),
             volume=float(k["v"]),
         )
-        #logger.info(f"[{kline.ticker}] Closed kline: {kline}")
         return kline
 
     async def __call__(self):
         """Register with shared client manager and wait for multiplex events."""
-        global aster_spot_kline_client_manager
+        global aster_perp_kline_client_manager
 
         # Register this feed with the shared manager
-        aster_spot_kline_client_manager.register_feed(self)
+        aster_perp_kline_client_manager.register_feed(self)
 
         # Start the shared manager if not already running
-        if not aster_spot_kline_client_manager._running:
-            await aster_spot_kline_client_manager.start()
+        if not aster_perp_kline_client_manager._running:
+            await aster_perp_kline_client_manager.start()
             # Start the multiplex feed runner in background
-            asyncio.create_task(aster_spot_kline_client_manager.run_multiplex_feeds())
+            asyncio.create_task(aster_perp_kline_client_manager.run_multiplex_feeds())
 
         # Keep the feed alive
         while True:
@@ -440,16 +412,16 @@ class AsterKlineFeed(AbstractDataFeed):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# AsterOrderBookFeed
+# AsterPerpOrderBookFeed
 # ──────────────────────────────────────────────────────────────────────────────
 
-class AsterOrderBookFeed(AbstractDataFeed):
+class AsterPerpOrderBookFeed(AbstractDataFeed):
     """
-    Real-time depth (order book) feed for a single Aster DEX symbol.
+    Real-time depth (order book) feed for a single Aster Perpetual DEX symbol.
     Produces OrderBook snapshots updated at 100ms intervals.
 
     Usage:
-        feed = AsterOrderBookFeed()
+        feed = AsterPerpOrderBookFeed()
         feed.create_new(asset="BTCUSDT")
         await feed()
     """
@@ -469,7 +441,7 @@ class AsterOrderBookFeed(AbstractDataFeed):
 
     def _fetch_rest_snapshot(self, limit: int = 100) -> dict:
         resp = requests.get(
-            f"{SPOT_BASE_ENDPOINT}/api/v1/depth",
+            f"{FUTURES_BASE_ENDPOINT}/fapi/v1/depth",
             params={"symbol": self._name, "limit": min(limit, 5000)},
         )
         resp.raise_for_status()
@@ -493,7 +465,7 @@ class AsterOrderBookFeed(AbstractDataFeed):
         
         self.snapshot_ready = True
         self.first_update_processed = False  # Reset for new snapshot sync
-        logger.info(f"Fetched initial snapshot for [{self._name}] OB snapshot id={raw['lastUpdateId']}")
+        logger.info(f"Fetched initial perpetual snapshot for [{self._name}] OB snapshot id={raw['lastUpdateId']}")
         
         # Process any buffered events now that snapshot is ready
         if self.event_buffer:
@@ -505,7 +477,7 @@ class AsterOrderBookFeed(AbstractDataFeed):
         buffered_events = self.event_buffer[:]
         self.event_buffer.clear()
         
-        logger.info(f"[{self._name}] Processing {len(buffered_events)} buffered events for snapshot sync")
+        logger.info(f"[{self._name}] Processing {len(buffered_events)} buffered perpetual events for snapshot sync")
         for buffered_event in buffered_events:
             # Skip events that are too old (u < lastUpdateId)
             if buffered_event['u'] < self._data.last_update_id:
@@ -532,7 +504,7 @@ class AsterOrderBookFeed(AbstractDataFeed):
     
     
     async def _process_depth_event(self, event: dict) -> OrderBook:
-        """Process depth updates following Binance/Aster API spec."""
+        """Process depth updates following Aster Perpetual API spec."""
         
         # Phase 1: Buffer events while snapshot is being fetched
         if not self.snapshot_ready:
@@ -557,28 +529,27 @@ class AsterOrderBookFeed(AbstractDataFeed):
         return self._data
     
     
-    
     async def _apply_depth_update(self, event: dict):
         """Apply depth update to order book."""
         ts = int(time.time() * 1000)
         await self._data.apply_both_updates(ts, event['u'], 
                                             bid_levels=event.get("b", []), ask_levels=event.get("a", []))
-        logger.info(f"[{self._name}] OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
+        logger.info(f"[{self._name}] Perpetual OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
 
 
     async def __call__(self):
         """Register with shared client manager and wait for multiplex events."""
-        global aster_spot_ob_client_manager
+        global aster_perp_ob_client_manager
 
         # Register this feed with the shared manager (WebSocket will start buffering)
-        aster_spot_ob_client_manager.register_feed(self)
+        aster_perp_ob_client_manager.register_feed(self)
 
         # Start the shared manager if not already running
-        if not aster_spot_ob_client_manager._running:
-            await aster_spot_ob_client_manager.start()
+        if not aster_perp_ob_client_manager._running:
+            await aster_perp_ob_client_manager.start()
             
             # Start the multiplex feed runner in background (WebSocket reader/workers)
-            asyncio.create_task(aster_spot_ob_client_manager.run_multiplex_feeds())
+            asyncio.create_task(aster_perp_ob_client_manager.run_multiplex_feeds())
 
         # Give WebSocket a moment to start buffering events
         await asyncio.sleep(0.1)

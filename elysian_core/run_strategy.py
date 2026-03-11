@@ -33,6 +33,14 @@ from elysian_core.connectors.AsterExchange import (
     aster_spot_ob_client_manager
 )
 
+from elysian_core.connectors.AsterPerpExchange import (
+    aster_perp_kline_client_manager,
+    aster_perp_ob_client_manager,
+    AsterPerpKlineFeed,
+    AsterPerpOrderBookFeed
+)
+    
+
 
 # from elysian_core.connectors.OKXFeed import OKXDataFeed
 # from elysian_core.connectors.VolatilityBarbClient import VolatilityBarbClientLocal, RedisConfig
@@ -97,6 +105,11 @@ class StrategyRunner:
         self.aster_kline_manager = aster_spot_kline_client_manager
         self.aster_ob_manager = aster_spot_ob_client_manager
         
+        # Aster Futures Client Managers
+        self.aster_futures_kline_manager = aster_perp_kline_client_manager
+        self.aster_futures_ob_manager = aster_perp_ob_client_manager
+        
+        
         
         
     @staticmethod
@@ -147,6 +160,8 @@ class StrategyRunner:
         await self.binance_futures_ob_manager.stop()
         await self.aster_kline_manager.stop()
         await self.aster_ob_manager.stop()
+        await self.aster_futures_kline_manager.stop()
+        await self.aster_futures_ob_manager.stop()
         
         for tasks in tasks_groups:
             for task in tasks:
@@ -181,6 +196,12 @@ class StrategyRunner:
         self.aster_tokens = self.config_json.get('Spot Trading Pairs', {}).get('Aster Pairs', [])
         self.aster_token_symbols = self.config_json.get('Spot Trading Pairs', {}).get('Aster Symbols', [])
         self.total_token_pairs.extend(self.aster_tokens)
+        
+        
+        # Setting up Aster Futures tokens
+        self.aster_futures_tokens = self.config_json.get('Futures Trading Pairs', {}).get('Aster Futures Pairs', [])
+        self.aster_futures_token_symbols = self.config_json.get('Futures Trading Pairs', {}).get('Aster Futures Symbols', [])
+        self.total_token_pairs.extend(self.aster_futures_tokens)
         
         self.spot_total_tokens = self.config_json.get('Spot Total Tokens', [])
         self.futures_total_tokens = self.config_json.get('Futures Total Tokens', [])
@@ -419,6 +440,71 @@ class StrategyRunner:
         
         asyncio.run(self._setup_aster_data_feeds())
         
+        
+        
+    # --------- Setting up Aster Futures Kline and OB Feeds with Multiplex Architecture --------- # 
+    async def _setup_aster_futures_data_feeds(self) -> None:
+        """Initialize all data feeds with multiplex architecture"""
+        
+        logger.info("Setting up data feeds with multiplex architecture...")
+        
+        # Create kline feeds that register with shared client manager
+        for i, token in enumerate(self.aster_futures_token_symbols):
+            token_feed = AsterPerpKlineFeed(save_data=False)
+            token_feed.create_new(asset=token, interval="1s")
+            
+            # Register the feed in the client manager
+            self.aster_futures_kline_manager.register_feed(token_feed)
+
+                    
+        # Create order book feeds if needed (for exchange operations)
+        ob_feeds = []
+        for i, token in enumerate(self.aster_futures_token_symbols):
+            ob_feed = AsterPerpOrderBookFeed(save_data=False)
+            ob_feed.create_new(asset=token, interval="100ms")
+            
+            # Register the feed in the client manager
+            self.aster_futures_ob_manager.register_feed(ob_feed)
+            ob_feeds.append(ob_feed)
+        
+        logger.info(f"Initialized {len(self.aster_futures_kline_manager._active_feeds)} Aster kline feeds and {len(self.aster_futures_ob_manager._active_feeds)} order book feeds")
+        
+        # Start the multiplex managers (begins WebSocket connection and buffering)
+        await self.aster_futures_kline_manager.start()
+        await self.aster_futures_ob_manager.start()
+        
+        # Start multiplex reader/worker tasks (WebSocket now connecting and buffering events)
+        multiplex_tasks = []
+        if self.aster_futures_kline_manager._active_feeds:
+            logger.info(f"Starting Aster Futures Kline multiplex feeds ({len(self.aster_futures_kline_manager._active_feeds)} feeds)")
+            multiplex_tasks.append(asyncio.create_task(self.aster_futures_kline_manager.run_multiplex_feeds()))
+        
+        if self.aster_futures_ob_manager._active_feeds:
+            logger.info(f"Starting Aster Futures Order Book multiplex feeds ({len(self.aster_futures_ob_manager._active_feeds)} feeds)")
+            multiplex_tasks.append(asyncio.create_task(self.aster_futures_ob_manager.run_multiplex_feeds()))
+        
+        # Give WebSocket a moment to connect and start buffering events
+        await asyncio.sleep(10.0)
+        
+        # NOW fetch snapshots on all order book feeds
+        # This will trigger _process_buffered_events() which finds the sync point
+        if ob_feeds:
+            logger.info(f"Fetching initial snapshots for {len(ob_feeds)} Aster Perp order book feeds...")
+            snapshot_tasks = [feed.get_initial_snapshot() for feed in ob_feeds]
+            await asyncio.gather(*snapshot_tasks)
+            logger.info(f"All Aster Perp order book snapshots fetched and synced")
+            
+        if multiplex_tasks:
+            logger.info(f"Aster Perps Worker process running {len(multiplex_tasks)} feed task(s)...")
+            await asyncio.gather(*multiplex_tasks)
+            
+    
+    def setup_and_run_aster_futures_feeds(self):
+        '''Helper function to setup Aster Perp feeds and return the multiplex tasks. 
+           Wraps around _setup_data_feeds for better modularity and testing.'''
+        
+        asyncio.run(self._setup_aster_futures_data_feeds())
+        
 
     
     
@@ -468,7 +554,8 @@ class StrategyRunner:
             process_jobs = [
                 #(self.setup_and_run_binance_feeds, [], "binance_feeds"),
                 #(self.setup_and_run_aster_feeds, [], "aster_feeds")
-                (self.setup_and_run_binance_futures_feeds, [], "binance_futures_feeds")
+                #(self.setup_and_run_binance_futures_feeds, [], "binance_futures_feeds")
+                (self.setup_and_run_aster_futures_feeds, [], "aster_futures_feeds")
             ]
             
             # Run all task groups concurrently using ProcessPoolExecutor
@@ -497,73 +584,10 @@ class StrategyRunner:
     
 
     
-    #############################################################################################################################################################
-    ######## Testing functions for individual components in isolation   #########################################################################################
-    #############################################################################################################################################################
+#############################################################################################################################################################
+######## Testing functions for individual components in isolation   #########################################################################################
+#############################################################################################################################################################
     
-    
-    
-    async def test_binance_feed(self, pairs: list = None, duration: int = 60, feed_type: str = "kline") -> None:
-        """
-        Test Binance data feeds in isolation using multiplex architecture.
-        
-        Args:
-            pairs: List of trading pairs to test (defaults from config)
-            duration: Seconds to run the test
-            feed_type: "kline" for candlestick data or "orderbook" for depth data
-        """
-        logger.info(f"Testing Binance {feed_type} feeds with multiplex architecture...")
-        
-        if not pairs:
-            pairs = self.config_json.get('Trading Pairs', {}).get('Binance Pairs', [])
-        
-        try:
-            # Create feeds that register with appropriate client manager
-            binance_feeds = {}
-            if feed_type == "kline":
-                client_manager = binance_spot_kline_client_manager
-                FeedClass = BinanceKlineFeed
-            else:
-                client_manager = binance_spot_ob_client_manager
-                FeedClass = BinanceOrderBookFeed
-            
-            for pair in pairs:
-                logger.info(f"Initializing Binance {feed_type} feed for {pair}...")
-                feed = FeedClass(save_data=False)
-                if feed_type == "kline":
-                    feed.create_new(asset=pair, interval="1s")
-                else:
-                    feed.create_new(asset=pair, interval="100ms")
-                    
-                # Register feed with client manager
-                client_manager.register_feed(feed)
-                binance_feeds[pair] = feed
-            
-            await client_manager.start()
-            multiplex_task = asyncio.create_task(client_manager.run_multiplex_feeds())
-            
-            # Run for specified duration
-            logger.info(f"Running multiplex {feed_type} feeds for {duration} seconds...")
-            all_tasks = [multiplex_task]
-            
-            # Wait for timeout
-            await asyncio.wait_for(
-                asyncio.gather(*all_tasks, return_exceptions=True),
-                timeout=duration
-            )
-            
-        except asyncio.TimeoutError:
-            logger.info(f"Test completed after {duration} seconds (timeout as expected)")
-        except Exception as e:
-            logger.error(f"Error testing Binance {feed_type} feeds: {e}", exc_info=True)
-            raise
-        finally:
-            # Cleanup
-            logger.info("Cleaning up test feeds...")
-            if 'client_manager' in locals():
-                await client_manager.stop()
-            logger.info(f"Binance {feed_type} feed test completed")
-
 
 # Standalone functions for backward compatibility
 def run_event_loop_in_thread(tasks):
@@ -594,13 +618,6 @@ async def run_strategy():
     """Main entry point for running the strategy."""
     runner = StrategyRunner()
     await runner.run()
-
-
-async def test_binance_feed(pairs: list = None, duration: int = 60, feed_type: str = "kline"):
-    """Test Binance feeds in isolation."""
-    runner = StrategyRunner()
-    await runner.test_binance_feed(pairs=pairs, duration=duration, feed_type=feed_type)
-        
 
 if __name__ == "__main__":
     

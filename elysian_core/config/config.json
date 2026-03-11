@@ -15,10 +15,15 @@
     "Futures Trading Pairs": {
       "Binance Futures Pairs": ["BTCUSDT"],
       "Binance Futures Symbols": ["BTCUSDT"],
+
       "Bybit Futures Pairs": [],
       "Bybit Futures Symbols": [],
+
       "OKX Futures Pairs": [],
-      "OKX Futures Symbols": []
+      "OKX Futures Symbols": [],
+
+      "Aster Futures Pairs": ["ASTERUSDT"],
+      "Aster Futures Symbols": ["ASTERUSDT"]
     },
     "Spot Total Tokens": ["SUI", "USDC"],
     "Futures Total Tokens": ["SUI", "USDT", "BTC", "ETH"],

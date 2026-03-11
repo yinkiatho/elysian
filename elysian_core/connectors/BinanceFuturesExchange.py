@@ -19,7 +19,7 @@ from binance.helpers import round_step_size
 from elysian_core.connectors.base import AbstractDataFeed
 from elysian_core.core.enums import OrderStatus, Side, TradeType, _BINANCE_SIDE, _BINANCE_STATUS, AssetType, Venue
 from elysian_core.core.market_data import Kline, OrderBook, BinanceOrderBook
-from elysian_core.db.database import DATelysiABASE
+from elysian_core.db.database import DATABASE
 from elysian_core.db.models import CexTrade
 import elysian_core.utils.logger as log
 
@@ -41,9 +41,10 @@ class BinanceFuturesKlineClientManager:
         self._socket: Optional[Any] = None
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
         self._active_feeds: Dict[str, 'BinanceFuturesKlineFeed'] = {}
-        self._running = False
+        self._running = False   
         self._reader_task: Optional[asyncio.Task] = None
         self._worker_tasks: List[asyncio.Task] = []
+
 
     async def _create_client(self, retries: int = 5) -> AsyncClient:
         for i in range(retries):
@@ -60,6 +61,7 @@ class BinanceFuturesKlineClientManager:
                     raise
                 await asyncio.sleep(2 ** i)
 
+
     async def start(self):
         if self._running:
             return
@@ -68,6 +70,7 @@ class BinanceFuturesKlineClientManager:
         self._manager = BinanceSocketManager(self._client)
         self._running = True
         logger.info("BinanceFuturesKlineClientManager: Started shared futures kline client")
+        
 
     async def stop(self):
         if not self._running:
@@ -316,7 +319,6 @@ class BinanceFuturesOrderBookClientManager:
         while self._running:
             try:
                 msg = await self._queue.get()
-
                 stream = msg.get("stream", "")
                 data = msg.get("data", {})
 
@@ -531,7 +533,7 @@ class BinanceFuturesOrderBookFeed(AbstractDataFeed):
         """Process depth updates following Binance Futures API spec."""
         
         #logger.info(f'Received depth event: U={event["U"]} u={event["u"]} pu={event["pu"]} bids={len(event.get("b", []))} asks={len(event.get("a", []))}')
-        # Phase 1: Buffer events while snapshot is being fetched
+        # Buffer events while snapshot is being fetched
         if not self.snapshot_ready:
             self.event_buffer.append(event)
             logger.warning(f"[{self._name}] Buffering depth event (snapshot not ready). Buffer size: {len(self.event_buffer)}")
