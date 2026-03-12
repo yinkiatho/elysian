@@ -20,6 +20,8 @@ class OrderType(Enum):
     LIMIT = "Limit"
     MARKET = "Market"
     RANGE = "Range"          # AMM / LP range order
+    OTHERS = "OTHERS"
+    
 
 
 class OrderStatus(Enum):

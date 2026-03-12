@@ -11,11 +11,14 @@ import asyncio
 import os
 import datetime 
 from elysian_core.connectors.BinanceExchange import (
-    BinanceOrderBookFeed, 
-    BinanceKlineFeed,
-    binance_spot_kline_client_manager,
-    binance_spot_ob_client_manager,
     BinanceSpotExchange
+)
+
+from elysian_core.connectors.BinanceDataConnectors import (
+    BinanceKlineFeed,
+    BinanceOrderBookFeed,
+    binance_spot_kline_client_manager,
+    binance_spot_ob_client_manager
 )
 
 from elysian_core.connectors.BinanceFuturesExchange import (

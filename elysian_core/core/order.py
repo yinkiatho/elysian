@@ -16,13 +16,15 @@ class Order:
     order_type: OrderType
     quantity: float
     price: Optional[float] = None           # None for market orders
+    use_quote_order_qty: bool = False
+    avg_fill_price: float = 0.0
     filled_qty: float = 0.0
     status: OrderStatus = OrderStatus.PENDING
     timestamp: Optional[datetime.datetime] = None
     venue: Optional[Venue] = None
-    client_order_id: Optional[str] = None
-    fee: float = 0.0
-    fee_currency: Optional[str] = None
+    commission: float = 0.0
+    commission_asset: str = None
+    last_updated_timestamp: int = None
 
     @property
     def remaining_qty(self) -> float:
@@ -36,6 +38,20 @@ class Order:
     def is_active(self) -> bool:
         return self.status.is_active()
 
+
+    def update_fill(self, filled_qty: float, fill_price: float):
+        prev_filled = self.filled_quantity
+        self.filled_quantity = filled_qty
+        # running weighted average fill price
+        if filled_qty > 0:
+            self.avg_fill_price = (
+                (prev_filled * self.avg_fill_price + (filled_qty - prev_filled) * fill_price)
+                / filled_qty
+            )
+        self.status = OrderStatus.FILLED if filled_qty >= self.quantity else OrderStatus.PARTIAL
+        self.updated_at = int(datetime.datetime.now().timestamp() * 1000)
+        
+        
     def __str__(self) -> str:
         return (
             f"Order({self.id} | {self.symbol} {self.side.value} {self.order_type.value} | "

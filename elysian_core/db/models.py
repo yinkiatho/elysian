@@ -49,12 +49,14 @@ class CexTrade(BaseModel):
     """One CEX fill recorded by BinanceExchange._record_trade."""
     id = AutoField(primary_key=True)
     datetime = DateTimeField(default=lambda: datetime.datetime.now(_UTC8))
+    strategy_id = IntegerField(null=False) # optional strategy_id for easier querying
+    strategy_name = TextField(null=False)
     venue = EnumField(Venue, default=Venue.BINANCE)
     symbol = TextField(null=False)                 # e.g. "ETHUSDT"
     asset_type = EnumField(AssetType, null=False) # AssetType.SPOT or AssetType.PERPETUAL
     side = EnumField(Side, null=False)             # Side.BUY | Side.SELL
-    amount = FloatField(null=False)                # signed base amount requested
-    executed_qty = FloatField(null=False)
+    base_amount = FloatField(null=False)                # signed base amount requested
+    quote_amount = FloatField(null=False)               # signed quote amount (base_amount * price)
     price = FloatField(null=False)                 # average fill price
     commission_asset = TextField(null=True)
     total_commission = FloatField(null=False)
@@ -92,6 +94,19 @@ class DexTrade(BaseModel):
 
     class Meta:
         table_name = "dex_trades"
+        
+        
+        
+class AccountSnapshots(BaseModel):
+    datetime = DateTimeField(default=lambda: datetime.datetime.now(_UTC8), primary_key=True)
+    venue = EnumField(Venue, default=Venue.BINANCE)
+    balances = JSONField(null=False)  # { "USDT": 1000.0, "ETH": 2.5, ... }
+    total_usd_value = FloatField(null=False)  # total account value in USD at the time of snapshot
+    total_open_orders = IntegerField(null=False)  # total number of open orders at the time of snapshot
+    
+    class Meta:
+        table_name = "account_snapshots"
+    
 
 
 # ── Schema management ─────────────────────────────────────────────────────────
