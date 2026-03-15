@@ -53,12 +53,16 @@ class Order:
         
         
     def __str__(self) -> str:
+        fill_pct = (self.filled_qty / self.quantity * 100) if self.quantity else 0
         return (
-            f"Order({self.id} | {self.symbol} {self.side.value} {self.order_type.value} | "
-            f"qty={self.quantity} filled={self.filled_qty} price={self.price} | "
-            f"status={self.status.value})"
+            f"┌─ Order {self.id}\n"
+            f"│  Symbol   : {self.symbol:<10} │  Venue  : {self.venue.value if self.venue else 'N/A'}\n"
+            f"│  Side     : {self.side.value:<10} │  Type   : {self.order_type.value}\n"
+            f"│  Qty      : {self.quantity:<10} │  Filled : {self.filled_qty} ({fill_pct:.1f}%)  │  Remaining: {self.remaining_qty}\n"
+            f"│  Price    : {str(self.price) if self.price is not None else 'MARKET':<10} │  Avg Fill: {self.avg_fill_price}\n"
+            f"│  Status   : {self.status.value:<10} │  Commission: {self.commission} {self.commission_asset or ''}\n"
+            f"└─ Updated  : {self.last_updated_timestamp}"
         )
-
 
 @dataclass
 class LimitOrder:

@@ -3,592 +3,683 @@ import collections
 import datetime
 import hashlib
 import hmac
-import json
 import math
 import statistics
 import time
-from datetime import datetime as dt
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 
-import pylru
+import aiohttp
+import argparse
 import requests
-import websockets
 
-from elysian_core.connectors.base import AbstractDataFeed
-from elysian_core.core.enums import OrderStatus, Side, TradeType
-from elysian_core.core.market_data import Kline, OrderBook, AsterOrderBook
-from elysian_core.db.database import DATABASE
+from elysian_core.connectors.base import SpotExchangeConnector
+from elysian_core.connectors.AsterDataConnectors import (
+    AsterKlineClientManager,
+    AsterOrderBookClientManager,
+    AsterUserDataClientManager,
+)
+from elysian_core.core.enums import (
+    OrderStatus, Side, AssetType, Venue, OrderType,
+    _BINANCE_SIDE, _BINANCE_STATUS,
+)
+from elysian_core.core.order import Order
+from elysian_core.core.market_data import Kline, OrderBook
 from elysian_core.db.models import CexTrade
 import elysian_core.utils.logger as log
 
 logger = log.setup_custom_logger("root")
 
 SPOT_BASE_ENDPOINT = "https://sapi.asterdex.com"
-WEBSOCKET_SPOT_ENDPOINT = "wss://sstream.asterdex.com/ws"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Shared Client Managers
+# AsterSpotExchange
 # ──────────────────────────────────────────────────────────────────────────────
 
-class AsterKlineClientManager:
-    """Shared WebSocket client for multiplex kline streams with queue-based processing."""
-
-    def __init__(self):
-        self._websocket: Optional[Any] = None
-        self._queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
-        self._active_feeds: Dict[str, 'AsterKlineFeed'] = {}
-        self._running = False
-        self._reader_task: Optional[asyncio.Task] = None
-        self._worker_tasks: List[asyncio.Task] = []
-        self._subscription_id = 1
-
-    async def start(self):
-        if self._running:
-            return
-        self._running = True
-        logger.info("AsterKlineClientManager: Started shared kline client")
-
-    async def stop(self):
-        if not self._running:
-            return
-
-        self._running = False
-
-        # Cancel reader and worker tasks
-        if self._reader_task and not self._reader_task.done():
-            self._reader_task.cancel()
-            try:
-                await self._reader_task
-            except asyncio.CancelledError:
-                pass
-
-        for task in self._worker_tasks:
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-
-        # Close websocket
-        if self._websocket:
-            await self._websocket.close()
-            self._websocket = None
-
-        logger.info("AsterKlineClientManager: Stopped shared kline client")
-
-    def register_feed(self, feed: 'AsterKlineFeed'):
-        self._active_feeds[feed._name] = feed
-
-    def unregister_feed(self, symbol: str):
-        self._active_feeds.pop(symbol, None)
-
-    async def _reader_coroutine(self):
-        """Network reader: connects WebSocket and reads messages."""
-        if not self._active_feeds:
-            logger.warning("AsterKlineClientManager: No feeds registered for reader")
-            return
-
-        # Create stream params for all symbols
-        streams = [f"{symbol.lower()}@kline_1m" for symbol in self._active_feeds.keys()]
-        
-        reconnect_delay = 1
-        while self._running:
-            try:
-                async with websockets.connect(WEBSOCKET_SPOT_ENDPOINT) as websocket:
-                    self._websocket = websocket
-                    logger.info(f"AsterKlineClientManager: WebSocket connected for {len(streams)} streams")
-                    reconnect_delay = 1  # Reset delay on successful connection
-
-                    # Subscribe to streams
-                    subscription_msg = {
-                        "method": "SUBSCRIBE",
-                        "params": streams,
-                        "id": self._subscription_id
-                    }
-                    await websocket.send(json.dumps(subscription_msg))
-                    logger.debug(f"AsterKlineClientManager: Subscribed to {len(streams)} kline streams")
-                    self._subscription_id += 1
-
-                    while self._running:
-                        try:
-                            msg = await asyncio.wait_for(websocket.recv(), timeout=30)
-                            await self._queue.put(json.loads(msg))
-                        except asyncio.TimeoutError:
-                            # Send pong to keep connection alive
-                            try:
-                                await websocket.pong()
-                            except:
-                                pass
-                        except Exception as e:
-                            logger.error(f"AsterKlineClientManager: Error in reader: {e}")
-                            await asyncio.sleep(0.1)
-
-            except Exception as e:
-                logger.error(f"AsterKlineClientManager: WebSocket connection error: {e}", exc_info=False)
-
-            if self._running:
-                logger.warning(f"AsterKlineClientManager: Reconnecting in {reconnect_delay}s...")
-                await asyncio.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 2, 60)
-
-    async def _worker_coroutine(self, worker_id: int):
-        """Worker coroutine: processes messages from queue."""
-        logger.debug(f"AsterKlineClientManager: Worker {worker_id} started")
-
-        while self._running:
-            try:
-                msg = await self._queue.get()
-
-                # Aster wraps data in {"stream": "...", "data": {...}} or direct kline event
-                if "data" in msg and "stream" in msg:
-                    data = msg.get("data", {})
-                    stream = msg.get("stream", "")
-                elif "e" in msg and msg["e"] == "kline":
-                    data = msg
-                    stream = f"{msg.get('s', '').lower()}@kline_1m"
-                else:
-                    self._queue.task_done()
-                    continue
-
-                # Extract symbol from stream name
-                if "@kline" in stream:
-                    symbol = stream.split("@")[0].upper()
-                    feed = self._active_feeds.get(symbol)
-                    if feed:
-                        kline = feed._process_kline_event(data)
-                        if kline is not None:
-                            feed._kline = kline
-                            feed._historical.append(kline.close)
-
-                            if len(feed._historical) == 60:
-                                returns = [
-                                    (feed._historical[i] - feed._historical[i - 1]) / feed._historical[i - 1]
-                                    for i in range(1, len(feed._historical))
-                                ]
-                                feed._vol = statistics.stdev(returns) * math.sqrt(12)
-                                logger.info(f"[{symbol}] Volatility: {feed._vol * 1e4:.2f} bps (60-candle window)")
-
-                self._queue.task_done()
-
-            except Exception as e:
-                logger.error(f"AsterKlineClientManager: Worker {worker_id} error: {e}")
-                await asyncio.sleep(0.1)
-
-        logger.debug(f"AsterKlineClientManager: Worker {worker_id} stopped")
-
-    async def run_multiplex_feeds(self):
-        """Run multiplex socket with reader and worker pool."""
-        if not self._active_feeds:
-            logger.warning("AsterKlineClientManager: No feeds registered")
-            return
-
-        # Start reader coroutine
-        self._reader_task = asyncio.create_task(self._reader_coroutine())
-
-        # Start worker pool
-        num_workers = min(8, len(self._active_feeds))
-        self._worker_tasks = [
-            asyncio.create_task(self._worker_coroutine(i))
-            for i in range(num_workers)
-        ]
-
-        logger.info(f"AsterKlineClientManager: Started with {num_workers} workers")
-        await self._reader_task
-
-
-class AsterOrderBookClientManager:
-    """Shared WebSocket client for multiplex orderbook streams with queue-based processing."""
-
-    def __init__(self):
-        self._websocket: Optional[Any] = None
-        self._queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
-        self._active_feeds: Dict[str, 'AsterOrderBookFeed'] = {}
-        self._running = False
-        self._reader_task: Optional[asyncio.Task] = None
-        self._worker_tasks: List[asyncio.Task] = []
-        self._subscription_id = 1
-
-    async def start(self):
-        if self._running:
-            return
-        self._running = True
-        logger.info("AsterOrderBookClientManager: Started shared orderbook client")
-
-
-    async def stop(self):
-        if not self._running:
-            return
-
-        self._running = False
-
-        # Cancel reader and worker tasks
-        if self._reader_task and not self._reader_task.done():
-            self._reader_task.cancel()
-            try:
-                await self._reader_task
-            except asyncio.CancelledError:
-                pass
-
-        for task in self._worker_tasks:
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-
-        # Close websocket
-        if self._websocket:
-            await self._websocket.close()
-            self._websocket = None
-
-        logger.info("AsterOrderBookClientManager: Stopped shared orderbook client")
-
-
-    def register_feed(self, feed: 'AsterOrderBookFeed'):
-        self._active_feeds[feed._name] = feed
-
-
-    def unregister_feed(self, symbol: str):
-        self._active_feeds.pop(symbol, None)
-
-
-    async def _reader_coroutine(self):
-        """Network reader: connects WebSocket and reads messages."""
-        if not self._active_feeds:
-            logger.warning("AsterOrderBookClientManager: No feeds registered for reader")
-            return
-
-        # Create stream params for all symbols (20-level depth updates)
-        streams = [f"{symbol.lower()}@depth20@100ms" for symbol in self._active_feeds.keys()]
-        
-        reconnect_delay = 1
-        while self._running:
-            try:
-                async with websockets.connect(WEBSOCKET_SPOT_ENDPOINT) as websocket:
-                    self._websocket = websocket
-                    logger.info(f"AsterOrderBookClientManager: WebSocket connected for {len(streams)} streams")
-                    reconnect_delay = 1
-
-                    # Subscribe to streams
-                    subscription_msg = {
-                        "method": "SUBSCRIBE",
-                        "params": streams,
-                        "id": self._subscription_id
-                    }
-                    await websocket.send(json.dumps(subscription_msg))
-                    logger.debug(f"AsterOrderBookClientManager: Subscribed to {len(streams)} depth streams")
-                    self._subscription_id += 1
-
-                    while self._running:
-                        try:
-                            msg = await asyncio.wait_for(websocket.recv(), timeout=30)
-                            await self._queue.put(json.loads(msg))
-                        except asyncio.TimeoutError:
-                            # Send pong to keep connection alive
-                            try:
-                                await websocket.pong()
-                            except:
-                                pass
-                        except Exception as e:
-                            logger.error(f"AsterOrderBookClientManager: Error in reader: {e}")
-                            await asyncio.sleep(0.1)
-
-            except Exception as e:
-                logger.error(f"AsterOrderBookClientManager: WebSocket connection error: {e}", exc_info=False)
-
-            if self._running:
-                logger.warning(f"AsterOrderBookClientManager: Reconnecting in {reconnect_delay}s...")
-                await asyncio.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 2, 60)
-
-
-    async def _worker_coroutine(self, worker_id: int):
-        """Worker coroutine: processes messages from queue."""
-        logger.debug(f"AsterOrderBookClientManager: Worker {worker_id} started")
-
-        while self._running:
-            try:
-                msg = await self._queue.get()
-
-                # Aster wraps data in {"stream": "...", "data": {...}} or direct depth event
-                if "e" in msg and msg["e"] == "depthUpdate":
-                    data = msg
-                    stream = f"{msg.get('s', '').lower()}@depth"
-                else:
-                    self._queue.task_done()
-                    continue
-
-                # Extract symbol from stream name
-                if "@depth" in stream:
-                    symbol = stream.split("@")[0].upper()
-                    feed = self._active_feeds.get(symbol)
-                    if feed:
-                        feed._data = await feed._process_depth_event(data)
-
-                        if feed.save_data:
-                            asyncio.create_task(feed._append_to_df(feed._data))
-
-                self._queue.task_done()
-
-            except Exception as e:
-                logger.error(f"AsterOrderBookClientManager: Worker {worker_id} error: {e}")
-                await asyncio.sleep(0.1)
-
-        logger.debug(f"AsterOrderBookClientManager: Worker {worker_id} stopped")
-
-
-    async def run_multiplex_feeds(self):
-        """Run multiplex socket with reader and worker pool."""
-        if not self._active_feeds:
-            logger.warning("AsterOrderBookClientManager: No feeds registered")
-            return
-
-        # Start reader coroutine
-        self._reader_task = asyncio.create_task(self._reader_coroutine())
-
-        # Start worker pool
-        num_workers = min(8, len(self._active_feeds))
-        self._worker_tasks = [
-            asyncio.create_task(self._worker_coroutine(i))
-            for i in range(num_workers)
-        ]
-
-        logger.info(f"AsterOrderBookClientManager: Started with {num_workers} workers")
-        await self._reader_task
-
-
-# Global client managers
-aster_spot_kline_client_manager = AsterKlineClientManager()
-aster_spot_ob_client_manager = AsterOrderBookClientManager()
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# AsterKlineFeed
-# ──────────────────────────────────────────────────────────────────────────────
-
-class AsterKlineFeed(AbstractDataFeed):
+class AsterSpotExchange(SpotExchangeConnector):
     """
-    Real-time closed kline (candle) feed for a single Aster DEX symbol.
-    Produces Kline objects and maintains a 60-candle rolling close-price window
-    for realised volatility.
+    Authenticated Aster spot exchange client.
+
+    Manages:
+      - Per-symbol AsterKlineFeed and AsterOrderBookFeed
+      - Account balances (polled periodically)
+      - Open orders registry
+      - Market and limit order placement / cancellation
+      - User data stream (executions, balance updates)
 
     Usage:
-        feed = AsterKlineFeed()
-        feed.create_new(asset="BTCUSDT", interval="1m")
-        await feed()
+        exchange = AsterSpotExchange(
+            api_key="...", api_secret="...",
+            symbols=["ETHUSDT", "SUIUSDT"],
+        )
+        await exchange.run()
+        await exchange.place_market_order(...)
     """
 
-    def __init__(self, save_data: bool = False, file_dir: Optional[str] = None):
-        super().__init__(save_data=save_data, file_dir=file_dir)
-        self._kline: Optional[Kline] = None   # latest closed kline
+    _STABLECOINS = frozenset({"USDC", "USDT", "BUSD"})
 
-    def create_new(self, asset: str, interval: str = "1m"):
-        self._name = asset
-        self._interval = interval
-
-    @property
-    def latest_kline(self) -> Optional[Kline]:
-        return self._kline
-
-    @property
-    def latest_close(self) -> Optional[float]:
-        return self._historical[-1] if self._historical else None
-
-    # rolling vol from close prices — override base which uses mid-price
-    async def update_current_stats(self):
-        pass  # klines update _historical inline on each closed candle
-
-    def _process_kline_event(self, raw: dict) -> Optional[Kline]:
-        k = raw.get("k", {})
-        if not k.get("x"):         # only process closed candles
-            return None
-        
-        kline = Kline(
-            ticker=k["s"],
-            interval=k["i"],
-            start_time=dt.fromtimestamp(k["t"] / 1000),
-            end_time=dt.fromtimestamp(k["T"] / 1000),
-            open=float(k["o"]),
-            high=float(k["h"]),
-            low=float(k["l"]),
-            close=float(k["c"]),
-            volume=float(k["v"]),
+    def __init__(
+        self,
+        args: argparse.Namespace = argparse.Namespace(),
+        api_key: str = "",
+        api_secret: str = "",
+        symbols: Optional[List[str]] = None,
+        file_path: Optional[str] = None,
+        kline_manager: Optional[AsterKlineClientManager] = None,
+        ob_manager: Optional[AsterOrderBookClientManager] = None,
+        user_data_manager: Optional[AsterUserDataClientManager] = None,
+    ):
+        super().__init__(
+            args=args,
+            api_key=api_key,
+            api_secret=api_secret,
+            symbols=symbols or [],
+            file_path=file_path,
+            kline_manager=kline_manager,
+            ob_manager=ob_manager,
         )
-        #logger.info(f"[{kline.ticker}] Closed kline: {kline}")
-        return kline
 
-    async def __call__(self):
-        """Register with shared client manager and wait for multiplex events."""
-        global aster_spot_kline_client_manager
+        self.user_data_manager = user_data_manager or AsterUserDataClientManager(api_key, api_secret)
+        self._session: Optional[aiohttp.ClientSession] = None
 
-        # Register this feed with the shared manager
-        aster_spot_kline_client_manager.register_feed(self)
+        self.strategy_name = getattr(args, "strategy_name", "")
+        self.strategy_id   = getattr(args, "strategy_id", "")
 
-        # Start the shared manager if not already running
-        if not aster_spot_kline_client_manager._running:
-            await aster_spot_kline_client_manager.start()
-            # Start the multiplex feed runner in background
-            asyncio.create_task(aster_spot_kline_client_manager.run_multiplex_feeds())
+    # ── HTTP helpers ──────────────────────────────────────────────────────────
 
-        # Keep the feed alive
-        while True:
-            await asyncio.sleep(1)
+    def _sign(self, params: dict) -> dict:
+        """Add timestamp + HMAC SHA256 signature to a params dict (in-place)."""
+        params["timestamp"] = int(time.time() * 1000)
+        qs  = urlencode(params)
+        sig = hmac.new(self._api_secret.encode(), qs.encode(), hashlib.sha256).hexdigest()
+        params["signature"] = sig
+        return params
+
+    def _headers(self) -> dict:
+        return {"X-MBX-APIKEY": self._api_key}
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        params: Optional[dict] = None,
+        signed: bool = False,
+    ) -> Any:
+        """
+        Async HTTP request against the Aster REST API.
+        Returns the parsed JSON body; raises on non-2xx responses.
+        """
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+
+        url = SPOT_BASE_ENDPOINT + path
+        p   = dict(params or {})
+        if signed:
+            self._sign(p)
+
+        async with self._session.request(
+            method, url, params=p if method.upper() == "GET" else None,
+            data=p if method.upper() != "GET" else None,
+            headers=self._headers(),
+        ) as resp:
+            body = await resp.json(content_type=None)
+            if resp.status >= 400:
+                logger.error(f"Aster API error {resp.status}: {body}")
+                resp.raise_for_status()
+            return body
+
+    # ── Initialisation ────────────────────────────────────────────────────────
+
+    async def initialize(self):
+        """Ping the exchange, fetch symbol metadata, refresh balances and start user-data stream."""
+        self._session = aiohttp.ClientSession()
+
+        # Health check
+        try:
+            await self._request("GET", "/api/v1/ping")
+            logger.info("AsterSpotExchange: ping OK")
+        except Exception as e:
+            logger.warning(f"AsterSpotExchange: ping failed: {e}")
+
+        for sym in self._symbols:
+            await self._fetch_symbol_info(sym)
+
+        await self.refresh_balances()
+
+        try:
+            self.user_data_manager.register(self._handle_user_data)
+            await self.user_data_manager.start()
+            logger.info("AsterSpotExchange: user data stream started")
+        except Exception as e:
+            logger.error(f"AsterSpotExchange: failed to start user data stream: {e}")
+
+        logger.info("AsterSpotExchange initialised.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# AsterOrderBookFeed
-# ──────────────────────────────────────────────────────────────────────────────
-
-class AsterOrderBookFeed(AbstractDataFeed):
-    """
-    Real-time depth (order book) feed for a single Aster DEX symbol.
-    Produces OrderBook snapshots updated at 100ms intervals.
-
-    Usage:
-        feed = AsterOrderBookFeed()
-        feed.create_new(asset="BTCUSDT")
-        await feed()
-    """
-
-    def __init__(self, save_data: bool = False, file_dir: Optional[str] = None):
-        super().__init__(save_data=save_data, file_dir=file_dir)
-        
-        # Aster Specific Parameters
-        self.last_update_id: Optional[int] = None
-        self.snapshot_ready: bool = False
-        self.event_buffer: List[dict] = []  # Buffer events while waiting for snapshot
-        self.first_update_processed: bool = False  # Track if we've synced with snapshot
-
-
-    def create_new(self, asset: str, interval: str = "100ms"):
-        self._name = asset
-        self._interval = interval
-
-
-    def _fetch_rest_snapshot(self, limit: int = 100) -> dict:
-        resp = requests.get(
-            f"{SPOT_BASE_ENDPOINT}/api/v1/depth",
-            params={"symbol": self._name, "limit": min(limit, 5000)},
-        )
-        resp.raise_for_status()
-        return resp.json()
-
-
-    async def get_initial_snapshot(self):
-        """Fetch snapshot and process any buffered events that cover it."""
-        raw = self._fetch_rest_snapshot(100)
-        ts = int(time.time() * 1000)
-        bids = [[float(b[0]), float(b[1])] for b in raw["bids"]]
-        asks = [[float(a[0]), float(a[1])] for a in raw["asks"]]
-        
-        self._data = AsterOrderBook.from_lists(
-            last_update_id=raw["lastUpdateId"],
-            last_timestamp=ts,
-            ticker=self._name,
-            interval=self._interval,
-            bid_levels=bids,
-            ask_levels=asks,
-        )
-        
-        self.snapshot_ready = True
-        self.first_update_processed = False  # Reset for new snapshot sync
-        logger.info(f"Fetched initial snapshot for [{self._name}] OB snapshot id={raw['lastUpdateId']}")
-        
-        # Process any buffered events now that snapshot is ready
-        if self.event_buffer:
-            logger.info(f"[{self._name}] Processing {len(self.event_buffer)} buffered depth events")
-            await self._process_buffered_events()
-
-    async def _process_buffered_events(self):
-        """Process buffered events after snapshot is ready."""
-        buffered_events = self.event_buffer[:]
-        self.event_buffer.clear()
-        
-        logger.info(f"[{self._name}] Processing {len(buffered_events)} buffered events for snapshot sync")
-        for buffered_event in buffered_events:
-            # Skip events that are too old (u < lastUpdateId)
-            if buffered_event['u'] < self._data.last_update_id:
-                logger.info(f"[{self._name}] Skipping old buffered event u={buffered_event['u']}")
-                continue
-            
-            # Find first event that covers the snapshot
-            if buffered_event['U'] <= self._data.last_update_id and buffered_event['u'] >= self._data.last_update_id:
-                logger.info(f"[{self._name}] Found sync point: buffered event u={buffered_event['u']} covers snapshot id={self._data.last_update_id}")
-                await self._apply_depth_update(buffered_event)
-                self.first_update_processed = True
-                self._data.last_update_id = buffered_event['u']
-                
-            elif self.first_update_processed and buffered_event['pu'] == self._data.last_update_id:
-                logger.info(f"[{self._name}] Applying buffered event with pu={buffered_event['pu']} matching last_update_id={self._data.last_update_id}")
-                await self._apply_depth_update(buffered_event)
-                
-                
-            elif self.first_update_processed and buffered_event['pu'] != self._data.last_update_id:
-                logger.warning(f"[{self._name}] Gap detected: buffered event U={buffered_event['U']} > snapshot id={self.last_update_id}")
-                self.snapshot_ready = False
-                asyncio.create_task(self.get_initial_snapshot())
+    async def _fetch_symbol_info(self, symbol: str):
+        """Fetch symbol filters (step size, min notional) from /api/v1/exchangeInfo."""
+        try:
+            data = await self._request("GET", "/api/v1/exchangeInfo", params={"symbol": symbol})
+            symbols = data.get("symbols", [])
+            info = next((s for s in symbols if s["symbol"] == symbol), None)
+            if not info:
+                logger.warning(f"[{symbol}] exchangeInfo: symbol not found")
                 return
-    
-    
-    async def _process_depth_event(self, event: dict) -> OrderBook:
-        """Process depth updates following Binance/Aster API spec."""
-        
-        # Phase 1: Buffer events while snapshot is being fetched
-        if not self.snapshot_ready:
-            self.event_buffer.append(event)
-            logger.warning(f"[{self._name}] Buffering depth event (snapshot not ready). Buffer size: {len(self.event_buffer)}")
-            return self._data if self._data else None
-        
-        # Validate pu (previous update id)
-        if event.get('pu') != self._data.last_update_id:
-            if event.get('pu') < self._data.last_update_id:
-                logger.warning(f"[{self._name}] Received out-of-order event with pu={event.get('pu')} < last_update_id={self._data.last_update_id}. Ignoring event.")
-                return self._data
-            elif event.get('pu') > self._data.last_update_id:
-                logger.error(f"[{self._name}] Sequence break: event pu={event.get('pu')} > last_update_id={self._data.last_update_id}")
-                self.snapshot_ready = False
-                await asyncio.sleep(3.0)
-                asyncio.create_task(self.get_initial_snapshot())
-                raise ValueError("Invalid event sequence")
+
+            filters = info.get("filters", [])
+
+            step_size = float(
+                next((f["stepSize"] for f in filters if f["filterType"] == "LOT_SIZE"), "0.0001")
+            )
+            min_notional = float(
+                next(
+                    (f.get("minNotional", f.get("minQty", 0))
+                     for f in filters
+                     if f["filterType"] in ("NOTIONAL", "MIN_NOTIONAL")),
+                    0.0,
+                )
+            )
+
+            self._token_infos[symbol] = {
+                "step_size":             step_size,
+                "min_notional":          min_notional,
+                "base_asset":            info.get("baseAsset", ""),
+                "quote_asset":           info.get("quoteAsset", ""),
+                "base_asset_precision":  info.get("baseAssetPrecision", 8),
+                "quote_asset_precision": info.get("quoteAssetPrecision", 8),
+            }
+        except Exception as e:
+            logger.error(f"[{symbol}] _fetch_symbol_info error: {e}")
+
+    # ── Account ───────────────────────────────────────────────────────────────
+
+    async def refresh_balances(self):
+        """Fetch account balances from /api/v1/account."""
+        try:
+            account = await self._request("GET", "/api/v1/account", signed=True)
+            for b in account.get("balances", []):
+                self._balances[b["asset"]] = float(b["free"])
+        except Exception as e:
+            logger.error(f"AsterSpotExchange: refresh_balances error: {e}")
+
+    def _handle_user_data(self, msg: dict):
+        """Callback invoked by the user-data manager when an event arrives."""
+        et = msg.get("e")
+
+        if et == "balanceUpdate":
+            asset = msg.get("a")
+            delta = float(msg.get("d", 0))
+            self._balances[asset] = self._balances.get(asset, 0.0) + delta
+            logger.info(f"[{asset}] balance update delta={delta:.6f} new={self._balances[asset]:.6f}")
+
+        elif et == "outboundAccountPosition":
+            for bal in msg.get("B", []):
+                asset  = bal.get("a")
+                free   = float(bal.get("f", 0))
+                locked = float(bal.get("l", 0))
+                self._balances[asset] = free + locked
+            logger.info("outboundAccountPosition applied to balances")
+
+        elif et == "executionReport":
+            logger.info(
+                f"Execution report @ "
+                f"{datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))}"
+            )
+            self._handle_execution_report(msg)
+
+    def _handle_execution_report(self, msg: dict):
+        """
+        Update open-orders registry from a user-data executionReport.
+
+        Key fields (Binance-compatible):
+          i  → Order ID
+          s  → Symbol
+          X  → Current order status
+          x  → Execution type
+          z  → Cumulative filled quantity
+          Z  → Cumulative quote asset transacted quantity
+          L  → Last executed price
+          n  → Commission amount
+          N  → Commission asset
+        """
+        order_id  = str(msg.get("i"))
+        symbol    = msg.get("s")
+        status    = msg.get("X")
+        exec_type = msg.get("x")
+
+        internal_status = _BINANCE_STATUS.get(status)
+        if internal_status is None:
+            logger.warning(f"[{symbol}] Unknown order status '{status}' for order {order_id}")
+            return
+
+        symbol_orders = self._open_orders.get(symbol, {})
+
+        # ── New order ─────────────────────────────────────────────────────────
+        if exec_type == "NEW" and order_id not in symbol_orders:
+            side      = Side.BUY if msg.get("S") == "BUY" else Side.SELL
+            raw_type  = msg.get("o", "LIMIT")
+            if raw_type.upper() == "MARKET":
+                order_type = OrderType.MARKET
+            elif raw_type.upper() == "LIMIT":
+                order_type = OrderType.LIMIT
+            else:
+                order_type = OrderType.OTHERS
+
+            order = Order(
+                id          = order_id,
+                symbol      = symbol,
+                side        = side,
+                order_type  = order_type,
+                quantity    = float(msg.get("q", 0)),
+                price       = float(msg.get("p", 0)) or None,
+                status      = internal_status,
+                timestamp   = datetime.datetime.fromtimestamp(
+                                  msg.get("O", 0) / 1000,
+                                  tz=datetime.timezone.utc,
+                              ),
+                venue                  = Venue.ASTER,
+                commission             = float(msg.get("n", 0)),
+                commission_asset       = msg.get("N"),
+                last_updated_timestamp = int(msg.get("E", 0)),
+            )
+            self._open_orders[symbol][order_id] = order
+            logger.info(f"[{symbol}] New order registered: {order}")
+            return
+
+        # ── Update existing order ─────────────────────────────────────────────
+        order = symbol_orders.get(order_id)
+        if order is None:
+            logger.warning(
+                f"[{symbol}] executionReport for unknown order {order_id} (status={status}), skipping"
+            )
+            return
+
+        cum_filled_qty = float(msg.get("z", 0))
+        cum_quote_qty  = float(msg.get("Z", 0))
+        last_price     = float(msg.get("L", 0))
+        avg_price      = (cum_quote_qty / cum_filled_qty) if cum_filled_qty > 0 else last_price
+
+        if cum_filled_qty > order.filled_qty:
+            order.update_fill(cum_filled_qty, avg_price)
+
+        order.commission      += float(msg.get("n", 0))
+        order.commission_asset = msg.get("N") or order.commission_asset
+        order.status           = internal_status
+        logger.info(f"[{symbol}] Order updated: {order}")
+
+        if not order.is_active:
+            self._open_orders[symbol].pop(order_id, None)
+            logger.info(f"[{symbol}] Order {order_id} removed from open orders (status={status})")
+
+    # ── Price helper ──────────────────────────────────────────────────────────
+
+    def last_price(self, symbol: str) -> Optional[float]:
+        """Best available mid-price: OB mid → last kline close → None."""
+        if self.ob_manager:
+            feed = self.ob_manager.get_feed(symbol)
+            if feed and feed.data:
+                return feed.data.mid_price
+
+        if self.kline_manager:
+            feed = self.kline_manager.get_feed(symbol)
+            if feed and feed.latest_close:
+                return feed.latest_close
+
+        return None
+
+    # ── Deposit / Withdraw (stubs) ────────────────────────────────────────────
+
+    async def get_deposit_address(self, coin: str, network: Optional[str] = None) -> Optional[str]:
+        """Not supported by Aster spot API — returns None."""
+        logger.warning("get_deposit_address: not supported on Aster spot")
+        return None
+
+    async def deposit_asset(self, coin: str, amount: float, network: Optional[str] = None) -> bool:
+        """Not applicable for CEX deposit flow — returns False."""
+        logger.warning("deposit_asset: not supported on Aster spot")
+        return False
+
+    async def withdraw_asset(
+        self, coin: str, amount: float, address: str, network: Optional[str] = None
+    ) -> bool:
+        """Submit a withdrawal via /api/v1/withdraw (signed)."""
+        params: dict = {"coin": coin, "address": address, "amount": str(amount)}
+        if network:
+            params["network"] = network
+        try:
+            resp = await self._request("POST", "/api/v1/withdraw", params=params, signed=True)
+            logger.info(f"Withdrew {amount} {coin} → {address}  resp={resp}")
+            return True
+        except Exception as e:
+            logger.error(f"withdraw_asset error: {e}")
+            return False
+
+    # ── Orders ────────────────────────────────────────────────────────────────
+
+    def order_health_check(
+        self, symbol: str, side: Side, quantity: float, use_quote_order_qty: bool = False
+    ) -> bool:
+        """Validate balance and notional before placing an order."""
+        info = self._token_infos.get(symbol, {})
+        base_asset  = info.get("base_asset")
+        quote_asset = info.get("quote_asset")
+        if not base_asset or not quote_asset:
+            logger.error(f"[{symbol}] order_health_check: symbol info not found")
+            return False
+
+        price            = self.last_price(symbol) or 0.0
+        min_notional     = info.get("min_notional", 0.0)
+        estimated_notional = price * abs(quantity) if not use_quote_order_qty else abs(quantity)
+
+        if estimated_notional < min_notional:
+            logger.error(
+                f"[{symbol}] Estimated notional {estimated_notional:.4f} < min {min_notional}"
+            )
+            return False
+
+        if not use_quote_order_qty:
+            if side == Side.BUY:
+                if self._balances.get(quote_asset, 0.0) < price * abs(quantity):
+                    logger.error(
+                        f"[{symbol}] Insufficient {quote_asset} to BUY {quantity} {base_asset}"
+                    )
+                    return False
+            else:
+                if self._balances.get(base_asset, 0.0) < abs(quantity):
+                    logger.error(
+                        f"[{symbol}] Insufficient {base_asset} to SELL {quantity}"
+                    )
+                    return False
         else:
-            #logger.info(f"[{self._name}] Processing perpetual depth event: U={event['U']} u={event['u']} (last_update_id={self._data.last_update_id})")
-            await self._apply_depth_update(event)
-        return self._data
-    
-    
-    
-    async def _apply_depth_update(self, event: dict):
-        """Apply depth update to order book."""
-        ts = int(time.time() * 1000)
-        await self._data.apply_both_updates(ts, event['u'], 
-                                            bid_levels=event.get("b", []), ask_levels=event.get("a", []))
-        logger.success(f"[{self._name}] OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
+            if side == Side.BUY:
+                if self._balances.get(quote_asset, 0.0) < abs(quantity):
+                    logger.error(
+                        f"[{symbol}] Insufficient {quote_asset} for quoteOrderQty={quantity}"
+                    )
+                    return False
+            else:
+                if self._balances.get(base_asset, 0.0) < price * abs(quantity):
+                    logger.error(
+                        f"[{symbol}] Insufficient {base_asset} for quoteOrderQty SELL"
+                    )
+                    return False
 
+        return True
 
-    async def __call__(self):
-        """Register with shared client manager and wait for multiplex events."""
-        global aster_spot_ob_client_manager
+    async def place_limit_order(
+        self, symbol: str, side: Side, quantity: float, price: float
+    ):
+        """Place a GTC limit order via POST /api/v1/order."""
+        params = {
+            "symbol":      symbol,
+            "side":        side.value.upper(),
+            "type":        "LIMIT",
+            "timeInForce": "GTC",
+            "quantity":    self._round_step(symbol, quantity),
+            "price":       str(price),
+        }
+        try:
+            resp = await self._request("POST", "/api/v1/order", params=params, signed=True)
+            logger.info(f"[{symbol}] Limit order placed: {resp}")
+            return resp
+        except Exception as e:
+            logger.error(f"[{symbol}] place_limit_order error: {e}")
 
-        # Register this feed with the shared manager (WebSocket will start buffering)
-        aster_spot_ob_client_manager.register_feed(self)
+    async def place_market_order(
+        self,
+        symbol: str,
+        side: Side,
+        quantity: float,
+        use_quote_order_qty: bool = False,
+    ):
+        """Place a market order via POST /api/v1/order."""
+        if not self.order_health_check(symbol, side, quantity, use_quote_order_qty):
+            logger.error(f"[{symbol}] Market order health check failed.")
+            return
 
-        # Start the shared manager if not already running
-        if not aster_spot_ob_client_manager._running:
-            await aster_spot_ob_client_manager.start()
-            
-            # Start the multiplex feed runner in background (WebSocket reader/workers)
-            asyncio.create_task(aster_spot_ob_client_manager.run_multiplex_feeds())
+        info        = self._token_infos.get(symbol, {})
+        base_asset  = info.get("base_asset", "")
+        quote_asset = info.get("quote_asset", "")
+        price       = self.last_price(symbol) or 0.0
 
-        # Give WebSocket a moment to start buffering events
-        await asyncio.sleep(0.1)
-        
-        # NOW fetch the snapshot while events are being buffered
-        await self.get_initial_snapshot()
+        params: dict = {
+            "symbol": symbol,
+            "side":   side.value.upper(),
+            "type":   "MARKET",
+        }
 
-        # Keep the feed alive
-        while True:
-            await asyncio.sleep(1)
+        if not use_quote_order_qty:
+            qty = self._round_step(symbol, abs(quantity))
+            params["quantity"] = qty
+            logger.info(
+                f"[{symbol}] Market {'BUY' if side == Side.BUY else 'SELL'} "
+                f"qty={qty} {base_asset} (~{qty * price:.2f} {quote_asset})"
+            )
+        else:
+            qty = round(abs(quantity), 2)
+            params["quoteOrderQty"] = qty
+            logger.info(
+                f"[{symbol}] Market {'BUY' if side == Side.BUY else 'SELL'} "
+                f"quoteQty={qty:.2f} {quote_asset}"
+            )
+
+        try:
+            resp = await self._request("POST", "/api/v1/order", params=params, signed=True)
+
+            avg_price, total_comm = self._average_fill_price(resp)
+            total_quote_qty  = float(resp.get("cummulativeQuoteQty", 0))
+            total_base_qty   = total_quote_qty / avg_price if avg_price else 0.0
+            order_id         = int(resp.get("orderId", 0))
+            status           = str(resp.get("status", "FILLED"))
+            side_str         = str(resp.get("side", side.value.upper()))
+            comm_asset       = (resp.get("fills") or [{}])[0].get("commissionAsset", quote_asset)
+
+            logger.success(
+                f"[{symbol}] Filled: {side_str} {total_base_qty:.6f} @ {avg_price:.6f} "
+                f"comm={total_comm} {comm_asset}"
+            )
+            asyncio.create_task(self._record_trade(
+                base_asset            = base_asset,
+                quote_asset           = quote_asset,
+                base_amount_executed  = total_base_qty,
+                quote_amount_executed = total_quote_qty,
+                order_type            = OrderType.MARKET,
+                price                 = avg_price,
+                commission            = total_comm,
+                order_id              = order_id,
+                status                = status,
+                side_str              = side_str,
+                comm_asset            = comm_asset,
+            ))
+            return resp
+
+        except Exception as e:
+            logger.error(f"[{symbol}] place_market_order error: {e}")
+
+    async def cancel_order(self, symbol: str, order_id: str):
+        """Cancel an active order via DELETE /api/v1/order."""
+        try:
+            resp = await self._request(
+                "DELETE", "/api/v1/order",
+                params={"symbol": symbol, "orderId": order_id},
+                signed=True,
+            )
+            logger.info(f"[{symbol}] Order {order_id} cancelled: {resp}")
+        except Exception as e:
+            logger.error(f"[{symbol}] cancel_order error: {e}")
+
+    async def get_open_orders(self, symbol: str):
+        """Refresh open orders for a specific symbol from GET /api/v1/openOrders."""
+        try:
+            orders = await self._request(
+                "GET", "/api/v1/openOrders",
+                params={"symbol": symbol},
+                signed=True,
+            )
+            logger.info(f"[{symbol}] Open orders: {len(orders)}")
+            return orders
+        except Exception as e:
+            logger.error(f"[{symbol}] get_open_orders error: {e}")
+
+    async def get_all_open_orders(self):
+        """Refresh open orders for all symbols from GET /api/v1/openOrders (no symbol filter)."""
+        try:
+            all_orders = await self._request("GET", "/api/v1/openOrders", signed=True)
+        except Exception as e:
+            logger.error(f"get_all_open_orders error: {e}")
+            return
+
+        self._open_orders.clear()
+        for o in all_orders:
+            symbol      = o.get("symbol")
+            order_id    = str(o.get("orderId"))
+            updated_time = o.get("updateTime")
+
+            existing = self._open_orders[symbol].get(order_id)
+            if (
+                existing
+                and updated_time
+                and existing.last_updated_timestamp
+                and updated_time < existing.last_updated_timestamp
+            ):
+                continue
+
+            cum_filled_qty = float(o.get("executedQty", 0))
+            cum_quote_qty  = float(o.get("cummulativeQuoteQty", 0))
+            avg_price      = (
+                cum_quote_qty / cum_filled_qty
+            ) if cum_filled_qty > 0 else float(o.get("price", 0))
+
+            order = Order(
+                id          = order_id,
+                symbol      = symbol,
+                side        = Side.BUY if o.get("side") == "BUY" else Side.SELL,
+                order_type  = (
+                    OrderType.MARKET if o.get("type") == "MARKET" else OrderType.LIMIT
+                ),
+                quantity    = float(o.get("origQty", 0)),
+                price       = float(o.get("price", 0)) or None,
+                status      = _BINANCE_STATUS.get(o.get("status", "NEW"), OrderStatus.OPEN),
+                avg_fill_price = avg_price,
+                filled_qty  = cum_filled_qty,
+                timestamp   = datetime.datetime.fromtimestamp(
+                                  o.get("time", 0) / 1000,
+                                  tz=datetime.timezone.utc,
+                              ),
+                venue       = Venue.ASTER,
+            )
+            self._open_orders[symbol][order_id] = order
+
+        logger.info(
+            f"Refreshed open orders: "
+            f"{sum(len(v) for v in self._open_orders.values())} orders "
+            f"across {len(self._open_orders)} symbols"
+        )
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _round_step(self, symbol: str, qty: float) -> float:
+        """Round quantity down to the exchange's step size."""
+        step = self._token_infos.get(symbol, {}).get("step_size", 0.0001)
+        if step <= 0:
+            return qty
+        precision = max(0, round(-math.log10(step)))
+        return round(math.floor(qty / step) * step, precision)
+
+    @staticmethod
+    def _average_fill_price(resp: dict):
+        """
+        Compute VWAP from a market order fill response.
+        Falls back to cummulativeQuoteQty / executedQty if fills list is absent.
+        """
+        fills = resp.get("fills", [])
+        if fills:
+            total_qty       = sum(float(f["qty"]) for f in fills)
+            total_notional  = sum(float(f["qty"]) * float(f["price"]) for f in fills)
+            total_comm      = sum(float(f["commission"]) for f in fills)
+            avg             = total_notional / total_qty if total_qty else 0.0
+            return avg, total_comm
+
+        # Fallback for exchanges that omit fills
+        exec_qty   = float(resp.get("executedQty", 0))
+        quote_qty  = float(resp.get("cummulativeQuoteQty", 0))
+        avg        = quote_qty / exec_qty if exec_qty else 0.0
+        return avg, 0.0
+
+    async def _record_trade(
+        self,
+        base_asset: str,
+        quote_asset: str,
+        base_amount_executed: float,
+        quote_amount_executed: float,
+        order_type: OrderType,
+        price: float,
+        commission: float,
+        order_id: int,
+        status: str,
+        side_str: str,
+        comm_asset: str,
+    ):
+        """Record a completed trade to the database."""
+        ts = datetime.datetime.now(self._utc8)
+        try:
+            CexTrade.create(
+                id                     = ts.strftime("%Y-%m-%d_%H-%M-%S") + "_aster_" + self.strategy_name,
+                datetime               = ts,
+                strategy_id            = self.strategy_id,
+                strategy_name          = self.strategy_name,
+                venue                  = Venue.ASTER,
+                asset_type             = AssetType.SPOT,
+                symbol                 = base_asset + quote_asset,
+                side                   = Side.BUY if side_str.upper() == "BUY" else Side.SELL,
+                base_amount            = base_amount_executed,
+                quote_amount           = quote_amount_executed,
+                price                  = price,
+                commission_asset       = comm_asset,
+                total_commission       = commission,
+                total_commission_quote = (
+                    commission * price
+                    if comm_asset.upper() not in self._STABLECOINS
+                    else commission
+                ),
+                order_id    = str(order_id),
+                status      = _BINANCE_STATUS.get(status, OrderStatus.OPEN),
+                order_side  = _BINANCE_SIDE.get(side_str.upper(), Side.BUY),
+                order_type  = order_type,
+            )
+            logger.info(f"Trade recorded at {ts.strftime('%Y-%m-%d_%H-%M-%S')}")
+        except Exception as e:
+            logger.error(f"_record_trade DB error: {e}")
+
+    # ── Run / Cleanup ─────────────────────────────────────────────────────────
+
+    async def run(self):
+        """
+        Initialise the exchange client and start background monitoring tasks.
+        Data feeds are NOT started here — pass them to your ThreadPoolExecutor separately.
+        """
+        await self.initialize()
+        asyncio.create_task(self.monitor_balances())
+        asyncio.create_task(self.monitor_open_orders())
+        asyncio.create_task(self.print_snapshot())
+        await asyncio.sleep(0.5)
+        logger.info("AsterSpotExchange running.")
+
+    async def cleanup(self):
+        """
+        Stop data managers and close the HTTP session.
+        Call this before shutting down.
+        """
+        if self.kline_manager:
+            await self.kline_manager.stop()
+        if self.ob_manager:
+            await self.ob_manager.stop()
+        if self.user_data_manager:
+            await self.user_data_manager.stop()
+
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
+
+        logger.info("AsterSpotExchange cleanup completed.")

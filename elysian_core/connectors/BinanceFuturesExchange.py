@@ -1,682 +1,120 @@
 import asyncio
 import collections
 import datetime
-import hashlib
-import hmac
-import math
-import statistics
-import time
-from datetime import datetime as dt
-from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode
+import argparse
+from typing import List, Optional
 
 import pylru
-import requests
-from binance import AsyncClient, BinanceSocketManager
+from binance import AsyncClient
 from binance.exceptions import BinanceAPIException
 from binance.helpers import round_step_size
 
-from elysian_core.connectors.base import AbstractDataFeed
-from elysian_core.core.enums import OrderStatus, Side, TradeType, _BINANCE_SIDE, _BINANCE_STATUS, AssetType, Venue
-from elysian_core.core.market_data import Kline, OrderBook, BinanceOrderBook
-from elysian_core.db.database import DATABASE
+from elysian_core.connectors.base import FuturesExchangeConnector
+from elysian_core.connectors.BinanceFuturesDataConnectors import (
+    BinanceFuturesKlineClientManager,
+    BinanceFuturesOrderBookClientManager,
+    BinanceFuturesUserDataClientManager,
+)
+from elysian_core.core.enums import (
+    OrderStatus, Side, OrderType, AssetType, Venue,
+    _BINANCE_SIDE, _BINANCE_STATUS,
+)
+from elysian_core.core.order import Order
 from elysian_core.db.models import CexTrade
 import elysian_core.utils.logger as log
 
-import argparse
 
 logger = log.setup_custom_logger("root")
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Shared Client Managers
-# ──────────────────────────────────────────────────────────────────────────────
-
-class BinanceFuturesKlineClientManager:
-    """Shared AsyncClient for multiplex futures kline streams with queue-based processing."""
-
-    def __init__(self):
-        self._client: Optional[AsyncClient] = None
-        self._manager: Optional[BinanceSocketManager] = None
-        self._socket: Optional[Any] = None
-        self._queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
-        self._active_feeds: Dict[str, 'BinanceFuturesKlineFeed'] = {}
-        self._running = False   
-        self._reader_task: Optional[asyncio.Task] = None
-        self._worker_tasks: List[asyncio.Task] = []
-
-
-    async def _create_client(self, retries: int = 5) -> AsyncClient:
-        for i in range(retries):
-            try:
-                # Pre-resolve DNS to avoid async DNS issues
-                loop = asyncio.get_event_loop()
-                await loop.getaddrinfo("fapi.binance.com", 443)
-                logger.debug("BinanceFuturesKlineClientManager: DNS pre-resolved successfully")
-
-                return await AsyncClient.create()
-            except (TimeoutError, BinanceAPIException) as e:
-                logger.warning(f"BinanceFuturesKlineClientManager: Client creation attempt {i+1}/{retries} failed: {e}")
-                if i == retries - 1:
-                    raise
-                await asyncio.sleep(2 ** i)
-
-
-    async def start(self):
-        if self._running:
-            return
-
-        self._client = await self._create_client()
-        self._manager = BinanceSocketManager(self._client, max_queue_size=10000)
-        self._running = True
-        logger.info("BinanceFuturesKlineClientManager: Started shared futures kline client")
-        
-
-    async def stop(self):
-        if not self._running:
-            return
-
-        self._running = False
-
-        # Cancel reader and worker tasks
-        if self._reader_task and not self._reader_task.done():
-            self._reader_task.cancel()
-            try:
-                await self._reader_task
-            except asyncio.CancelledError:
-                pass
-
-        for task in self._worker_tasks:
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-
-        # Close socket and client
-        if self._socket:
-            await self._socket.__aexit__(None, None, None)
-            self._socket = None
-
-        if self._client:
-            await self._client.close_connection()
-            self._client = None
-
-        logger.info("BinanceFuturesKlineClientManager: Stopped shared futures kline client")
-
-    def register_feed(self, feed: 'BinanceFuturesKlineFeed'):
-        self._active_feeds[feed._name] = feed
-
-    def unregister_feed(self, symbol: str):
-        self._active_feeds.pop(symbol, None)
-
-    async def _reader_coroutine(self):
-        """Network reader: only reads messages from multiplex socket."""
-        if not self._active_feeds:
-            logger.warning("BinanceFuturesKlineClientManager: No feeds registered for reader")
-            return
-
-        # Create multiplex socket for all symbols (futures streams)
-        streams = [f"{symbol.lower()}@kline_1m" for symbol in self._active_feeds.keys()]
-        self._socket = self._manager.multiplex_socket(streams)
-
-        reconnect_delay = 1
-        while self._running:
-            try:
-                async with self._socket:
-                    logger.info(f"BinanceFuturesKlineClientManager: Multiplex socket opened for {len(streams)} streams")
-                    reconnect_delay = 1  # Reset delay on successful connection
-
-                    while self._running:
-                        try:
-                            msg = await self._socket.recv()
-                            await self._queue.put(msg)
-                        except Exception as e:
-                            logger.error(f"BinanceFuturesKlineClientManager: Error in reader: {e}")
-                            await asyncio.sleep(0.1)
-
-            except Exception as e:
-                logger.error(f"BinanceFuturesKlineClientManager: Socket connection error: {e}", exc_info=False)
-
-            if self._running:
-                logger.warning(f"BinanceFuturesKlineClientManager: Reconnecting in {reconnect_delay}s...")
-                await asyncio.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 2, 60)
-
-    async def _worker_coroutine(self, worker_id: int):
-        """Worker coroutine: processes messages from queue."""
-        logger.debug(f"BinanceFuturesKlineClientManager: Worker {worker_id} started")
-
-        while self._running:
-            try:
-                msg = await self._queue.get()
-
-                stream = msg.get("stream", "")
-                data = msg.get("data", {})
-
-                # Extract symbol from stream name (e.g., "ethusdt@kline_1m" -> "ETHUSDT")
-                if "@kline" in stream:
-                    symbol = stream.split("@")[0].upper()
-                    feed = self._active_feeds.get(symbol)
-                    if feed:
-                        kline = feed._process_kline_event(data)
-                        if kline is not None:
-                            feed._kline = kline
-                            feed._historical.append(kline.close)
-
-                            if len(feed._historical) == 60:
-                                returns = [
-                                    (feed._historical[i] - feed._historical[i - 1]) / feed._historical[i - 1]
-                                    for i in range(1, len(feed._historical))
-                                ]
-                                feed._vol = statistics.stdev(returns) * math.sqrt(12)
-                                logger.info(f"[{symbol}] Futures Volatility: {feed._vol * 1e4:.2f} bps (60-candle window)")
-
-                self._queue.task_done()
-
-            except Exception as e:
-                logger.error(f"BinanceFuturesKlineClientManager: Worker {worker_id} error: {e}")
-                await asyncio.sleep(0.1)
-
-        logger.debug(f"BinanceFuturesKlineClientManager: Worker {worker_id} stopped")
-
-    async def run_multiplex_feeds(self):
-        """Run multiplex socket with reader and worker pool."""
-        if not self._active_feeds:
-            logger.warning("BinanceFuturesKlineClientManager: No feeds registered")
-            return
-
-        # Start reader coroutine
-        self._reader_task = asyncio.create_task(self._reader_coroutine())
-
-        # Start worker pool (4 workers for parallel processing)
-        num_workers = min(8, len(self._active_feeds))
-        self._worker_tasks = [
-            asyncio.create_task(self._worker_coroutine(i))
-            for i in range(num_workers)
-        ]
-
-        logger.info(f"BinanceFuturesKlineClientManager: Started with {num_workers} workers")
-
-        # Wait for reader to complete (it runs until stopped)
-        await self._reader_task
-
-
-class BinanceFuturesOrderBookClientManager:
-    """Shared AsyncClient for multiplex futures orderbook streams with queue-based processing."""
-
-    def __init__(self):
-        self._client: Optional[AsyncClient] = None
-        self._manager: Optional[BinanceSocketManager] = None
-        self._socket: Optional[Any] = None
-        self._queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
-        self._active_feeds: Dict[str, 'BinanceFuturesOrderBookFeed'] = {}
-        self._running = False
-        self._reader_task: Optional[asyncio.Task] = None
-        self._worker_tasks: List[asyncio.Task] = []
-
-    async def _create_client(self, retries: int = 5) -> AsyncClient:
-        for i in range(retries):
-            try:
-                # Pre-resolve DNS to avoid async DNS issues
-                loop = asyncio.get_event_loop()
-                await loop.getaddrinfo("fapi.binance.com", 443)
-                logger.debug("BinanceFuturesOrderBookClientManager: DNS pre-resolved successfully")
-
-                return await AsyncClient.create()
-            except (TimeoutError, BinanceAPIException) as e:
-                logger.warning(f"BinanceFuturesOrderBookClientManager: Client creation attempt {i+1}/{retries} failed: {e}")
-                if i == retries - 1:
-                    raise
-                await asyncio.sleep(2 ** i)
-
-    async def start(self):
-        if self._running:
-            return
-
-        self._client = await self._create_client()
-        self._manager = BinanceSocketManager(self._client, max_queue_size=10000)
-        self._running = True
-        logger.info("BinanceFuturesOrderBookClientManager: Started shared futures orderbook client")
-
-    async def stop(self):
-        if not self._running:
-            return
-
-        self._running = False
-
-        # Cancel reader and worker tasks
-        if self._reader_task and not self._reader_task.done():
-            self._reader_task.cancel()
-            try:
-                await self._reader_task
-            except asyncio.CancelledError:
-                pass
-
-        for task in self._worker_tasks:
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-
-        # Close socket and client
-        if self._socket:
-            await self._socket.__aexit__(None, None, None)
-            self._socket = None
-
-        if self._client:
-            await self._client.close_connection()
-            self._client = None
-
-        logger.info("BinanceFuturesOrderBookClientManager: Stopped shared futures orderbook client")
-
-    def register_feed(self, feed: 'BinanceFuturesOrderBookFeed'):
-        self._active_feeds[feed._name] = feed
-
-    def unregister_feed(self, symbol: str):
-        self._active_feeds.pop(symbol, None)
-
-    async def _reader_coroutine(self):
-        """Network reader: only reads messages from multiplex socket."""
-        if not self._active_feeds:
-            logger.warning("BinanceFuturesOrderBookClientManager: No feeds registered for reader")
-            return
-
-        # Create multiplex socket for all symbols (futures depth streams)
-        streams = [f"{symbol.lower()}@depth@100ms" for symbol in self._active_feeds.keys()]
-        self._socket = self._manager.futures_multiplex_socket(streams)
-
-        reconnect_delay = 1
-        while self._running:
-            try:
-                async with self._socket:
-                    logger.info(f"BinanceFuturesOrderBookClientManager: Multiplex socket opened for {len(streams)} streams")
-                    reconnect_delay = 1  # Reset delay on successful connection
-
-                    while self._running:
-                        try:
-                            msg = await self._socket.recv()
-                            await self._queue.put(msg)
-                        except Exception as e:
-                            logger.error(f"BinanceFuturesOrderBookClientManager: Error in reader: {e}")
-                            await asyncio.sleep(0.1)
-
-            except Exception as e:
-                logger.error(f"BinanceFuturesOrderBookClientManager: Socket connection error: {e}", exc_info=False)
-
-            if self._running:
-                logger.warning(f"BinanceFuturesOrderBookClientManager: Reconnecting in {reconnect_delay}s...")
-                await asyncio.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 2, 60)
-
-    async def _worker_coroutine(self, worker_id: int):
-        """Worker coroutine: processes messages from queue."""
-        logger.debug(f"BinanceFuturesOrderBookClientManager: Worker {worker_id} started")
-
-        while self._running:
-            try:
-                msg = await self._queue.get()
-                stream = msg.get("stream", "")
-                data = msg.get("data", {})
-
-                # Extract symbol from stream name (e.g., "ethusdt@depth20@100ms" -> "ETHUSDT")
-                if "@depth" in stream:
-                    symbol = stream.split("@")[0].upper()
-                    feed = self._active_feeds.get(symbol)
-                    if feed:
-                        feed._data = await feed._process_depth_event(data)
-
-                        if feed.save_data:
-                            asyncio.create_task(feed._append_to_df(feed._data))
-
-                self._queue.task_done()
-
-            except Exception as e:
-                logger.error(f"BinanceFuturesOrderBookClientManager: Worker {worker_id} error: {e}")
-                await asyncio.sleep(0.1)
-
-        logger.debug(f"BinanceFuturesOrderBookClientManager: Worker {worker_id} stopped")
-
-    async def run_multiplex_feeds(self):
-        """Run multiplex socket with reader and worker pool."""
-        if not self._active_feeds:
-            logger.warning("BinanceFuturesOrderBookClientManager: No feeds registered")
-            return
-
-        # Start reader coroutine
-        self._reader_task = asyncio.create_task(self._reader_coroutine())
-
-        # Start worker pool (4 workers for parallel processing)
-        num_workers = min(8, len(self._active_feeds))
-        self._worker_tasks = [
-            asyncio.create_task(self._worker_coroutine(i))
-            for i in range(num_workers)
-        ]
-
-        logger.info(f"BinanceFuturesOrderBookClientManager: Started with {num_workers} workers")
-
-        # Wait for reader to complete (it runs until stopped)
-        await self._reader_task
-
-
-# Global client managers
-binance_futures_kline_client_manager = BinanceFuturesKlineClientManager()
-binance_futures_ob_client_manager = BinanceFuturesOrderBookClientManager()
-
-
-class BinanceFuturesKlineFeed(AbstractDataFeed):
-    """
-    Real-time closed kline (candle) feed for a single Binance futures symbol.
-    Produces Kline objects and maintains a 60-candle rolling close-price window
-    for realised volatility.
-
-    Usage:
-        feed = BinanceFuturesKlineFeed()
-        feed.create_new(asset="ETHUSDT", interval="1m")
-        await feed()
-    """
-
-    def __init__(self, save_data: bool = False, file_dir: Optional[str] = None):
-        super().__init__(save_data=save_data, file_dir=file_dir)
-        self._kline: Optional[Kline] = None   # latest closed kline
-
-    def create_new(self, asset: str, interval: str = "1m"):
-        self._name = asset
-        self._interval = interval
-
-    @property
-    def latest_kline(self) -> Optional[Kline]:
-        return self._kline
-
-    @property
-    def latest_close(self) -> Optional[float]:
-        return self._historical[-1] if self._historical else None
-
-    # rolling vol from close prices — override base which uses mid-price
-    async def update_current_stats(self):
-        pass  # klines update _historical inline on each closed candle
-
-    def _process_kline_event(self, raw: dict) -> Optional[Kline]:
-        k = raw.get("k", {})
-        if not k.get("x"):         # only process closed candles
-            return None
-
-        kline = Kline(
-            ticker=k["s"],
-            interval=k["i"],
-            start_time=dt.fromtimestamp(k["t"] / 1000),
-            end_time=dt.fromtimestamp(k["T"] / 1000),
-            open=float(k["o"]),
-            high=float(k["h"]),
-            low=float(k["l"]),
-            close=float(k["c"]),
-            volume=float(k["v"]),
-        )
-        #logger.info(f"[{kline.ticker}] Futures Closed kline: {kline}")
-        return kline
-
-    async def __call__(self):
-        """Register with shared client manager and wait for multiplex events."""
-        global binance_futures_kline_client_manager
-
-        # Register this feed with the shared manager
-        binance_futures_kline_client_manager.register_feed(self)
-
-        # Start the shared manager if not already running
-        if not binance_futures_kline_client_manager._running:
-            await binance_futures_kline_client_manager.start()
-            # Start the multiplex feed runner in background
-            asyncio.create_task(binance_futures_kline_client_manager.run_multiplex_feeds())
-
-        # Keep the feed alive
-        while True:
-            await asyncio.sleep(1)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# BinanceFuturesOrderBookFeed
-# ──────────────────────────────────────────────────────────────────────────────
-
-class BinanceFuturesOrderBookFeed(AbstractDataFeed):
-    """
-    Real-time depth (order book) feed for a single Binance futures symbol.
-    Produces OrderBook snapshots updated at 100ms intervals.
-
-    Usage:
-        feed = BinanceFuturesOrderBookFeed()
-        feed.create_new(asset="ETHUSDT")
-        await feed()
-    """
-
-    def __init__(self, save_data: bool = False, file_dir: Optional[str] = None):
-        super().__init__(save_data=save_data, file_dir=file_dir)
-        
-        # Binance Futures Specific Parameters
-        self.snapshot_ready: bool = False
-        self.event_buffer: List[dict] = []  # Buffer events while waiting for snapshot
-        self.first_update_processed: bool = False  # Track if we've synced with snapshot
-
-    def create_new(self, asset: str, interval: str = "100ms"):
-        self._name = asset
-        self._interval = interval
-
-    def _fetch_rest_snapshot(self, limit: int = 100) -> dict:
-        resp = requests.get(
-            "https://fapi.binance.com/fapi/v1/depth",
-            params={"symbol": self._name, "limit": min(limit, 1000)},
-        )
-        resp.raise_for_status()
-        return resp.json()
-
-    async def get_initial_snapshot(self):
-        """Fetch snapshot and process any buffered events that cover it."""
-        raw = self._fetch_rest_snapshot(100)
-        ts = int(time.time() * 1000)
-        bids = [[float(b[0]), float(b[1])] for b in raw["bids"]]
-        asks = [[float(a[0]), float(a[1])] for a in raw["asks"]]
-        self._data = BinanceOrderBook.from_lists(
-            last_update_id=raw["lastUpdateId"],
-            last_timestamp=ts,
-            ticker=self._name,
-            interval=self._interval,
-            bid_levels=bids,
-            ask_levels=asks,
-        )
-        self.snapshot_ready = True
-        self.first_update_processed = False  # Reset for new snapshot sync
-        logger.info(f"[{self._name}] Futures OB snapshot id={raw['lastUpdateId']}")
-        
-        # Process any buffered events now that snapshot is ready
-        if self.event_buffer:
-            logger.info(f"[{self._name}] Processing {len(self.event_buffer)} buffered depth events")
-            await self._process_buffered_events()
-            logger.info(f"[{self._name}] Finished processing buffered events. Buffer cleared.")
-            
-            
-
-    async def _process_buffered_events(self):
-        """Process buffered events after snapshot is ready."""
-        buffered_events = self.event_buffer[:]
-        self.event_buffer.clear()
-        
-        for buffered_event in buffered_events:
-
-            # Skip events that are too old (u < lastUpdateId)
-            if buffered_event['u'] < self._data.last_update_id:
-                logger.debug(f"[{self._name}] Skipping old buffered event u={buffered_event['u']}")
-                continue
-            
-            # Find first event that covers the snapshot
-            if buffered_event['U'] <= self._data.last_update_id and buffered_event['u'] == self._data.last_update_id:
-                logger.info(f"[{self._name}] Found sync point: buffered event u={buffered_event['u']} covers snapshot id={self._data.last_update_id}")
-                await self._apply_depth_update(buffered_event)
-                self.first_update_processed = True
-
-            elif self.first_update_processed and buffered_event['U'] <= self._data.last_update_id + 1:
-                # This event is in sequence after the snapshot - apply it
-                #logger.info(f"[{self._name}] Applying buffered event u={buffered_event['u']} after snapshot id={self._data.last_update_id}")
-                await self._apply_depth_update(buffered_event)
-            
-            elif buffered_event['U'] > self._data.last_update_id:
-                # This event is ahead of snapshot with gap - re-fetch snapshot
-                logger.warning(f"[{self._name}] Gap detected: buffered event U={buffered_event['U']} > snapshot id={self._data.last_update_id}")
-                self.snapshot_ready = False
-                asyncio.create_task(self.get_initial_snapshot())
-                return
-
-            
-    
-    async def _process_depth_event(self, event: dict) -> OrderBook:
-        """Process depth updates following Binance Futures API spec."""
-        
-        #logger.info(f'Received depth event: U={event["U"]} u={event["u"]} pu={event["pu"]} bids={len(event.get("b", []))} asks={len(event.get("a", []))}')
-        # Buffer events while snapshot is being fetched
-        if not self.snapshot_ready:
-            self.event_buffer.append(event)
-            logger.warning(f"[{self._name}] Buffering depth event (snapshot not ready). Buffer size: {len(self.event_buffer)}")
-            return self._data if self._data else None
-        
-        # Validate U and u according to Binance spec
-        elif event['pu'] < self._data.last_update_id:
-            #logger.warning(f"[{self._name}] Skipping old event pu={event['pu']} < last_update_id={self._data.last_update_id}")
-            return self._data
-        
-        
-        elif event['pu'] != self._data.last_update_id:
-            logger.error(f"[{self._name}] Gap detected: event pu={event['pu']} != last_update_id={self._data.last_update_id}. Re-fetching snapshot...")
-            self.snapshot_ready = False
-            asyncio.create_task(self.get_initial_snapshot())
-            raise ValueError("Gap in event sequence")
-        
-        else:
-            await self._apply_depth_update(event)
-            
-        return self._data
-    
-    
-    
-    async def _apply_depth_update(self, event: dict):
-        """Apply depth update to order book."""
-        ts = int(time.time() * 1000)
-        await self._data.apply_both_updates(ts, event['u'], 
-                                            bid_levels=event.get("b", []), ask_levels=event.get("a", []))
-        logger.success(f"[{self._name}] Futures OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
-
-
-    async def __call__(self):
-        """Register with shared client manager and wait for multiplex events."""
-        global binance_futures_ob_client_manager
-
-        # Register this feed with the shared manager (WebSocket will start buffering)
-        binance_futures_ob_client_manager.register_feed(self)
-
-        # Start the shared manager if not already running
-        if not binance_futures_ob_client_manager._running:
-            await binance_futures_ob_client_manager.start()
-
-            # Start the multiplex feed runner in background (WebSocket reader/workers)
-            asyncio.create_task(binance_futures_ob_client_manager.run_multiplex_feeds())
-
-        # Give WebSocket a moment to start buffering events
-        await asyncio.sleep(0.1)
-        
-        # NOW fetch the snapshot while events are being buffered
-        await self.get_initial_snapshot()
-
-        # Keep the feed alive
-        while True:
-            await asyncio.sleep(1)
+_STABLECOINS = frozenset({"USDC", "USDT", "BUSD"})
+
+# Map raw Binance futures order type strings → OrderType enum
+_BINANCE_ORDER_TYPE = {
+    "LIMIT": OrderType.LIMIT,
+    "MARKET": OrderType.MARKET,
+    "STOP_MARKET": OrderType.STOP_MARKET,
+    "TAKE_PROFIT_MARKET": OrderType.TAKE_PROFIT_MARKET,
+    "TRAILING_STOP_MARKET": OrderType.TRAILING_STOP_MARKET,
+}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # BinanceFuturesExchange
 # ──────────────────────────────────────────────────────────────────────────────
 
-class BinanceFuturesExchange:
+class BinanceFuturesExchange(FuturesExchangeConnector):
     """
-    Authenticated Binance futures exchange client for multiple symbols.
+    Authenticated Binance USDS-M futures exchange client for multiple symbols.
 
     Manages:
-      - Per-symbol BinanceFuturesKlineFeed and BinanceFuturesOrderBookFeed
-      - Account balances and positions (polled every second)
-      - Leverage settings per symbol
-      - Open orders registry
-      - Market and limit order placement / cancellation
-      - Futures-specific order types (STOP, TAKE_PROFIT, etc.)
-      - Position management and liquidation monitoring
+      - Account balances and positions (via polling + user data stream)
+      - Per-symbol leverage and margin type
+      - Open orders registry using Order dataclass
+      - Market, limit, and stop order placement / cancellation
+      - Position management (close, adjust leverage)
+      - Real-time order updates via futures user data stream
 
     Usage:
         exchange = BinanceFuturesExchange(
+            args=args,
             api_key="...", api_secret="...",
             symbols=["ETHUSDT", "BTCUSDT"],
         )
-        await exchange.run()                          # starts background tasks
-        await exchange.place_market_order(...)
+        await exchange.run()
+        await exchange.place_market_order("ETHUSDT", Side.BUY, 0.1)
     """
 
     def __init__(
         self,
-        api_key: str,
-        api_secret: str,
-        symbols: List[str],
+        args: argparse.Namespace = argparse.Namespace(),
+        api_key: str = "",
+        api_secret: str = "",
+        symbols: Optional[List[str]] = [],
         file_path: Optional[str] = None,
+        kline_manager: Optional[BinanceFuturesKlineClientManager] = None,
+        ob_manager: Optional[BinanceFuturesOrderBookClientManager] = None,
+        user_data_manager: Optional[BinanceFuturesUserDataClientManager] = None,
         default_leverage: int = 1,
-        binance_futures_kline_manager: Optional[BinanceFuturesKlineClientManager] = None,
-        binance_futures_ob_manager: Optional[BinanceFuturesOrderBookClientManager] = None,
-        args: argparse.Namespace = None
     ):
-        self._api_key = api_key
-        self._api_secret = api_secret
-        self._symbols = symbols
-        self._file_path = file_path
-        self._default_leverage = default_leverage
-        self.args = args
+        super().__init__(
+            args=args,
+            api_key=api_key,
+            api_secret=api_secret,
+            symbols=symbols,
+            file_path=file_path,
+            kline_manager=kline_manager,
+            ob_manager=ob_manager,
+            default_leverage=default_leverage,
+        )
 
-        # Per-symbol feeds
-        self.kline_manager = binance_futures_kline_manager or binance_futures_kline_client_manager
-        self.ob_manager = binance_futures_ob_manager or binance_futures_ob_client_manager
+        # User data stream
+        self.user_data_manager = user_data_manager or BinanceFuturesUserDataClientManager(api_key, api_secret)
 
-        # Account state
-        self._balances: Dict[str, float] = {}
-        self._positions: Dict[str, dict] = {}
-        self._open_orders: Dict[str, list] = collections.defaultdict(list)
-        self._token_infos: Dict[str, dict] = {}
-        self._leverages: Dict[str, int] = {}
+        # Strategy identifiers
+        self.strategy_name = getattr(args, 'strategy_name', None)
+        self.strategy_id = getattr(args, 'strategy_id', None)
+
+        # LRU cache for dedup
         self._swap_cache: pylru.lrucache = pylru.lrucache(size=50)
-        self._utc8 = datetime.timezone(datetime.timedelta(hours=8))
-
-    # ── Feed accessors ────────────────────────────────────────────────────────
-    def kline_feed(self, symbol: str) -> BinanceFuturesKlineFeed:
-        return self.kline_manager.get_feed(symbol)
-
-
-    def ob_feed(self, symbol: str) -> BinanceFuturesOrderBookFeed:
-        return self.ob_manager.get_feed(symbol)
-
-
-    def last_price(self, symbol: str) -> Optional[float]:
-        """Best available mid-price: OB mid → last kline close → None."""
-        ob = self._ob_feeds.get(symbol)
-        if ob and ob.data:
-            return ob.data.mid_price
-        kf = self._kline_feeds.get(symbol)
-        if kf and kf.latest_close:
-            return kf.latest_close
-        return None
 
     # ── Initialisation ────────────────────────────────────────────────────────
     async def initialize(self):
-        """Create authenticated futures client and fetch symbol metadata."""
-
+        """Create authenticated futures client, fetch symbol metadata, set leverage, start user data stream."""
         self._client = await AsyncClient.create(self._api_key, self._api_secret, testnet=False)
+
         for sym in self._symbols:
             await self._fetch_symbol_info(sym)
-            await self._set_leverage(sym, self._default_leverage)
-        logger.info("BinanceFuturesExchange initialised.")
+            await self.set_leverage(sym, self._default_leverage)
 
+        # Start user data listener
+        try:
+            self.user_data_manager.register(self._handle_user_data)
+            await self.user_data_manager.start()
+            logger.info("Futures user data stream started")
+        except Exception as e:
+            logger.error(f"Failed to start futures user data stream: {e}")
+
+        logger.info("BinanceFuturesExchange initialised.")
 
     async def _fetch_symbol_info(self, symbol: str):
         info = await self._client.futures_symbol_info(symbol)
@@ -686,12 +124,20 @@ class BinanceFuturesExchange:
         min_notional = float(
             next(f["minNotional"] for f in info["filters"] if f["filterType"] == "MIN_NOTIONAL")
         )
-        self._token_infos[symbol] = {"step_size": step_size, "min_notional": min_notional}
-        logger.info(f"[{symbol}] Futures step={step_size} min_notional={min_notional}")
+        tick_size = float(
+            next(f["tickSize"] for f in info["filters"] if f["filterType"] == "PRICE_FILTER")
+        )
+        self._token_infos[symbol] = {
+            "step_size": step_size,
+            "min_notional": min_notional,
+            "tick_size": tick_size,
+            "base_asset": info.get("baseAsset", ""),
+            "quote_asset": info.get("quoteAsset", ""),
+        }
+        logger.info(f"[{symbol}] Futures step={step_size} min_notional={min_notional} tick={tick_size}")
 
-
-    async def _set_leverage(self, symbol: str, leverage: int):
-        """Set leverage for a symbol."""
+    # ── Leverage & Margin ─────────────────────────────────────────────────────
+    async def set_leverage(self, symbol: str, leverage: int):
         try:
             await self._client.futures_change_leverage(symbol=symbol, leverage=leverage)
             self._leverages[symbol] = leverage
@@ -699,68 +145,255 @@ class BinanceFuturesExchange:
         except Exception as e:
             logger.error(f"[{symbol}] Failed to set leverage: {e}")
 
+    async def set_margin_type(self, symbol: str, margin_type: str):
+        """Set margin type: 'ISOLATED' or 'CROSSED'."""
+        try:
+            await self._client.futures_change_margin_type(symbol=symbol, marginType=margin_type)
+            self._margin_types[symbol] = margin_type
+            logger.info(f"[{symbol}] Margin type set to {margin_type}")
+        except BinanceAPIException as e:
+            # -4046 means margin type already set — not an error
+            if e.code == -4046:
+                self._margin_types[symbol] = margin_type
+                logger.debug(f"[{symbol}] Margin type already {margin_type}")
+            else:
+                logger.error(f"[{symbol}] Failed to set margin type: {e}")
+        except Exception as e:
+            logger.error(f"[{symbol}] Failed to set margin type: {e}")
+
     # ── Account ───────────────────────────────────────────────────────────────
-    async def refresh_account_info(self):
-        """Refresh balances and positions."""
+    async def refresh_balances(self):
+        """Refresh balances and positions from the futures account endpoint."""
         try:
             account = await self._client.futures_account()
-            # Update balances
             for asset in account["assets"]:
                 self._balances[asset["asset"]] = float(asset["walletBalance"])
-
-            # Update positions
-            for position in account["positions"]:
-                symbol = position["symbol"]
-                if float(position["positionAmt"]) != 0:
-                    self._positions[symbol] = {
-                        "amount": float(position["positionAmt"]),
-                        "entry_price": float(position["entryPrice"]),
-                        "unrealized_pnl": float(position["unrealizedProfit"]),
-                        "leverage": int(position["leverage"])
-                    }
-                else:
-                    self._positions.pop(symbol, None)
+            # Also update positions while we have the data
+            self._update_positions_from_account(account)
         except Exception as e:
-            logger.error(f"Failed to refresh account info: {e}")
+            logger.error(f"Failed to refresh futures account: {e}")
 
-    async def monitor_account(self):
-        while True:
-            await self.refresh_account_info()
-            await asyncio.sleep(1)
+    async def refresh_positions(self):
+        """Refresh positions only (uses same endpoint as balances)."""
+        try:
+            account = await self._client.futures_account()
+            self._update_positions_from_account(account)
+        except Exception as e:
+            logger.error(f"Failed to refresh futures positions: {e}")
 
-    def get_balance(self, asset: str) -> float:
-        return self._balances.get(asset, 0.0)
+    def _update_positions_from_account(self, account: dict):
+        """Extract position data from a futures_account() response."""
+        for position in account.get("positions", []):
+            symbol = position["symbol"]
+            amt = float(position["positionAmt"])
+            if amt != 0:
+                self._positions[symbol] = {
+                    "amount": amt,
+                    "entry_price": float(position["entryPrice"]),
+                    "unrealized_pnl": float(position["unrealizedProfit"]),
+                    "leverage": int(position["leverage"]),
+                }
+            else:
+                self._positions.pop(symbol, None)
 
-    def get_position(self, symbol: str) -> Optional[dict]:
-        return self._positions.get(symbol)
+    # ── User Data Stream Handling ─────────────────────────────────────────────
+    def _handle_user_data(self, msg: dict):
+        """Callback invoked by the user-data manager when an event arrives."""
+        et = msg.get("e")
+        if et == "ACCOUNT_UPDATE":
+            self._handle_account_update(msg)
+        elif et == "ORDER_TRADE_UPDATE":
+            self._handle_order_trade_update(msg)
+        elif et == "MARGIN_CALL":
+            logger.warning(f"MARGIN CALL received: {msg}")
+        elif et == "ACCOUNT_CONFIG_UPDATE":
+            self._handle_account_config_update(msg)
 
-    def get_leverage(self, symbol: str) -> int:
-        return self._leverages.get(symbol, self._default_leverage)
+    def _handle_account_update(self, msg: dict):
+        """
+        Handle ACCOUNT_UPDATE events — balance + position changes.
+
+        Structure:
+          msg["a"]["B"] -> list of {"a": asset, "wb": wallet_balance, "cw": cross_wallet_balance}
+          msg["a"]["P"] -> list of {"s": symbol, "pa": position_amt, "ep": entry_price, "up": unrealized_pnl}
+        """
+        account_data = msg.get("a", {})
+
+        # Update balances
+        for bal in account_data.get("B", []):
+            asset = bal.get("a")
+            wallet_balance = float(bal.get("wb", 0))
+            self._balances[asset] = wallet_balance
+
+        # Update positions
+        for pos in account_data.get("P", []):
+            symbol = pos.get("s")
+            amt = float(pos.get("pa", 0))
+            if amt != 0:
+                self._positions[symbol] = {
+                    "amount": amt,
+                    "entry_price": float(pos.get("ep", 0)),
+                    "unrealized_pnl": float(pos.get("up", 0)),
+                    "leverage": self._leverages.get(symbol, self._default_leverage),
+                }
+            else:
+                self._positions.pop(symbol, None)
+
+        logger.info(f"ACCOUNT_UPDATE applied: {len(account_data.get('B', []))} balance(s), {len(account_data.get('P', []))} position(s)")
+
+    def _handle_order_trade_update(self, msg: dict):
+        """
+        Handle ORDER_TRADE_UPDATE events — order status changes and fills.
+
+        Key fields in msg["o"]:
+          s  -> Symbol
+          i  -> Order ID
+          S  -> Side (BUY/SELL)
+          o  -> Order type (LIMIT, MARKET, STOP_MARKET, etc.)
+          X  -> Order status (NEW, PARTIALLY_FILLED, FILLED, CANCELED, etc.)
+          x  -> Execution type
+          q  -> Original quantity
+          p  -> Original price
+          ap -> Average price (cumulative)
+          z  -> Cumulative filled quantity
+          n  -> Commission of this trade
+          N  -> Commission asset
+          rp -> Realized profit of this trade
+        """
+        o = msg.get("o", {})
+        order_id = str(o.get("i"))
+        symbol = o.get("s")
+        exec_type = o.get("x")
+        raw_status = o.get("X")
+
+        internal_status = _BINANCE_STATUS.get(raw_status)
+        if internal_status is None:
+            logger.warning(f"[{symbol}] Unknown futures order status '{raw_status}' for order {order_id}")
+            return
+
+        symbol_orders = self._open_orders.get(symbol, {})
+
+        # ── NEW order arriving for the first time ────────────────────────────
+        if exec_type == "NEW" and order_id not in symbol_orders:
+            side = Side.BUY if o.get("S") == "BUY" else Side.SELL
+            order_type = _BINANCE_ORDER_TYPE.get(o.get("o", "LIMIT"), OrderType.OTHERS)
+
+            order = Order(
+                id=order_id,
+                symbol=symbol,
+                side=side,
+                order_type=order_type,
+                quantity=float(o.get("q", 0)),
+                price=float(o.get("p", 0)) or None,
+                status=internal_status,
+                timestamp=datetime.datetime.fromtimestamp(
+                    msg.get("T", 0) / 1000, tz=datetime.timezone.utc
+                ),
+                venue=Venue.BINANCE,
+                commission=float(o.get("n", 0)),
+                commission_asset=o.get("N"),
+                last_updated_timestamp=int(msg.get("E", 0)),
+            )
+            self._open_orders[symbol][order_id] = order
+            logger.info(f"[{symbol}] New futures order registered: {order}")
+            return
+
+        # ── Update existing order ────────────────────────────────────────────
+        order = symbol_orders.get(order_id)
+        if order is None:
+            logger.warning(f"[{symbol}] ORDER_TRADE_UPDATE for unknown order {order_id} (status={raw_status}), skipping")
+            return
+
+        cum_filled_qty = float(o.get("z", 0))
+        avg_price = float(o.get("ap", 0))
+
+        if cum_filled_qty > order.filled_qty:
+            order.update_fill(cum_filled_qty, avg_price)
+
+        order.commission += float(o.get("n", 0))
+        order.commission_asset = o.get("N") or order.commission_asset
+        order.status = internal_status
+
+        logger.info(f"[{symbol}] Futures order updated: {order}")
+
+        # Remove terminal orders from open-orders registry
+        if not order.is_active:
+            self._open_orders[symbol].pop(order_id, None)
+            logger.info(f"[{symbol}] Futures order {order_id} removed from open orders (status={raw_status})")
+
+    def _handle_account_config_update(self, msg: dict):
+        """Handle ACCOUNT_CONFIG_UPDATE — leverage or multi-asset mode changes."""
+        ac = msg.get("ac", {})
+        if ac:
+            symbol = ac.get("s")
+            leverage = int(ac.get("l", self._default_leverage))
+            self._leverages[symbol] = leverage
+            logger.info(f"[{symbol}] Leverage updated to {leverage}x via stream")
+
+    # ── Order Health Check ────────────────────────────────────────────────────
+    def order_health_check(self, symbol: str, side: Side, quantity: float) -> bool:
+        """Validate minimum notional and approximate balance sufficiency for a futures order."""
+        price = self.last_price(symbol) or 0.0
+        notional = price * abs(quantity)
+        min_notional = self._token_infos.get(symbol, {}).get("min_notional", 0.0)
+
+        if notional < min_notional:
+            logger.error(f"[{symbol}] Estimated notional {notional:.4f} < min {min_notional}")
+            return False
+
+        # Check approximate margin availability (wallet balance in quote)
+        quote_asset = self._token_infos.get(symbol, {}).get("quote_asset", "USDT")
+        leverage = self.get_leverage(symbol)
+        required_margin = notional / leverage
+        available = self._balances.get(quote_asset, 0.0)
+
+        if available < required_margin:
+            logger.error(
+                f"[{symbol}] Insufficient margin for {side.value} {quantity}. "
+                f"Need ~{required_margin:.2f} {quote_asset} (at {leverage}x), have {available:.2f}"
+            )
+            return False
+
+        return True
 
     # ── Orders ────────────────────────────────────────────────────────────────
-
     async def place_limit_order(
-        self, symbol: str, side: Side, quantity: float, price: float,
-        time_in_force: str = "GTC", reduce_only: bool = False
+        self, symbol: str, side: Side, price: float, quantity: float,
+        reduce_only: bool = False, time_in_force: str = "GTC"
     ):
-        """Place a GTC limit order."""
+        """Place a GTC limit order on Binance Futures."""
         try:
-            order = await self._client.futures_create_order(
-                                    symbol=symbol,
-                                    side=side.value.upper(),
-                                    type="LIMIT",
-                                    timeInForce=time_in_force,
-                                    quantity=quantity,
-                                    price=str(price),
-                                    reduceOnly=reduce_only,
-                                )
-            self._open_orders[symbol].append(order)
+            resp = await self._client.futures_create_order(
+                symbol=symbol,
+                side=side.value.upper(),
+                type="LIMIT",
+                timeInForce=time_in_force,
+                quantity=quantity,
+                price=str(price),
+                reduceOnly=reduce_only,
+            )
+
+            order_id = str(resp["orderId"])
+            order = Order(
+                id=order_id,
+                symbol=symbol,
+                side=side,
+                order_type=OrderType.LIMIT,
+                quantity=float(resp.get("origQty", quantity)),
+                price=float(resp.get("price", price)),
+                status=_BINANCE_STATUS.get(resp.get("status", "NEW"), OrderStatus.OPEN),
+                timestamp=datetime.datetime.fromtimestamp(
+                    resp.get("updateTime", 0) / 1000, tz=datetime.timezone.utc
+                ),
+                venue=Venue.BINANCE,
+                last_updated_timestamp=resp.get("updateTime"),
+            )
+            self._open_orders[symbol][order_id] = order
             logger.info(f"Futures limit order placed: {order}")
             return order
-        
+
         except BinanceAPIException as e:
             logger.error(f"[{symbol}] place_limit_order API error: {e}")
-            
         except Exception as e:
             logger.error(f"[{symbol}] place_limit_order error: {e}")
 
@@ -768,9 +401,9 @@ class BinanceFuturesExchange:
         self, symbol: str, side: Side, quantity: float, stop_price: float,
         reduce_only: bool = True
     ):
-        """Place a stop market order."""
+        """Place a stop-market order on Binance Futures."""
         try:
-            order = await self._client.futures_create_order(
+            resp = await self._client.futures_create_order(
                 symbol=symbol,
                 side=side.value.upper(),
                 type="STOP_MARKET",
@@ -778,97 +411,133 @@ class BinanceFuturesExchange:
                 quantity=quantity,
                 reduceOnly=reduce_only,
             )
-            self._open_orders[symbol].append(order)
+
+            order_id = str(resp["orderId"])
+            order = Order(
+                id=order_id,
+                symbol=symbol,
+                side=side,
+                order_type=OrderType.STOP_MARKET,
+                quantity=float(resp.get("origQty", quantity)),
+                price=stop_price,
+                status=_BINANCE_STATUS.get(resp.get("status", "NEW"), OrderStatus.OPEN),
+                timestamp=datetime.datetime.fromtimestamp(
+                    resp.get("updateTime", 0) / 1000, tz=datetime.timezone.utc
+                ),
+                venue=Venue.BINANCE,
+                last_updated_timestamp=resp.get("updateTime"),
+            )
+            self._open_orders[symbol][order_id] = order
             logger.info(f"Futures stop order placed: {order}")
             return order
+
         except BinanceAPIException as e:
             logger.error(f"[{symbol}] place_stop_order API error: {e}")
         except Exception as e:
             logger.error(f"[{symbol}] place_stop_order error: {e}")
 
-
-    async def cancel_order(self, symbol: str, order_id: int):
-        """Cancel an active futures order by id."""
+    async def place_take_profit_order(
+        self, symbol: str, side: Side, quantity: float, stop_price: float,
+        reduce_only: bool = True
+    ):
+        """Place a take-profit market order on Binance Futures."""
         try:
-            result = await self._client.futures_cancel_order(symbol=symbol, orderId=order_id)
-            self._open_orders[symbol] = [
-                o for o in self._open_orders[symbol] if o["orderId"] != order_id
-            ]
-            logger.info(f"[{symbol}] Futures order {order_id} cancelled: {result}")
+            resp = await self._client.futures_create_order(
+                symbol=symbol,
+                side=side.value.upper(),
+                type="TAKE_PROFIT_MARKET",
+                stopPrice=str(stop_price),
+                quantity=quantity,
+                reduceOnly=reduce_only,
+            )
+
+            order_id = str(resp["orderId"])
+            order = Order(
+                id=order_id,
+                symbol=symbol,
+                side=side,
+                order_type=OrderType.TAKE_PROFIT_MARKET,
+                quantity=float(resp.get("origQty", quantity)),
+                price=stop_price,
+                status=_BINANCE_STATUS.get(resp.get("status", "NEW"), OrderStatus.OPEN),
+                timestamp=datetime.datetime.fromtimestamp(
+                    resp.get("updateTime", 0) / 1000, tz=datetime.timezone.utc
+                ),
+                venue=Venue.BINANCE,
+                last_updated_timestamp=resp.get("updateTime"),
+            )
+            self._open_orders[symbol][order_id] = order
+            logger.info(f"Futures take-profit order placed: {order}")
+            return order
+
+        except BinanceAPIException as e:
+            logger.error(f"[{symbol}] place_take_profit_order API error: {e}")
         except Exception as e:
-            logger.error(f"[{symbol}] cancel_order error: {e}")
-
-
-    async def cancel_all_orders(self, symbol: str):
-        orders = list(self._open_orders.get(symbol, []))
-        for order in orders:
-            await self.cancel_order(symbol, order["orderId"])
-
-
-    async def get_open_orders(self):
-        """Refresh open orders for all tracked symbols."""
-        try:
-            for sym in self._symbols:
-                self._open_orders[sym] = await self._client.futures_get_open_orders(symbol=sym)
-            active = {s: o for s, o in self._open_orders.items() if o}
-            if active:
-                logger.info(f"Futures open orders: {active}")
-        except Exception as e:
-            logger.error(f"get_open_orders error: {e}")
-
-    async def monitor_open_orders(self):
-        while True:
-            await self.get_open_orders()
-            await asyncio.sleep(1)
+            logger.error(f"[{symbol}] place_take_profit_order error: {e}")
 
     async def place_market_order(
         self,
-        amount: float,          # positive = long, negative = short
         symbol: str,
-        tx_digest: Optional[str] = None,
+        side: Side,
+        quantity: float,
         reduce_only: bool = False,
     ):
         """
-        Place a futures market order. amount is in base asset.
-        Falls back to simulation if below min notional.
-        """
-        price = self.last_price(symbol) or 0.0
-        notional = price * abs(amount)
-        min_notional = self._token_infos.get(symbol, {}).get("min_notional", 0.0)
+        Place a futures market order.
 
-        if notional < min_notional:
-            logger.warning(f"[{symbol}] Futures notional {notional:.4f} < min {min_notional}. Simulating.")
+        Args:
+            symbol: Trading pair (e.g. "ETHUSDT")
+            side: Side.BUY or Side.SELL
+            quantity: Amount in base asset
+            reduce_only: If True, only reduce an existing position
+        """
+        if not self.order_health_check(symbol, side, quantity):
+            logger.error(f"[{symbol}] Futures market order health check failed. Order not placed.")
             return
+
+        price = self.last_price(symbol) or 0.0
+        base_asset = self._token_infos.get(symbol, {}).get("base_asset", "")
+        quote_asset = self._token_infos.get(symbol, {}).get("quote_asset", "USDT")
 
         try:
             step = self._token_infos.get(symbol, {}).get("step_size", 0.001)
-            qty = round_step_size(abs(amount), step)
-            side = "BUY" if amount > 0 else "SELL"
+            qty = round_step_size(abs(quantity), step)
 
-            logger.info(f"[{symbol}] Futures Market {side} qty={qty} (~{qty * price:.2f} USD)")
+            logger.info(f"[{symbol}] Futures Market {side.value.upper()} qty={qty} (~{qty * price:.2f} {quote_asset})")
 
             resp = await self._client.futures_create_order(
                 symbol=symbol,
-                side=side,
+                side=side.value.upper(),
                 type="MARKET",
                 quantity=qty,
                 reduceOnly=reduce_only,
             )
 
             avg_price, total_comm = self._average_fill_price(resp)
-            exec_qty = float(resp["executedQty"])
+            total_base_quantity = float(resp.get("executedQty", 0))
+            total_quote_quantity = float(resp.get("cumQuote", 0))
             order_id = int(resp["orderId"])
             status = str(resp["status"])
             side_str = str(resp["side"])
-            comm_asset = resp["fills"][0]["commissionAsset"] if resp.get("fills") else "USDT"
+            comm_asset = resp["fills"][0]["commissionAsset"] if resp.get("fills") else quote_asset
 
-            logger.info(
-                f"[{symbol}] Futures Filled: {side_str} {exec_qty} @ {avg_price:.6f} "
-                f"comm={total_comm} {comm_asset} tx={tx_digest}"
+            logger.success(
+                f"[{symbol}] Futures Filled: {side_str} {total_base_quantity} @ {avg_price:.6f} "
+                f"comm={total_comm} {comm_asset}"
             )
+
             asyncio.create_task(self._record_trade(
-                amount, symbol, exec_qty, avg_price,
-                total_comm, order_id, status, side_str, comm_asset,
+                base_asset=base_asset,
+                quote_asset=quote_asset,
+                base_amount_executed=total_base_quantity,
+                quote_amount_executed=total_quote_quantity,
+                order_type=OrderType.MARKET,
+                price=avg_price,
+                commission=total_comm,
+                order_id=order_id,
+                status=status,
+                side_str=side_str,
+                comm_asset=comm_asset,
             ))
 
         except BinanceAPIException as e:
@@ -876,9 +545,9 @@ class BinanceFuturesExchange:
         except Exception as e:
             logger.error(f"[{symbol}] place_market_order error: {e}")
 
-
     @staticmethod
     def _average_fill_price(resp: dict):
+        """Get VWAP from market order fills. Returns (avg_price, total_commission)."""
         fills = resp.get("fills", [])
         if not fills:
             return 0.0, 0.0
@@ -887,23 +556,78 @@ class BinanceFuturesExchange:
         total_comm = sum(float(f["commission"]) for f in fills)
         return total_notional / total_qty, total_comm
 
+    async def cancel_order(self, symbol: str, order_id: str):
+        """Cancel an active futures order by id."""
+        try:
+            result = await self._client.futures_cancel_order(symbol=symbol, orderId=int(order_id))
+            self._open_orders[symbol].pop(order_id, None)
+            logger.info(f"[{symbol}] Futures order {order_id} cancelled: {result}")
+        except Exception as e:
+            logger.error(f"[{symbol}] cancel_order error: {e}")
+
+    async def get_open_orders(self, symbol: str):
+        """Fetch and reconcile open orders for a specific symbol."""
+        try:
+            raw_orders = await self._client.futures_get_open_orders(symbol=symbol)
+
+            # Build new OrderedDict from exchange response
+            refreshed = collections.OrderedDict()
+            for o in raw_orders:
+                order_id = str(o.get("orderId"))
+                updated_time = o.get("updateTime")
+
+                # Keep local version if it's more recent
+                existing = self._open_orders[symbol].get(order_id)
+                if existing and updated_time and existing.last_updated_timestamp and updated_time < existing.last_updated_timestamp:
+                    refreshed[order_id] = existing
+                    continue
+
+                raw_status = o.get("status", "NEW")
+                raw_type = o.get("type", "LIMIT")
+                raw_side = o.get("side", "BUY")
+
+                cum_filled_qty = float(o.get("executedQty", 0))
+                avg_price = float(o.get("avgPrice", 0)) or float(o.get("price", 0))
+
+                order = Order(
+                    id=order_id,
+                    symbol=symbol,
+                    side=Side.BUY if raw_side == "BUY" else Side.SELL,
+                    order_type=_BINANCE_ORDER_TYPE.get(raw_type, OrderType.OTHERS),
+                    quantity=float(o.get("origQty", 0)),
+                    price=float(o.get("price", 0)) or None,
+                    status=_BINANCE_STATUS.get(raw_status, OrderStatus.OPEN),
+                    avg_fill_price=avg_price,
+                    filled_qty=cum_filled_qty,
+                    timestamp=datetime.datetime.fromtimestamp(
+                        o.get("time", 0) / 1000, tz=datetime.timezone.utc
+                    ),
+                    venue=Venue.BINANCE,
+                    last_updated_timestamp=updated_time,
+                )
+                refreshed[order_id] = order
+
+            self._open_orders[symbol] = refreshed
+
+        except Exception as e:
+            logger.error(f"[{symbol}] get_open_orders error: {e}")
 
     # ── Position Management ───────────────────────────────────────────────────
     async def close_position(self, symbol: str):
-        """Close entire position for a symbol."""
+        """Close entire position for a symbol via market order."""
         position = self.get_position(symbol)
         if not position:
             logger.warning(f"[{symbol}] No position to close")
             return
 
         amount = position["amount"]
-        side = "SELL" if amount > 0 else "BUY"
+        close_side = Side.SELL if amount > 0 else Side.BUY
         qty = abs(amount)
 
         try:
             resp = await self._client.futures_create_order(
                 symbol=symbol,
-                side=side,
+                side=close_side.value.upper(),
                 type="MARKET",
                 quantity=qty,
                 reduceOnly=True,
@@ -912,23 +636,19 @@ class BinanceFuturesExchange:
         except Exception as e:
             logger.error(f"[{symbol}] Failed to close position: {e}")
 
-    async def adjust_leverage(self, symbol: str, leverage: int):
-        """Adjust leverage for a symbol."""
-        await self._set_leverage(symbol, leverage)
-
-
-
-    # ── Trade recording ───────────────────────────────────────────────────────
+    # ── Trade Recording ───────────────────────────────────────────────────────
     async def _record_trade(
         self,
-        amount: float,
-        symbol: str,
-        exec_qty: float,
+        base_asset: str,
+        quote_asset: str,
+        base_amount_executed: float,
+        quote_amount_executed: float,
+        order_type: OrderType,
         price: float,
         commission: float,
         order_id: int,
         status: str,
-        side: str,
+        side_str: str,
         comm_asset: str,
     ):
         ts = datetime.datetime.now(self._utc8)
@@ -936,48 +656,51 @@ class BinanceFuturesExchange:
             CexTrade.create(
                 id=ts.strftime("%Y-%m-%d_%H-%M-%S") + "_" + self.args.version_name,
                 datetime=ts,
+                strategy_id=self.strategy_id,
+                strategy_name=self.strategy_name,
                 venue=Venue.BINANCE,
                 asset_type=AssetType.PERPETUAL,
-                symbol=symbol,
-                side=Side.BUY if amount > 0 else Side.SELL,
-                amount=amount,
-                executed_qty=exec_qty,
+                symbol=base_asset + quote_asset,
+                side=Side.BUY if side_str.lower() == "buy" else Side.SELL,
+                base_amount=base_amount_executed,
+                quote_amount=quote_amount_executed,
                 price=price,
                 commission_asset=comm_asset,
                 total_commission=commission,
-                total_commission_quote=commission * price if amount > 0 else commission,
+                total_commission_quote=commission * price if comm_asset.upper() not in _STABLECOINS else commission,
                 order_id=str(order_id),
                 status=_BINANCE_STATUS.get(status, OrderStatus.OPEN),
-                order_side=_BINANCE_SIDE.get(side, Side.BUY),
+                order_side=_BINANCE_SIDE.get(side_str, Side.BUY),
+                order_type=order_type,
             )
             logger.info(f"Futures trade recorded at {ts.strftime('%Y-%m-%d_%H-%M-%S')}")
         except Exception as e:
             logger.error(f"_record_trade DB error: {e}")
-            
 
     # ── Run ───────────────────────────────────────────────────────────────────
     async def run(self):
         """
         Initialise the futures client and start background monitoring tasks.
         Feed streams are NOT started here — call feed.__call__() separately
-        or pass them to your ThreadPoolExecutor.
+        or use the data feed managers in run_strategy.
         """
         await self.initialize()
-        asyncio.create_task(self.monitor_account())
+        asyncio.create_task(self.monitor_balances(interval_secs=10, name="BinanceFutures"))
         asyncio.create_task(self.monitor_open_orders())
+        asyncio.create_task(self.print_snapshot())
         await asyncio.sleep(0.5)   # let first account fetch settle
         logger.info("BinanceFuturesExchange running.")
 
     async def cleanup(self):
-        """
-        Cleanup shared client managers and authenticated client.
-        Call this before shutting down the exchange.
-        """
-        global binance_futures_kline_client_manager, binance_futures_ob_client_manager
+        """Cleanup client managers and authenticated client."""
+        # Stop user data stream
+        await self.user_data_manager.stop()
 
         # Stop shared client managers
-        await binance_futures_kline_client_manager.stop()
-        await binance_futures_ob_client_manager.stop()
+        if self.kline_manager:
+            await self.kline_manager.stop()
+        if self.ob_manager:
+            await self.ob_manager.stop()
 
         # Close authenticated client
         if self._client:

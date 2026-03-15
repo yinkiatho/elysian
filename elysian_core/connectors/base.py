@@ -5,7 +5,7 @@ import statistics
 from abc import ABC, abstractmethod
 from collections import deque
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 import collections
 import datetime
 import pandas as pd
@@ -363,7 +363,7 @@ class SpotExchangeConnector(ABC):
         self.args = args
 
         # Per-symbol feeds
-        self.kline_manager = kline_manager 
+        self.kline_manager = kline_manager
         self.ob_manager = ob_manager
         
         # Account state
@@ -371,7 +371,7 @@ class SpotExchangeConnector(ABC):
         self._open_orders: Dict[str, collections.OrderedDict[str, Order]] = collections.defaultdict(collections.OrderedDict)
         self._token_infos: Dict[str, dict] = {}
         self._utc8 = datetime.timezone(datetime.timedelta(hours=8))
-        
+                
         
     # ── Feed accessors ────────────────────────────────────────────────────────
     def kline_feed(self, symbol: str):
@@ -483,29 +483,68 @@ class SpotExchangeConnector(ABC):
             await asyncio.sleep(poll_interval)
             
             
-    async def print_snapshot(self, poll_interval: int = 60 * 5):
+    async def print_snapshot(self, poll_interval: int = 60 * 2, balance_filter: float = 1e-5):
         """
         Prints out account balances and all open order snapshots
         """
         while True:
             try:
-                logger.info("==================== Account Snapshot =============================")
-                logger.info(f"================== Balances: {self._balances} ====================\n")
+                # ── Filter and format balances ────────────────────────────────
+                filtered = {
+                    asset: bal
+                    for asset, bal in self._balances.items()
+                    if bal >= balance_filter
+                }
+
+                if filtered:
+                    col_w = max(len(a) for a in filtered) + 2
+                    val_w = max(len(f"{v:.8f}") for v in filtered.values()) + 2
+                    divider  = f"║  ├{'─' * col_w}┬{'─' * val_w}┤"
+                    top_rule = f"║  ┌{'─' * col_w}┬{'─' * val_w}┐"
+                    bot_rule = f"║  └{'─' * col_w}┴{'─' * val_w}┘"
+                    header   = f"║  │{'ASSET'.center(col_w)}│{'BALANCE'.center(val_w)}│"
+
+                    balance_lines = [
+                        top_rule,
+                        header,
+                        divider,
+                        *[
+                            f"║  │ {asset:<{col_w - 1}}│ {bal:<{val_w - 1}.8f}│"
+                            for asset, bal in sorted(filtered.items())
+                        ],
+                        bot_rule,
+                        f"║  ({len(self._balances) - len(filtered)} asset(s) below 1e-5 hidden)",
+                    ]
+                else:
+                    balance_lines = ["║  (no balances above 1e-5)"]
+
+                output_str = ""
+                output_str += "╔══════════════════════════════════════════════════╗\n"
+                output_str += "║              ACCOUNT SNAPSHOT                    ║\n"
+                output_str += "╠══════════════════════════════════════════════════╣\n"
+                output_str += "║  BALANCES\n"
+                for line in balance_lines:
+                    output_str += f"{line}\n"
+                output_str += "╠══════════════════════════════════════════════════╣\n"
+
                 counter = 0
                 for symbol, orders in self._open_orders.items():
-                    logger.info(f"Open orders for {symbol}:")
-                    internal_counter = 1
-                    for order_id, order in orders.items():
-                        logger.info(f"{internal_counter}: {order}")
-                        internal_counter += 1
+                    output_str += f"║  ── {symbol} ({len(orders)} order(s))\n"
+                    for _, (order_id, order) in enumerate(orders.items(), start=1):
+                        for line in str(order).splitlines():
+                            output_str += f"║    {line}\n"
+                        output_str += "║\n"
                         counter += 1
+
+                output_str += "╠══════════════════════════════════════════════════╣\n"
+                output_str += f"║  Total Open Orders : {counter}\n"
+                output_str += "╚══════════════════════════════════════════════════╝"
                 
-                logger.info(f'============================ Total Number of Open Orders: {counter} ===============================')
+                print(output_str)
                 await asyncio.sleep(poll_interval)
             except Exception as e:
                 logger.error(f"Snapshot monitoring error: {e}")
                 break
-            
         
     async def cancel_all_orders(self, symbol: str):
         """Cancel all open orders for a given symbol."""
@@ -515,23 +554,238 @@ class SpotExchangeConnector(ABC):
 
 
 class FuturesExchangeConnector(ABC):
-    """Abstract base for futures-exchange connectors.
+    """Abstract base for futures/perpetual-exchange connectors.
 
-    Similar to :class:`SpotExchangeConnector` but may include additional
-    futures-specific configuration (e.g. leverage, contract type).
+    Parallel to :class:`SpotExchangeConnector` but tailored for derivatives:
+      - Positions (long/short) with entry price and unrealised PnL
+      - Per-symbol leverage management
+      - Margin type (ISOLATED / CROSSED)
+      - Futures-specific order types (stop-market, take-profit, etc.)
+
+    Concrete implementations (e.g. BinanceFuturesExchange) should derive
+    from this class.
     """
 
-    def __init__(self, api_key: Optional[str] = None, api_secret: Optional[str] = None, base_url: Optional[str] = None):
-        self.api_key = api_key
-        self.api_secret = api_secret
-        self.base_url = base_url
+    def __init__(self, args: argparse.Namespace,
+                       api_key: str,
+                       api_secret: str,
+                       symbols: List[str],
+                       file_path: Optional[str] = None,
+                       kline_manager: Optional[KlineClientManager] = None,
+                       ob_manager: Optional[OrderBookClientManager] = None,
+                       default_leverage: int = 1):
 
+        # Common state (mirrors SpotExchangeConnector)
+        self._api_key = api_key
+        self._api_secret = api_secret
+        self._symbols = symbols
+        self._file_path = file_path
+        self.args = args
+
+        # Per-symbol feeds
+        self.kline_manager = kline_manager
+        self.ob_manager = ob_manager
+
+        # Account state
+        self._balances: Dict[str, float] = {}
+        self._open_orders: Dict[str, collections.OrderedDict[str, Order]] = collections.defaultdict(collections.OrderedDict)
+        self._token_infos: Dict[str, dict] = {}
+        self._utc8 = datetime.timezone(datetime.timedelta(hours=8))
+
+        # Futures-specific state
+        self._positions: Dict[str, dict] = {}
+        self._leverages: Dict[str, int] = {}
+        self._default_leverage: int = default_leverage
+        self._margin_types: Dict[str, str] = {}   # symbol -> "ISOLATED" | "CROSSED"
+
+    # ── Feed accessors ────────────────────────────────────────────────────────
+    def kline_feed(self, symbol: str):
+        return self.kline_manager.get_feed(symbol)
+
+    def ob_feed(self, symbol: str):
+        return self.ob_manager.get_feed(symbol)
+
+    def last_price(self, symbol: str) -> Optional[float]:
+        """Best available mid-price: OB mid → last kline close → None."""
+        ob = self._ob_feeds.get(symbol)
+        if ob and ob.data:
+            return ob.data.mid_price
+        kf = self._kline_feeds.get(symbol)
+        if kf and kf.latest_close:
+            return kf.latest_close
+        return None
+
+    # ── Initialisation ────────────────────────────────────────────────────────
     @abstractmethod
-    def create_orderbook_feed(self, symbol: str, save_data: bool = False, file_dir: Optional[str] = None) -> AbstractDataFeed:
-        """Return a new futures order-book feed for the given contract symbol."""
+    async def initialize(self):
+        """Perform any necessary setup (e.g. authentication, token info fetch)."""
         ...
 
     @abstractmethod
-    def create_kline_feed(self, symbol: str, interval: str = "1m", save_data: bool = False, file_dir: Optional[str] = None) -> AbstractDataFeed:
-        """Return a new futures kline/candle feed for the given contract symbol."""
+    async def _fetch_symbol_info(self, symbol: str) -> dict:
+        """Fetch and return exchange-specific info for the given symbol."""
         ...
+
+    # ── Account & Balances ────────────────────────────────────────────────────
+    @abstractmethod
+    async def refresh_balances(self) -> Dict[str, float]:
+        """Fetch and return current account balances."""
+        ...
+
+    async def monitor_balances(self, interval_secs: int = 5, name: str = ""):
+        """Background task to periodically refresh balances."""
+        while True:
+            try:
+                await self.refresh_balances()
+                await asyncio.sleep(interval_secs)
+            except Exception as e:
+                logger.error(f"{name} Balance monitoring error: {e}")
+                break
+
+    def get_balance(self, asset: str) -> float:
+        return self._balances.get(asset, 0.0)
+
+    # ── Positions (futures-specific) ──────────────────────────────────────────
+    @abstractmethod
+    async def refresh_positions(self):
+        """Fetch and update current positions from the exchange."""
+        ...
+
+    def get_position(self, symbol: str) -> Optional[dict]:
+        return self._positions.get(symbol)
+
+    # ── Leverage & Margin (futures-specific) ──────────────────────────────────
+    @abstractmethod
+    async def set_leverage(self, symbol: str, leverage: int):
+        """Set leverage for a symbol."""
+        ...
+
+    @abstractmethod
+    async def set_margin_type(self, symbol: str, margin_type: str):
+        """Set margin type (ISOLATED or CROSSED) for a symbol."""
+        ...
+
+    def get_leverage(self, symbol: str) -> int:
+        return self._leverages.get(symbol, self._default_leverage)
+
+    # ── Orders ────────────────────────────────────────────────────────────────
+    @abstractmethod
+    async def place_limit_order(self, symbol: str, side: Side, price: float, quantity: float, reduce_only: bool = False):
+        """Place a limit order. Adds order into self._open_orders."""
+        ...
+
+    @abstractmethod
+    async def place_market_order(self, symbol: str, side: Side, quantity: float, reduce_only: bool = False):
+        """Place a market order. Adds order into self._open_orders."""
+        ...
+
+    @abstractmethod
+    async def place_stop_order(self, symbol: str, side: Side, quantity: float, stop_price: float, reduce_only: bool = True):
+        """Place a stop-market order."""
+        ...
+
+    @abstractmethod
+    async def cancel_order(self, symbol: str, order_id: str):
+        """Cancel an existing order."""
+        ...
+
+    @abstractmethod
+    async def get_open_orders(self, symbol: str):
+        """Fetch and return open orders for the given symbol. Updates self._open_orders[symbol]."""
+        ...
+
+    async def get_all_open_orders(self):
+        """Fetch and return a dict of all open orders for all tracked symbols."""
+        for symbol in self._symbols:
+            await self.get_open_orders(symbol)
+
+    async def monitor_open_orders(self, poll_interval: int = 60 * 5):
+        while True:
+            await self.get_all_open_orders()
+            await asyncio.sleep(poll_interval)
+
+    async def cancel_all_orders(self, symbol: str):
+        """Cancel all open orders for a given symbol."""
+        orders = list(self._open_orders.get(symbol, {}).values())
+        await asyncio.gather(*(self.cancel_order(symbol, order.id) for order in orders))
+
+    # ── Position management (futures-specific) ────────────────────────────────
+    @abstractmethod
+    async def close_position(self, symbol: str):
+        """Close entire position for a symbol."""
+        ...
+
+    # ── Snapshot printing ─────────────────────────────────────────────────────
+    async def print_snapshot(self, poll_interval: int = 60 * 2, balance_filter: float = 1e-5):
+        """Prints out account balances, positions, and all open order snapshots."""
+        while True:
+            try:
+                # ── Filter and format balances ────────────────────────────────
+                filtered = {
+                    asset: bal
+                    for asset, bal in self._balances.items()
+                    if bal >= balance_filter
+                }
+
+                if filtered:
+                    col_w = max(len(a) for a in filtered) + 2
+                    val_w = max(len(f"{v:.8f}") for v in filtered.values()) + 2
+                    divider  = f"║  ├{'─' * col_w}┬{'─' * val_w}┤"
+                    top_rule = f"║  ┌{'─' * col_w}┬{'─' * val_w}┐"
+                    bot_rule = f"║  └{'─' * col_w}┴{'─' * val_w}┘"
+                    header   = f"║  │{'ASSET'.center(col_w)}│{'BALANCE'.center(val_w)}│"
+
+                    balance_lines = [
+                        top_rule, header, divider,
+                        *[
+                            f"║  │ {asset:<{col_w - 1}}│ {bal:<{val_w - 1}.8f}│"
+                            for asset, bal in sorted(filtered.items())
+                        ],
+                        bot_rule,
+                        f"║  ({len(self._balances) - len(filtered)} asset(s) below 1e-5 hidden)",
+                    ]
+                else:
+                    balance_lines = ["║  (no balances above 1e-5)"]
+
+                output_str = ""
+                output_str += "╔══════════════════════════════════════════════════╗\n"
+                output_str += "║           FUTURES ACCOUNT SNAPSHOT                ║\n"
+                output_str += "╠══════════════════════════════════════════════════╣\n"
+                output_str += "║  BALANCES\n"
+                for line in balance_lines:
+                    output_str += f"{line}\n"
+
+                # ── Positions ─────────────────────────────────────────────────
+                output_str += "╠══════════════════════════════════════════════════╣\n"
+                output_str += "║  POSITIONS\n"
+                if self._positions:
+                    for sym, pos in self._positions.items():
+                        amt = pos.get("amount", 0)
+                        entry = pos.get("entry_price", 0)
+                        pnl = pos.get("unrealized_pnl", 0)
+                        lev = pos.get("leverage", self._default_leverage)
+                        direction = "LONG" if amt > 0 else "SHORT"
+                        output_str += f"║  {sym:<12} {direction:<6} amt={abs(amt):<12} entry={entry:<12.6f} uPnL={pnl:<12.4f} lev={lev}x\n"
+                else:
+                    output_str += "║  (no open positions)\n"
+
+                # ── Open orders ───────────────────────────────────────────────
+                output_str += "╠══════════════════════════════════════════════════╣\n"
+                counter = 0
+                for symbol, orders in self._open_orders.items():
+                    output_str += f"║  ── {symbol} ({len(orders)} order(s))\n"
+                    for _, (order_id, order) in enumerate(orders.items(), start=1):
+                        for line in str(order).splitlines():
+                            output_str += f"║    {line}\n"
+                        output_str += "║\n"
+                        counter += 1
+
+                output_str += "╠══════════════════════════════════════════════════╣\n"
+                output_str += f"║  Total Open Orders : {counter}\n"
+                output_str += "╚══════════════════════════════════════════════════╝"
+
+                print(output_str)
+                await asyncio.sleep(poll_interval)
+            except Exception as e:
+                logger.error(f"Snapshot monitoring error: {e}")
+                break

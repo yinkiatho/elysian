@@ -208,3 +208,6 @@ __marimo__/
 
 old_code/
 __pycache__/
+
+
+.python-version

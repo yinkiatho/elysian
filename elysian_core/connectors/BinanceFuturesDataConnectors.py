@@ -3,6 +3,7 @@ import collections
 import datetime
 import hashlib
 import hmac
+import json
 import math
 import statistics
 import time
@@ -10,23 +11,14 @@ from datetime import datetime as dt
 from typing import Any, Dict, List, Optional, Callable
 from urllib.parse import urlencode
 
-import pylru
 import requests
 import websockets
-import json
 from binance import AsyncClient, BinanceSocketManager
 from binance.exceptions import BinanceAPIException
-from binance.helpers import round_step_size
 
-from elysian_core.connectors.base import AbstractDataFeed, SpotExchangeConnector, AbstractClientManager, AbstractKlineFeed
-from elysian_core.core.enums import OrderStatus, Side, TradeType, _BINANCE_SIDE, _BINANCE_STATUS, AssetType, Venue, OrderType
-from elysian_core.core.order import Order   
+from elysian_core.connectors.base import AbstractDataFeed
 from elysian_core.core.market_data import Kline, OrderBook, BinanceOrderBook
-from elysian_core.db.database import DATABASE
-from elysian_core.db.models import CexTrade
 import elysian_core.utils.logger as log
-import argparse
-
 
 logger = log.setup_custom_logger("root")
 
@@ -35,34 +27,35 @@ logger = log.setup_custom_logger("root")
 # Shared Client Managers
 # ──────────────────────────────────────────────────────────────────────────────
 
-class BinanceKlineClientManager:
-    """Shared AsyncClient for multiplex kline streams with queue-based processing."""
+class BinanceFuturesKlineClientManager:
+    """Shared AsyncClient for multiplex futures kline streams with queue-based processing."""
 
     def __init__(self):
         self._client: Optional[AsyncClient] = None
         self._manager: Optional[BinanceSocketManager] = None
         self._socket: Optional[Any] = None
-        self._queue: asyncio.Queue = asyncio.Queue(maxsize=100000)
-        self._active_feeds: Dict[str, BinanceKlineFeed] = {}
+        self._queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
+        self._active_feeds: Dict[str, 'BinanceFuturesKlineFeed'] = {}
         self._running = False
         self._reader_task: Optional[asyncio.Task] = None
         self._worker_tasks: List[asyncio.Task] = []
-        
-        
+
+
     async def _create_client(self, retries: int = 5) -> AsyncClient:
         for i in range(retries):
             try:
                 # Pre-resolve DNS to avoid async DNS issues
                 loop = asyncio.get_event_loop()
-                await loop.getaddrinfo("api.binance.com", 443)
-                logger.debug("BinanceKlineClientManager: DNS pre-resolved successfully")
+                await loop.getaddrinfo("fapi.binance.com", 443)
+                logger.debug("BinanceFuturesKlineClientManager: DNS pre-resolved successfully")
 
                 return await AsyncClient.create()
             except (TimeoutError, BinanceAPIException) as e:
-                logger.warning(f"BinanceKlineClientManager: Client creation attempt {i+1}/{retries} failed: {e}")
+                logger.warning(f"BinanceFuturesKlineClientManager: Client creation attempt {i+1}/{retries} failed: {e}")
                 if i == retries - 1:
                     raise
                 await asyncio.sleep(2 ** i)
+
 
     async def start(self):
         if self._running:
@@ -71,7 +64,8 @@ class BinanceKlineClientManager:
         self._client = await self._create_client()
         self._manager = BinanceSocketManager(self._client, max_queue_size=10000)
         self._running = True
-        logger.info("BinanceKlineClientManager: Started shared kline client")
+        logger.info("BinanceFuturesKlineClientManager: Started shared futures kline client")
+
 
     async def stop(self):
         if not self._running:
@@ -104,32 +98,29 @@ class BinanceKlineClientManager:
             await self._client.close_connection()
             self._client = None
 
-        logger.info("BinanceKlineClientManager: Stopped shared kline client")
+        logger.info("BinanceFuturesKlineClientManager: Stopped shared futures kline client")
 
-
-    def register_feed(self, feed: 'BinanceKlineFeed'):
+    def register_feed(self, feed: 'BinanceFuturesKlineFeed'):
         self._active_feeds[feed._name] = feed
-
 
     def unregister_feed(self, symbol: str):
         self._active_feeds.pop(symbol, None)
 
-
     async def _reader_coroutine(self):
         """Network reader: only reads messages from multiplex socket."""
         if not self._active_feeds:
-            logger.warning("BinanceKlineClientManager: No feeds registered for reader")
+            logger.warning("BinanceFuturesKlineClientManager: No feeds registered for reader")
             return
 
-        # Create multiplex socket for all symbols
-        streams = [f"{symbol.lower()}@kline_1s" for symbol in self._active_feeds.keys()]
+        # Create multiplex socket for all symbols (futures streams)
+        streams = [f"{symbol.lower()}@kline_1m" for symbol in self._active_feeds.keys()]
         self._socket = self._manager.multiplex_socket(streams)
 
         reconnect_delay = 1
         while self._running:
             try:
                 async with self._socket:
-                    logger.info(f"BinanceKlineClientManager: Multiplex socket opened for {len(streams)} streams")
+                    logger.info(f"BinanceFuturesKlineClientManager: Multiplex socket opened for {len(streams)} streams")
                     reconnect_delay = 1  # Reset delay on successful connection
 
                     while self._running:
@@ -137,20 +128,20 @@ class BinanceKlineClientManager:
                             msg = await self._socket.recv()
                             await self._queue.put(msg)
                         except Exception as e:
-                            logger.error(f"BinanceKlineClientManager: Error in reader: {e}")
+                            logger.error(f"BinanceFuturesKlineClientManager: Error in reader: {e}")
                             await asyncio.sleep(0.1)
 
             except Exception as e:
-                logger.error(f"BinanceKlineClientManager: Socket connection error: {e}", exc_info=False)
+                logger.error(f"BinanceFuturesKlineClientManager: Socket connection error: {e}", exc_info=False)
 
             if self._running:
-                logger.warning(f"BinanceKlineClientManager: Reconnecting in {reconnect_delay}s...")
+                logger.warning(f"BinanceFuturesKlineClientManager: Reconnecting in {reconnect_delay}s...")
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, 60)
 
     async def _worker_coroutine(self, worker_id: int):
         """Worker coroutine: processes messages from queue."""
-        logger.debug(f"BinanceKlineClientManager: Worker {worker_id} started")
+        logger.debug(f"BinanceFuturesKlineClientManager: Worker {worker_id} started")
 
         while self._running:
             try:
@@ -159,7 +150,7 @@ class BinanceKlineClientManager:
                 stream = msg.get("stream", "")
                 data = msg.get("data", {})
 
-                # Extract symbol from stream name (e.g., "ethusdt@kline_1s" -> "ETHUSDT")
+                # Extract symbol from stream name (e.g., "ethusdt@kline_1m" -> "ETHUSDT")
                 if "@kline" in stream:
                     symbol = stream.split("@")[0].upper()
                     feed = self._active_feeds.get(symbol)
@@ -174,21 +165,21 @@ class BinanceKlineClientManager:
                                     (feed._historical[i] - feed._historical[i - 1]) / feed._historical[i - 1]
                                     for i in range(1, len(feed._historical))
                                 ]
-                                feed._vol = statistics.stdev(returns) * math.sqrt(20)
-                                #logger.info(f"[{symbol}] Volatility: {feed._vol * 1e4:.2f} bps (60-kline window)")
+                                feed._vol = statistics.stdev(returns) * math.sqrt(12)
+                                logger.info(f"[{symbol}] Futures Volatility: {feed._vol * 1e4:.2f} bps (60-candle window)")
 
                 self._queue.task_done()
 
             except Exception as e:
-                logger.error(f"BinanceKlineClientManager: Worker {worker_id} error: {e}")
+                logger.error(f"BinanceFuturesKlineClientManager: Worker {worker_id} error: {e}")
                 await asyncio.sleep(0.1)
 
-        logger.debug(f"BinanceKlineClientManager: Worker {worker_id} stopped")
+        logger.debug(f"BinanceFuturesKlineClientManager: Worker {worker_id} stopped")
 
     async def run_multiplex_feeds(self):
         """Run multiplex socket with reader and worker pool."""
         if not self._active_feeds:
-            logger.warning("BinanceKlineClientManager: No feeds registered")
+            logger.warning("BinanceFuturesKlineClientManager: No feeds registered")
             return
 
         # Start reader coroutine
@@ -201,21 +192,21 @@ class BinanceKlineClientManager:
             for i in range(num_workers)
         ]
 
-        logger.info(f"BinanceKlineClientManager: Started with {num_workers} workers")
+        logger.info(f"BinanceFuturesKlineClientManager: Started with {num_workers} workers")
 
         # Wait for reader to complete (it runs until stopped)
         await self._reader_task
 
 
-class BinanceOrderBookClientManager:
-    """Shared AsyncClient for multiplex orderbook streams with queue-based processing."""
+class BinanceFuturesOrderBookClientManager:
+    """Shared AsyncClient for multiplex futures orderbook streams with queue-based processing."""
 
     def __init__(self):
         self._client: Optional[AsyncClient] = None
         self._manager: Optional[BinanceSocketManager] = None
         self._socket: Optional[Any] = None
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
-        self._active_feeds: Dict[str, BinanceOrderBookFeed] = {}
+        self._active_feeds: Dict[str, 'BinanceFuturesOrderBookFeed'] = {}
         self._running = False
         self._reader_task: Optional[asyncio.Task] = None
         self._worker_tasks: List[asyncio.Task] = []
@@ -225,12 +216,12 @@ class BinanceOrderBookClientManager:
             try:
                 # Pre-resolve DNS to avoid async DNS issues
                 loop = asyncio.get_event_loop()
-                await loop.getaddrinfo("api.binance.com", 443)
-                logger.debug("BinanceOrderBookClientManager: DNS pre-resolved successfully")
+                await loop.getaddrinfo("fapi.binance.com", 443)
+                logger.debug("BinanceFuturesOrderBookClientManager: DNS pre-resolved successfully")
 
                 return await AsyncClient.create()
             except (TimeoutError, BinanceAPIException) as e:
-                logger.warning(f"BinanceOrderBookClientManager: Client creation attempt {i+1}/{retries} failed: {e}")
+                logger.warning(f"BinanceFuturesOrderBookClientManager: Client creation attempt {i+1}/{retries} failed: {e}")
                 if i == retries - 1:
                     raise
                 await asyncio.sleep(2 ** i)
@@ -242,8 +233,7 @@ class BinanceOrderBookClientManager:
         self._client = await self._create_client()
         self._manager = BinanceSocketManager(self._client, max_queue_size=10000)
         self._running = True
-        logger.info("BinanceOrderBookClientManager: Started shared orderbook client")
-
+        logger.info("BinanceFuturesOrderBookClientManager: Started shared futures orderbook client")
 
     async def stop(self):
         if not self._running:
@@ -276,9 +266,9 @@ class BinanceOrderBookClientManager:
             await self._client.close_connection()
             self._client = None
 
-        logger.info("BinanceOrderBookClientManager: Stopped shared orderbook client")
+        logger.info("BinanceFuturesOrderBookClientManager: Stopped shared futures orderbook client")
 
-    def register_feed(self, feed: 'BinanceOrderBookFeed'):
+    def register_feed(self, feed: 'BinanceFuturesOrderBookFeed'):
         self._active_feeds[feed._name] = feed
 
     def unregister_feed(self, symbol: str):
@@ -287,18 +277,18 @@ class BinanceOrderBookClientManager:
     async def _reader_coroutine(self):
         """Network reader: only reads messages from multiplex socket."""
         if not self._active_feeds:
-            logger.warning("BinanceOrderBookClientManager: No feeds registered for reader")
+            logger.warning("BinanceFuturesOrderBookClientManager: No feeds registered for reader")
             return
 
-        # Create multiplex socket for all symbols
+        # Create multiplex socket for all symbols (futures depth streams)
         streams = [f"{symbol.lower()}@depth@100ms" for symbol in self._active_feeds.keys()]
-        self._socket = self._manager.multiplex_socket(streams)
+        self._socket = self._manager.futures_multiplex_socket(streams)
 
         reconnect_delay = 1
         while self._running:
             try:
                 async with self._socket:
-                    logger.info(f"BinanceOrderBookClientManager: Multiplex socket opened for {len(streams)} streams")
+                    logger.info(f"BinanceFuturesOrderBookClientManager: Multiplex socket opened for {len(streams)} streams")
                     reconnect_delay = 1  # Reset delay on successful connection
 
                     while self._running:
@@ -306,25 +296,24 @@ class BinanceOrderBookClientManager:
                             msg = await self._socket.recv()
                             await self._queue.put(msg)
                         except Exception as e:
-                            logger.error(f"BinanceOrderBookClientManager: Error in reader: {e}")
+                            logger.error(f"BinanceFuturesOrderBookClientManager: Error in reader: {e}")
                             await asyncio.sleep(0.1)
 
             except Exception as e:
-                logger.error(f"BinanceOrderBookClientManager: Socket connection error: {e}", exc_info=False)
+                logger.error(f"BinanceFuturesOrderBookClientManager: Socket connection error: {e}", exc_info=False)
 
             if self._running:
-                logger.warning(f"BinanceOrderBookClientManager: Reconnecting in {reconnect_delay}s...")
+                logger.warning(f"BinanceFuturesOrderBookClientManager: Reconnecting in {reconnect_delay}s...")
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, 60)
 
     async def _worker_coroutine(self, worker_id: int):
         """Worker coroutine: processes messages from queue."""
-        logger.debug(f"BinanceOrderBookClientManager: Worker {worker_id} started")
+        logger.debug(f"BinanceFuturesOrderBookClientManager: Worker {worker_id} started")
 
         while self._running:
             try:
                 msg = await self._queue.get()
-
                 stream = msg.get("stream", "")
                 data = msg.get("data", {})
 
@@ -341,15 +330,15 @@ class BinanceOrderBookClientManager:
                 self._queue.task_done()
 
             except Exception as e:
-                logger.error(f"BinanceOrderBookClientManager: Worker {worker_id} error: {e}")
+                logger.error(f"BinanceFuturesOrderBookClientManager: Worker {worker_id} error: {e}")
                 await asyncio.sleep(0.1)
 
-        logger.debug(f"BinanceOrderBookClientManager: Worker {worker_id} stopped")
+        logger.debug(f"BinanceFuturesOrderBookClientManager: Worker {worker_id} stopped")
 
     async def run_multiplex_feeds(self):
         """Run multiplex socket with reader and worker pool."""
         if not self._active_feeds:
-            logger.warning("BinanceOrderBookClientManager: No feeds registered")
+            logger.warning("BinanceFuturesOrderBookClientManager: No feeds registered")
             return
 
         # Start reader coroutine
@@ -362,25 +351,25 @@ class BinanceOrderBookClientManager:
             for i in range(num_workers)
         ]
 
-        logger.info(f"BinanceOrderBookClientManager: Started with {num_workers} workers")
+        logger.info(f"BinanceFuturesOrderBookClientManager: Started with {num_workers} workers")
 
         # Wait for reader to complete (it runs until stopped)
         await self._reader_task
 
 
-# Global client managers
-# binance_spot_kline_client_manager = BinanceKlineClientManager()
-# binance_spot_ob_client_manager = BinanceOrderBookClientManager()
+# ──────────────────────────────────────────────────────────────────────────────
+# Futures Feeds
+# ──────────────────────────────────────────────────────────────────────────────
 
-class BinanceKlineFeed(AbstractDataFeed):
+class BinanceFuturesKlineFeed(AbstractDataFeed):
     """
-    Real-time closed kline (candle) feed for a single Binance symbol.
+    Real-time closed kline (candle) feed for a single Binance futures symbol.
     Produces Kline objects and maintains a 60-candle rolling close-price window
     for realised volatility.
 
     Usage:
-        feed = BinanceKlineFeed()
-        feed.create_new(asset="ETHUSDT", interval="1s")
+        feed = BinanceFuturesKlineFeed()
+        feed.create_new(asset="ETHUSDT", interval="1m")
         await feed()
     """
 
@@ -388,7 +377,7 @@ class BinanceKlineFeed(AbstractDataFeed):
         super().__init__(save_data=save_data, file_dir=file_dir)
         self._kline: Optional[Kline] = None   # latest closed kline
 
-    def create_new(self, asset: str, interval: str = "1s"):
+    def create_new(self, asset: str, interval: str = "1m"):
         self._name = asset
         self._interval = interval
 
@@ -408,7 +397,7 @@ class BinanceKlineFeed(AbstractDataFeed):
         k = raw.get("k", {})
         if not k.get("x"):         # only process closed candles
             return None
-        
+
         kline = Kline(
             ticker=k["s"],
             interval=k["i"],
@@ -420,47 +409,33 @@ class BinanceKlineFeed(AbstractDataFeed):
             close=float(k["c"]),
             volume=float(k["v"]),
         )
-        #logger.info(f"[{kline.ticker}] Closed kline: {kline}")
         return kline
 
     async def __call__(self):
-        """Register with shared client manager and wait for multiplex events."""
-        global binance_spot_kline_client_manager
-
-        # Register this feed with the shared manager
-        binance_spot_kline_client_manager.register_feed(self)
-
-        # Start the shared manager if not already running
-        if not binance_spot_kline_client_manager._running:
-            await binance_spot_kline_client_manager.start()
-            # Start the multiplex feed runner in background
-            asyncio.create_task(binance_spot_kline_client_manager.run_multiplex_feeds())
-
-        # Keep the feed alive
+        """Keep the feed alive. Registration with manager is done externally via run_strategy."""
         while True:
             await asyncio.sleep(1)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# BinanceOrderBookFeed
+# BinanceFuturesOrderBookFeed
 # ──────────────────────────────────────────────────────────────────────────────
 
-class BinanceOrderBookFeed(AbstractDataFeed):
+class BinanceFuturesOrderBookFeed(AbstractDataFeed):
     """
-    Real-time depth (order book) feed for a single Binance symbol.
+    Real-time depth (order book) feed for a single Binance futures symbol.
     Produces OrderBook snapshots updated at 100ms intervals.
 
     Usage:
-        feed = BinanceOrderBookFeed()
+        feed = BinanceFuturesOrderBookFeed()
         feed.create_new(asset="ETHUSDT")
         await feed()
     """
 
     def __init__(self, save_data: bool = False, file_dir: Optional[str] = None):
         super().__init__(save_data=save_data, file_dir=file_dir)
-        
-        # Binance Specific Parameters
-        self.last_update_id: Optional[int] = None
+
+        # Binance Futures Specific Parameters
         self.snapshot_ready: bool = False
         self.event_buffer: List[dict] = []  # Buffer events while waiting for snapshot
         self.first_update_processed: bool = False  # Track if we've synced with snapshot
@@ -471,20 +446,18 @@ class BinanceOrderBookFeed(AbstractDataFeed):
 
     def _fetch_rest_snapshot(self, limit: int = 100) -> dict:
         resp = requests.get(
-            "https://api.binance.com/api/v3/depth",
-            params={"symbol": self._name, "limit": min(limit, 5000)},
+            "https://fapi.binance.com/fapi/v1/depth",
+            params={"symbol": self._name, "limit": min(limit, 1000)},
         )
         resp.raise_for_status()
         return resp.json()
 
     async def get_initial_snapshot(self):
         """Fetch snapshot and process any buffered events that cover it."""
-        
         raw = self._fetch_rest_snapshot(100)
         ts = int(time.time() * 1000)
         bids = [[float(b[0]), float(b[1])] for b in raw["bids"]]
         asks = [[float(a[0]), float(a[1])] for a in raw["asks"]]
-
         self._data = BinanceOrderBook.from_lists(
             last_update_id=raw["lastUpdateId"],
             last_timestamp=ts,
@@ -493,98 +466,90 @@ class BinanceOrderBookFeed(AbstractDataFeed):
             bid_levels=bids,
             ask_levels=asks,
         )
-        self.last_update_id = raw["lastUpdateId"]
         self.snapshot_ready = True
         self.first_update_processed = False  # Reset for new snapshot sync
-        #logger.info(f"Fetched Binance [{self._name}] OB snapshot id={raw['lastUpdateId']}")
-        
+        logger.info(f"[{self._name}] Futures OB snapshot id={raw['lastUpdateId']}")
+
         # Process any buffered events now that snapshot is ready
         if self.event_buffer:
-            #logger.info(f"[{self._name}] Processing {len(self.event_buffer)} buffered depth events")
+            logger.info(f"[{self._name}] Processing {len(self.event_buffer)} buffered depth events")
             await self._process_buffered_events()
+            logger.info(f"[{self._name}] Finished processing buffered events. Buffer cleared.")
+
+
 
     async def _process_buffered_events(self):
         """Process buffered events after snapshot is ready."""
         buffered_events = self.event_buffer[:]
         self.event_buffer.clear()
-        
+
         for buffered_event in buffered_events:
-            #print(buffered_event)
+
             # Skip events that are too old (u < lastUpdateId)
             if buffered_event['u'] < self._data.last_update_id:
                 logger.debug(f"[{self._name}] Skipping old buffered event u={buffered_event['u']}")
                 continue
-            
+
             # Find first event that covers the snapshot
-            elif buffered_event['U'] <= self._data.last_update_id and buffered_event['u'] >= self._data.last_update_id:
-                #logger.info(f"[{self._name}] Found sync point: buffered event u={buffered_event['u']} covers snapshot id={self._data.last_update_id}")
+            if buffered_event['U'] <= self._data.last_update_id and buffered_event['u'] == self._data.last_update_id:
+                logger.info(f"[{self._name}] Found sync point: buffered event u={buffered_event['u']} covers snapshot id={self._data.last_update_id}")
                 await self._apply_depth_update(buffered_event)
                 self.first_update_processed = True
-                
+
+            elif self.first_update_processed and buffered_event['U'] <= self._data.last_update_id + 1:
+                # This event is in sequence after the snapshot - apply it
+                await self._apply_depth_update(buffered_event)
 
             elif buffered_event['U'] > self._data.last_update_id:
                 # This event is ahead of snapshot with gap - re-fetch snapshot
-                #logger.warning(f"[{self._name}] Gap detected: buffered event U={buffered_event['U']} > snapshot id={self._data.last_update_id}")
+                logger.warning(f"[{self._name}] Gap detected: buffered event U={buffered_event['U']} > snapshot id={self._data.last_update_id}")
                 self.snapshot_ready = False
                 asyncio.create_task(self.get_initial_snapshot())
                 return
-            
-            elif self.first_update_processed:
-                await self._apply_depth_update(buffered_event)
-            
-            
-    
+
+
+
     async def _process_depth_event(self, event: dict) -> OrderBook:
-        """Process depth updates following Binance API spec."""
-        
-        # Phase 1: Buffer events while snapshot is being fetched
+        """Process depth updates following Binance Futures API spec."""
+
+        # Buffer events while snapshot is being fetched
         if not self.snapshot_ready:
             self.event_buffer.append(event)
-            #logger.warning(f"[{self._name}] Buffering depth event (snapshot not ready). Buffer size: {len(self.event_buffer)}")
+            logger.warning(f"[{self._name}] Buffering depth event (snapshot not ready). Buffer size: {len(self.event_buffer)}")
             return self._data if self._data else None
-        
+
         # Validate U and u according to Binance spec
-        if event['u'] < self._data.last_update_id:
-            #logger.debug(f"[{self._name}] Skipping old event u={event['u']} < last_update_id={self._data.last_update_id}")
+        elif event['pu'] < self._data.last_update_id:
             return self._data
-        
-        if event['U'] > self._data.last_update_id + 1:
-            logger.error(f"[{self._name}] Gap detected: event U={event['U']} > last_update_id+1={self._data.last_update_id+1}. Re-fetching snapshot...")
+
+
+        elif event['pu'] != self._data.last_update_id:
+            logger.error(f"[{self._name}] Gap detected: event pu={event['pu']} != last_update_id={self._data.last_update_id}. Re-fetching snapshot...")
             self.snapshot_ready = False
             asyncio.create_task(self.get_initial_snapshot())
             raise ValueError("Gap in event sequence")
-        
+
         else:
             await self._apply_depth_update(event)
+
         return self._data
-    
-    
+
+
+
     async def _apply_depth_update(self, event: dict):
         """Apply depth update to order book."""
         ts = int(time.time() * 1000)
-        await self._data.apply_both_updates(ts, event['u'], 
-                                            bid_levels=event.get("bids", []), ask_levels=event.get("asks", []))
-        #logger.success(f"[{self._name}] OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}") 
+        await self._data.apply_both_updates(ts, event['u'],
+                                            bid_levels=event.get("b", []), ask_levels=event.get("a", []))
+        logger.success(f"[{self._name}] Futures OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
 
 
     async def __call__(self):
-        """Register with shared client manager and wait for multiplex events."""
-        global binance_spot_ob_client_manager
-
-        # Register this feed with the shared manager (WebSocket will start buffering)
-        binance_spot_ob_client_manager.register_feed(self)
-
-        # Start the shared manager if not already running
-        if not binance_spot_ob_client_manager._running:
-            await binance_spot_ob_client_manager.start()
-            
-            # Start the multiplex feed runner in background (WebSocket reader/workers)
-            asyncio.create_task(binance_spot_ob_client_manager.run_multiplex_feeds())
-
+        """Keep the feed alive. Registration with manager is done externally via run_strategy."""
         # Give WebSocket a moment to start buffering events
         await asyncio.sleep(0.1)
-        
-        # NOW fetch the snapshot while events are being buffered
+
+        # Fetch the snapshot while events are being buffered
         await self.get_initial_snapshot()
 
         # Keep the feed alive
@@ -592,31 +557,68 @@ class BinanceOrderBookFeed(AbstractDataFeed):
             await asyncio.sleep(1)
 
 
-
 # ──────────────────────────────────────────────────────────────────────────────
-# User data stream manager for balance/order updates
+# Futures User Data Stream Manager
 # ──────────────────────────────────────────────────────────────────────────────
-class BinanceUserDataClientManager:
-    """Maintain a single user-data websocket and dispatch events.
 
-    Uses the new Binance WebSocket API (wss://ws-api.binance.com) with
-    userDataStream.subscribe.signature, replacing the deprecated listenKey
-    approach (/api/v3/userDataStream) which was retired 2026-02-20.
+class BinanceFuturesUserDataClientManager:
+    """Maintain a single futures user-data websocket and dispatch events.
 
-    HMAC-SHA256 keys are supported via userDataStream.subscribe.signature
-    which does not require an authenticated session (session.logon), unlike
-    userDataStream.subscribe which requires Ed25519 keys only.
+    Uses the listenKey approach for Binance USDS-M Futures:
+      1. POST /fapi/v1/listenKey to obtain a listenKey
+      2. Connect to wss://fstream.binance.com/ws/<listenKey>
+      3. PUT /fapi/v1/listenKey every 30 minutes to keep alive
+      4. Dispatch ACCOUNT_UPDATE and ORDER_TRADE_UPDATE events to subscribers
+
+    Futures user data stream event types:
+      - ACCOUNT_UPDATE:      balance and position changes
+      - ORDER_TRADE_UPDATE:  order status changes and fills
+      - MARGIN_CALL:         margin call warnings
+      - ACCOUNT_CONFIG_UPDATE: leverage or multi-asset mode changes
     """
 
-    WS_API_URL = "wss://ws-api.binance.com:443/ws-api/v3"
+    FAPI_BASE = "https://fapi.binance.com"
+    WS_BASE = "wss://fstream.binance.com/ws"
+    KEEPALIVE_INTERVAL = 30 * 60  # 30 minutes
 
     def __init__(self, api_key: str, api_secret: str):
         self._api_key = api_key
         self._api_secret = api_secret
         self._running: bool = False
         self._ws: Optional[Any] = None
+        self._listen_key: Optional[str] = None
         self._reader_task: Optional[asyncio.Task] = None
+        self._keepalive_task: Optional[asyncio.Task] = None
         self._subscribers: List[Callable[[dict], None]] = []
+
+    # ── listenKey management ─────────────────────────────────────────────────
+
+    def _get_listen_key(self) -> str:
+        """POST /fapi/v1/listenKey to create or renew a listenKey."""
+        resp = requests.post(
+            f"{self.FAPI_BASE}/fapi/v1/listenKey",
+            headers={"X-MBX-APIKEY": self._api_key},
+        )
+        resp.raise_for_status()
+        return resp.json()["listenKey"]
+
+    def _keepalive_listen_key(self):
+        """PUT /fapi/v1/listenKey to extend the listenKey validity."""
+        resp = requests.put(
+            f"{self.FAPI_BASE}/fapi/v1/listenKey",
+            headers={"X-MBX-APIKEY": self._api_key},
+        )
+        resp.raise_for_status()
+
+    def _close_listen_key(self):
+        """DELETE /fapi/v1/listenKey to close the stream."""
+        try:
+            requests.delete(
+                f"{self.FAPI_BASE}/fapi/v1/listenKey",
+                headers={"X-MBX-APIKEY": self._api_key},
+            )
+        except Exception:
+            pass
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -625,87 +627,75 @@ class BinanceUserDataClientManager:
             return
         self._running = True
         self._reader_task = asyncio.create_task(self._reader_loop())
-        logger.info("BinanceUserDataClientManager: started")
+        logger.info("BinanceFuturesUserDataClientManager: started")
 
     async def stop(self):
         if not self._running:
             return
         self._running = False
+
+        if self._keepalive_task and not self._keepalive_task.done():
+            self._keepalive_task.cancel()
+            try:
+                await self._keepalive_task
+            except asyncio.CancelledError:
+                pass
+
         if self._reader_task and not self._reader_task.done():
             self._reader_task.cancel()
             try:
                 await self._reader_task
             except asyncio.CancelledError:
                 pass
+
         if self._ws:
             try:
                 await self._ws.close()
             except Exception:
                 pass
             self._ws = None
-        logger.info("BinanceUserDataClientManager: stopped")
 
-    # ── Auth ──────────────────────────────────────────────────────────────────
+        # Close the listenKey on the server
+        self._close_listen_key()
+        logger.info("BinanceFuturesUserDataClientManager: stopped")
 
-    def _sign(self, payload: str) -> str:
-        """HMAC-SHA256 hex digest of payload using api_secret as key."""
-        return hmac.new(
-            self._api_secret.encode(),
-            payload.encode(),
-            hashlib.sha256
-        ).hexdigest()
+    # ── Keepalive loop ────────────────────────────────────────────────────────
 
-    async def _subscribe(self, ws) -> bool:
-        """Send userDataStream.subscribe.signature.
-        
-        Works with HMAC keys without requiring session.logon.
-        Params must be sorted alphabetically before signing.
-        """
-        timestamp = int(time.time() * 1000)
-
-        # Params sorted alphabetically as required by Binance signing spec
-        payload = f"apiKey={self._api_key}&timestamp={timestamp}"
-        signature = self._sign(payload)
-
-        await ws.send(json.dumps({
-            "id": "user-data-sub",
-            "method": "userDataStream.subscribe.signature",
-            "params": {
-                "apiKey": self._api_key,
-                "timestamp": timestamp,
-                "signature": signature,
-            }
-        }))
-
-        resp = json.loads(await ws.recv())
-        if resp.get("status") != 200:
-            logger.error(f"userDataStream.subscribe.signature failed: {resp}")
-            return False
-
-        logger.info("BinanceUserDataClientManager: subscribed to user data stream")
-        return True
+    async def _keepalive_loop(self):
+        """Send PUT keepalive every 30 minutes to keep the listenKey active."""
+        while self._running:
+            try:
+                await asyncio.sleep(self.KEEPALIVE_INTERVAL)
+                self._keepalive_listen_key()
+                logger.debug("BinanceFuturesUserDataClientManager: listenKey keepalive sent")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"BinanceFuturesUserDataClientManager: keepalive error: {e}")
 
     # ── Main loop ─────────────────────────────────────────────────────────────
 
     async def _reader_loop(self):
-        """Connect, subscribe, and dispatch events. Reconnects with exponential backoff on failure."""
+        """Connect, subscribe, and dispatch events. Reconnects with exponential backoff."""
         reconnect_delay = 1
         while self._running:
             try:
+                # Obtain a fresh listenKey
+                self._listen_key = self._get_listen_key()
+                ws_url = f"{self.WS_BASE}/{self._listen_key}"
+
                 async with websockets.connect(
-                    self.WS_API_URL,
-                    additional_headers={"X-MBX-APIKEY": self._api_key},
-                    ping_interval=180,  # server pings every 3 min
+                    ws_url,
+                    ping_interval=180,
                     ping_timeout=10,
                 ) as ws:
                     self._ws = ws
 
-                    if not await self._subscribe(ws):
-                        logger.error("BinanceUserDataClientManager: subscribe failed, stopping")
-                        break
+                    # Start keepalive task
+                    self._keepalive_task = asyncio.create_task(self._keepalive_loop())
 
-                    reconnect_delay = 1  # reset backoff on successful connection
-                    logger.info("BinanceUserDataClientManager: connected and listening")
+                    reconnect_delay = 1
+                    logger.info("BinanceFuturesUserDataClientManager: connected and listening")
 
                     async for raw in ws:
                         if not self._running:
@@ -713,44 +703,42 @@ class BinanceUserDataClientManager:
                         try:
                             msg = json.loads(raw)
                         except json.JSONDecodeError:
-                            logger.warning(f"BinanceUserDataClientManager: failed to decode message: {raw}")
+                            logger.warning(f"BinanceFuturesUserDataClientManager: failed to decode: {raw}")
                             continue
 
-                        # New WS API envelope: {"subscriptionId": 0, "event": {"e": ..., ...}}
-                        # Skip non-event messages (e.g. heartbeats, subscription confirmations)
-                        event = msg.get("event")
-                        if event is None:
-                            continue
-
+                        # Dispatch to subscribers
                         for cb in self._subscribers:
                             try:
-                                cb(event)
+                                cb(msg)
                             except Exception as e:
-                                logger.error(f"BinanceUserDataClientManager: callback error: {e}")
+                                logger.error(f"BinanceFuturesUserDataClientManager: callback error: {e}")
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"BinanceUserDataClientManager: connection error: {e}")
+                logger.error(f"BinanceFuturesUserDataClientManager: connection error: {e}")
+                # Cancel keepalive if it was started
+                if self._keepalive_task and not self._keepalive_task.done():
+                    self._keepalive_task.cancel()
                 if self._running:
-                    logger.info(f"BinanceUserDataClientManager: reconnecting in {reconnect_delay}s...")
+                    logger.info(f"BinanceFuturesUserDataClientManager: reconnecting in {reconnect_delay}s...")
                     await asyncio.sleep(reconnect_delay)
                     reconnect_delay = min(reconnect_delay * 2, 60)
 
         self._ws = None
-        logger.info("BinanceUserDataClientManager: reader loop exited")
+        logger.info("BinanceFuturesUserDataClientManager: reader loop exited")
 
     # ── Subscriber registry ───────────────────────────────────────────────────
 
     def register(self, callback: Callable[[dict], None]):
-        """Register a callback to receive raw event dicts from the user data stream."""
+        """Register a callback to receive raw event dicts from the futures user data stream."""
         self._subscribers.append(callback)
-        logger.debug(f"BinanceUserDataClientManager: registered callback {callback.__name__}")
+        logger.debug(f"BinanceFuturesUserDataClientManager: registered callback {callback.__name__}")
 
     def unregister(self, callback: Callable[[dict], None]):
         """Unregister a previously registered callback."""
         try:
             self._subscribers.remove(callback)
-            logger.debug(f"BinanceUserDataClientManager: unregistered callback {callback.__name__}")
+            logger.debug(f"BinanceFuturesUserDataClientManager: unregistered callback {callback.__name__}")
         except ValueError:
             pass

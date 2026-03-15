@@ -1,16 +1,27 @@
 # ── Exchange connectivity ──────────────────────────────────────────────────────
 python-binance>=1.0.19
 requests>=2.31.0
-websockets>=12.0           # Bybit / OKX WebSocket feeds
+aiohttp>=3.9.0             # async HTTP in run_strategy.py
+websockets>=12.0           # WebSocket feeds
 
 # ── Data ──────────────────────────────────────────────────────────────────────
 pandas>=2.0.0
 numpy>=1.26.0
+sortedcontainers>=2.4.0    # SortedDict used in core/market_data.py
+numexpr>=2.8.0             # used in connectors/__init__.py, utils/__init__.py
 
 # ── Database ──────────────────────────────────────────────────────────────────
 peewee>=3.17.0
 psycopg2-binary>=2.9.9     # PostgreSQL driver for Peewee
 python-dotenv>=1.0.0
+
+# ── Config ────────────────────────────────────────────────────────────────────
+pyyaml>=6.0.0              # yaml config parsing in utils/utils.py
+
+# ── Serialisation ─────────────────────────────────────────────────────────────
+betterproto>=2.0.0b6       # protobuf dataclasses in utils/data_types.py
+
+# ── Blockchain ────────────────────────────────────────────────────────────────
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 pylru>=1.2.0

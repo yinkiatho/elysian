@@ -110,10 +110,14 @@ class BinanceSpotExchange(SpotExchangeConnector):
         except Exception as e:
             logger.error(f"Failed to start user data stream: {e}")
 
-        logger.info("BinanceExchange initialised.")
+        logger.info("BinanceExchange initialised.......")
         
         
     async def _fetch_symbol_info(self, symbol: str):
+        '''
+        Function to fetch symbbol information
+        
+        '''
         info = await self._client.get_symbol_info(symbol)
         step_size = float(
             next(f["stepSize"] for f in info["filters"] if f["filterType"] == "LOT_SIZE")
@@ -124,13 +128,14 @@ class BinanceSpotExchange(SpotExchangeConnector):
         self._token_infos[symbol] = {"step_size": step_size, "min_notional": min_notional, 
                                      "base_asset": info["baseAsset"], "quote_asset": info["quoteAsset"], 
                                      "base_asset_precision": info["baseAssetPrecision"], "quote_asset_precision": info["quoteAssetPrecision"]}
-        logger.info(f"[{symbol}] step={step_size} min_notional={min_notional}")
+        #logger.info(f"[{symbol}] step={step_size} min_notional={min_notional}")
 
 
 
     # ── Account ───────────────────────────────────────────────────────────────
     async def refresh_balances(self):
         account = await self._client.get_account()
+        #print(f"Account Fetched: {account}")
         for b in account["balances"]:
             self._balances[b["asset"]] = float(b["free"])
 
@@ -155,7 +160,6 @@ class BinanceSpotExchange(SpotExchangeConnector):
         # other event types could be handled here (executionReport, etc.)
         elif et == "executionReport":
             logger.info(f"Received execution report @ {datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))}")
-            
             self._handle_execution_report(msg)
             
     def _handle_execution_report(self, msg: dict):
@@ -277,6 +281,20 @@ class BinanceSpotExchange(SpotExchangeConnector):
             return resp.json()["address"]
         logger.error(f"get_deposit_address failed: {resp.status_code} {resp.json()}")
         return None
+    
+    
+    async def deposit_asset(self, coin, amount, network = None):
+        """
+        Implementation to be done
+        """
+        pass
+    
+    async def withdraw_asset(self, coin, amount, address, network=None): 
+        """
+        Implementation to be done
+        """
+        pass
+    
 
 
 
@@ -351,9 +369,6 @@ class BinanceSpotExchange(SpotExchangeConnector):
         """Cancel an active order by id."""
         try:
             result = await self._client.cancel_order(symbol=symbol, orderId=order_id)
-            self._open_orders[symbol] = [
-                o for o in self._open_orders[symbol] if o["orderId"] != order_id
-            ]
             logger.info(f"[{symbol}] Order {order_id} cancelled: {result}")
         except Exception as e:
             logger.error(f"[{symbol}] cancel_order error: {e}")
@@ -363,9 +378,9 @@ class BinanceSpotExchange(SpotExchangeConnector):
     async def get_open_orders(self, symbol: str):
         """Refresh open orders for a specific symbol."""
         try:
-            self._open_orders[symbol] = await self._client.get_open_orders(symbol=symbol)
-            if self._open_orders[symbol]:
-                logger.info(f"[{symbol}] Open orders: {self._open_orders[symbol]}")
+            open_orders = await self._client.get_open_orders(symbol=symbol)
+            logger.info(f"[{symbol}] Open orders: {open_orders}")
+            return open_orders
         except Exception as e:
             logger.error(f"[{symbol}] get_open_orders error: {e}")
             
@@ -502,8 +517,9 @@ class BinanceSpotExchange(SpotExchangeConnector):
         return total_notional / total_qty, total_comm
     
     
-    async def _record_trade(self, base_asset: str, quote_asset: str, base_amount_executed: float, quote_amount_executed: float, order_type: OrderType,
-                                  price: float, commission: float, order_id: int, status: str, side_str: str, comm_asset: str):
+    async def _record_trade(self, base_asset: str, quote_asset: str, base_amount_executed: float, quote_amount_executed: float, 
+                                  order_type: OrderType, price: float, commission: float, order_id: int, 
+                                  status: str, side_str: str, comm_asset: str):
         """
         Record a trade in the database. This is called after a market order is filled.
         """
@@ -608,7 +624,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
         asyncio.create_task(self.monitor_open_orders())
         asyncio.create_task(self.print_snapshot())
         await asyncio.sleep(0.5)   # let first balance fetch settle
-        logger.info("BinanceExchange running.")
+        logger.info("BinanceExchange running................")
 
 
     async def cleanup(self):
@@ -616,11 +632,10 @@ class BinanceSpotExchange(SpotExchangeConnector):
         Cleanup shared client managers and authenticated client.
         Call this before shutting down the exchange.
         """
-        global binance_spot_kline_client_manager, binance_spot_ob_client_manager
 
         # Stop shared client managers
-        await binance_spot_kline_client_manager.stop()
-        await binance_spot_ob_client_manager.stop()
+        await self.kline_manager.stop()
+        await self.ob_manager.stop()
 
         # Close authenticated client
         if self._client:

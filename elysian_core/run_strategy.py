@@ -17,35 +17,34 @@ from elysian_core.connectors.BinanceExchange import (
 from elysian_core.connectors.BinanceDataConnectors import (
     BinanceKlineFeed,
     BinanceOrderBookFeed,
-    binance_spot_kline_client_manager,
-    binance_spot_ob_client_manager
+    BinanceKlineClientManager,
+    BinanceOrderBookClientManager
 )
 
-from elysian_core.connectors.BinanceFuturesExchange import (
+from elysian_core.connectors.BinanceFuturesDataConnectors import (
     BinanceFuturesOrderBookFeed,
     BinanceFuturesKlineFeed,
-    binance_futures_kline_client_manager,
-    binance_futures_ob_client_manager,
-    BinanceFuturesExchange
+    BinanceFuturesKlineClientManager,
+    BinanceFuturesOrderBookClientManager,
 )
+from elysian_core.connectors.BinanceFuturesExchange import BinanceFuturesExchange
 
 from elysian_core.connectors.AsterExchange import (
     AsterOrderBookFeed,
     AsterKlineFeed,
-    aster_spot_kline_client_manager,
-    aster_spot_ob_client_manager
+    AsterKlineClientManager,
+    AsterOrderBookClientManager
 )
 
-from elysian_core.connectors.AsterPerpExchange import (
-    aster_perp_kline_client_manager,
-    aster_perp_ob_client_manager,
+from elysian_core.connectors.AsterPerpDataConnectors import (
+    AsterPerpKlineClientManager,
+    AsterPerpOrderBookClientManager,
     AsterPerpKlineFeed,
-    AsterPerpOrderBookFeed
+    AsterPerpOrderBookFeed,
 )
+from elysian_core.connectors.AsterPerpExchange import AsterPerpExchange
     
 
-
-# from elysian_core.connectors.OKXFeed import OKXDataFeed
 # from elysian_core.connectors.VolatilityBarbClient import VolatilityBarbClientLocal, RedisConfig
 from elysian_core.utils.logger import setup_custom_logger
 from elysian_core.utils.utils import load_config, replace_placeholders, config_to_args
@@ -53,7 +52,13 @@ from pathlib import Path
 import json
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
-
+import sys
+    # Worker processes on Windows default to ProactorEventLoop, which breaks
+    # aiohttp (causes TimeoutError). Force the selector-based policy here so
+    # that each spawned process matches the policy set in __main__.
+if sys.platform.startswith('win'):
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        
 logger = setup_custom_logger('root')
 
 
@@ -78,7 +83,7 @@ class StrategyRunner:
             load_dotenv()
                     
         self.config_json = self._load_config(config_json)
-        self.config = load_config(config_yaml)
+        self.args = config_to_args(load_config(config_yaml))
         self.timestamp = self._get_timestamp()
                 
         # Components (initialized as None)
@@ -97,24 +102,23 @@ class StrategyRunner:
         
         
         # Binance Client Managers
-        self.binance_kline_manager = binance_spot_kline_client_manager
-        self.binance_ob_manager = binance_spot_ob_client_manager
+        self.binance_kline_manager = BinanceKlineClientManager()
+        self.binance_ob_manager = BinanceOrderBookClientManager()
         
         # Binance Futures Client Managers
-        self.binance_futures_kline_manager = binance_futures_kline_client_manager
-        self.binance_futures_ob_manager = binance_futures_ob_client_manager
-        
+        self.binance_futures_kline_manager = BinanceFuturesKlineClientManager()
+        self.binance_futures_ob_manager = BinanceFuturesOrderBookClientManager()
+
         # Aster Client Managers
-        self.aster_kline_manager = aster_spot_kline_client_manager
-        self.aster_ob_manager = aster_spot_ob_client_manager
-        
+        self.aster_kline_manager = AsterKlineClientManager()
+        self.aster_ob_manager = AsterOrderBookClientManager()
+            
         # Aster Futures Client Managers
-        self.aster_futures_kline_manager = aster_perp_kline_client_manager
-        self.aster_futures_ob_manager = aster_perp_ob_client_manager
-        
-        
-        
-        
+        self.aster_futures_kline_manager = AsterPerpKlineClientManager()
+        self.aster_futures_ob_manager = AsterPerpOrderBookClientManager()
+
+
+
     @staticmethod
     def _load_config(config_path: str) -> dict:
         """Load configuration from JSON file."""
@@ -123,6 +127,8 @@ class StrategyRunner:
         with open(config_path, 'r') as f:
             return json.load(f)
     
+    
+    
     @staticmethod
     def _get_env(key: str, default: str = None, required: bool = False) -> str:
         """Get environment variable with optional default and required check."""
@@ -130,6 +136,7 @@ class StrategyRunner:
         if required and not value:
             logger.warning(f"Required environment variable '{key}' not set")
         return value
+    
     
     
     @staticmethod
@@ -185,15 +192,18 @@ class StrategyRunner:
         """Initialize tokens and pools configuration. Testing, we just add the Binance Tokens"""
         logger.info("Setting up Strategy Configuration...")
         
+        
         # Setting up Binance tokens 
         self.binance_tokens = self.config_json.get('Spot Trading Pairs', {}).get('Binance Pairs', [])
         self.binance_token_symbols = self.config_json.get('Spot Trading Pairs', {}).get('Binance Symbols', [])
         self.total_token_pairs.extend(self.binance_tokens)
         
+        
         # Setting up Binance Futures tokens
         self.binance_futures_tokens = self.config_json.get('Futures Trading Pairs', {}).get('Binance Futures Pairs', [])
         self.binance_futures_token_symbols = self.config_json.get('Futures Trading Pairs', {}).get('Binance Futures Symbols', [])
         self.total_token_pairs.extend(self.binance_futures_tokens)
+
 
         # Setting up Aster tokens
         self.aster_tokens = self.config_json.get('Spot Trading Pairs', {}).get('Aster Pairs', [])
@@ -219,34 +229,41 @@ class StrategyRunner:
         """Initialize exchange instances for trading operations."""
         
         logger.info("Setting up exchange instances...")
-        
         # Initialize Binance spot exchange
         if hasattr(self, 'binance_tokens') and self.binance_tokens:
             self.binance_exchange = BinanceSpotExchange(
+                args = self.args,
                 api_key=self._get_env('BINANCE_API_KEY', required=True),
                 api_secret=self._get_env('BINANCE_API_SECRET', required=True),
-                testnet=self.config.get('binance', {}).get('testnet', True)
+                symbols=self.binance_token_symbols,
+                kline_manager=self.binance_kline_manager,
+                ob_manager=self.binance_ob_manager
             )
-            logger.info("Binance spot exchange initialized")
+            #logger.info("Binance spot exchange initialized")
         
         # Initialize Binance futures exchange
         if hasattr(self, 'binance_futures_tokens') and self.binance_futures_tokens:
             self.binance_futures_exchange = BinanceFuturesExchange(
+                args=self.args,
                 api_key=self._get_env('BINANCE_API_KEY', required=True),
                 api_secret=self._get_env('BINANCE_API_SECRET', required=True),
-                testnet=self.config.get('binance', {}).get('testnet', True)
+                symbols=self.binance_futures_token_symbols,
+                kline_manager=self.binance_futures_kline_manager,
+                ob_manager=self.binance_futures_ob_manager,
             )
             logger.info("Binance futures exchange initialized")
         
-        # # Initialize Aster exchange
-        # if hasattr(self, 'aster_tokens') and self.aster_tokens:
-        #     from elysian_core.connectors.AsterExchange import AsterExchange
-        #     self.aster_exchange = AsterExchange(
-        #         api_key=self._get_env('ASTER_API_KEY', required=True),
-        #         api_secret=self._get_env('ASTER_API_SECRET', required=True),
-        #         testnet=self.config.get('aster', {}).get('testnet', True)
-        #     )
-        #     logger.info("Aster exchange initialized")
+        # Initialize Aster futures exchange
+        if hasattr(self, 'aster_futures_tokens') and self.aster_futures_tokens:
+            self.aster_futures_exchange = AsterPerpExchange(
+                args=self.args,
+                api_key=self._get_env('ASTER_API_KEY', required=True),
+                api_secret=self._get_env('ASTER_API_SECRET', required=True),
+                symbols=self.aster_futures_token_symbols,
+                kline_manager=self.aster_futures_kline_manager,
+                ob_manager=self.aster_futures_ob_manager,
+            )
+            logger.info("Aster futures exchange initialized")
         
         
     # --------- Setting up Binance Kline and OB Feeds with Multiplex Architecture --------- # 
@@ -305,13 +322,29 @@ class StrategyRunner:
             logger.info(f"Worker process running {len(multiplex_tasks)} feed task(s)...")
             await asyncio.gather(*multiplex_tasks)
             
-            
-    def setup_and_run_binance_feeds(self):
-        '''Helper function to setup Binance feeds and return the multiplex tasks. 
-           Wraps around _setup_data_feeds for better modularity and testing.'''
-        
-        asyncio.run(self._setup_binance_data_feeds())
     
+    
+    # Sync Wrappers
+    def setup_and_run_binance_feeds_and_exchange(self):
+        '''Helper function to setup Binance feeds and return the multiplex tasks.
+           Wraps around _setup_data_feeds for better modularity and testing.'''
+
+        """Sync wrapper — runs both coroutines concurrently in a single event loop."""
+        
+
+        async def _inner():
+            try:
+                # Initialize the exchange first so its AsyncClient and
+                # get_exchange_info() call don't compete with the kline/OB
+                # managers creating their own AsyncClients concurrently.
+                # Running them together causes the large exchangeInfo response
+                # to be starved and timeout under aiohttp 3.13+.
+                await self.binance_exchange.run()
+                await self._setup_binance_data_feeds()
+            finally:
+                await self.binance_exchange.cleanup()
+
+        asyncio.run(_inner())
     
     
 # --------- Setting up Binance Futures Kline and OB Feeds with Multiplex Architecture --------- # 
@@ -547,18 +580,18 @@ class StrategyRunner:
             
             # Setup phase
             self._setup_config()
-            #self._setup_exchanges()
+            self._setup_exchanges()
             #await self._setup_processor()
             
-            logger.info("All components initialized. Starting event loops...")
-            
-            # Compile Process Jobs
-            #process_jobs = [(self.setup_and_run_binance_feeds, [], "binance_feeds")]
+            logger.info("All components initialized. Starting event loops...")            
+            # Initialize the BinanceExchange Connector
+
             process_jobs = [
-                (self.setup_and_run_binance_feeds, [], "binance_feeds"),
-                (self.setup_and_run_aster_feeds, [], "aster_feeds"),
-                (self.setup_and_run_binance_futures_feeds, [], "binance_futures_feeds"),
-                (self.setup_and_run_aster_futures_feeds, [], "aster_futures_feeds")
+                (self.setup_and_run_binance_feeds_and_exchange, [], "binance_feeds and binance exchange connector"),
+                # (self.setup_and_run_aster_feeds, [], "aster_feeds"),
+                # (self.setup_and_run_binance_futures_feeds, [], "binance_futures_feeds"),
+                # (self.setup_and_run_aster_futures_feeds, [], "aster_futures_feeds")
+                
             ]
             
             # Run all task groups concurrently using ProcessPoolExecutor
@@ -579,7 +612,7 @@ class StrategyRunner:
             raise
         finally:
             logger.info("Cleaning up...")
-            await self._cleanup(process_jobs)
+            await self._cleanup([])
             logger.info("Strategy runner shutdown complete")
 
     
@@ -628,14 +661,6 @@ if __name__ == "__main__":
     if sys.platform.startswith('win'):
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-
-    async def test():
-        async with aiohttp.ClientSession() as session:
-            async with session.get("https://api.binance.com/api/v3/ping") as r:
-                print(await r.text())
-
-    asyncio.run(test())
-        
     # Parse command line arguments
     if len(sys.argv) > 1 and sys.argv[1] == "test":
         # Test mode: run Binance feed test

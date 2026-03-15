@@ -19,6 +19,9 @@ class AssetType(Enum):
 class OrderType(Enum):
     LIMIT = "Limit"
     MARKET = "Market"
+    STOP_MARKET = "StopMarket"
+    TAKE_PROFIT_MARKET = "TakeProfitMarket"
+    TRAILING_STOP_MARKET = "TrailingStopMarket"
     RANGE = "Range"          # AMM / LP range order
     OTHERS = "OTHERS"
     

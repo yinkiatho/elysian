@@ -3,560 +3,827 @@ import collections
 import datetime
 import hashlib
 import hmac
-import json
 import math
-import statistics
 import time
-from datetime import datetime as dt
-from typing import Any, Dict, List, Optional
+import argparse
+from typing import Any, List, Optional
 from urllib.parse import urlencode
 
-import pylru
-import requests
-import websockets
+import aiohttp
 
-from elysian_core.connectors.base import AbstractDataFeed
-from elysian_core.core.enums import OrderStatus, Side, TradeType
-from elysian_core.core.market_data import Kline, OrderBook, AsterOrderBook
-from elysian_core.db.database import DATABASE
+from elysian_core.connectors.base import FuturesExchangeConnector
+from elysian_core.connectors.AsterPerpDataConnectors import (
+    AsterPerpKlineClientManager,
+    AsterPerpOrderBookClientManager,
+    AsterPerpUserDataClientManager,
+)
+from elysian_core.core.enums import (
+    OrderStatus, Side, OrderType, AssetType, Venue,
+    _BINANCE_SIDE, _BINANCE_STATUS,
+)
+from elysian_core.core.order import Order
 from elysian_core.db.models import CexTrade
 import elysian_core.utils.logger as log
+
 
 logger = log.setup_custom_logger("root")
 
 FUTURES_BASE_ENDPOINT = "https://fapi.asterdex.com"
-WEBSOCKET_FUTURES_ENDPOINT = "wss://fstream.asterdex.com"
+
+_STABLECOINS = frozenset({"USDC", "USDT", "BUSD"})
+
+# Map raw Aster futures order type strings -> OrderType enum
+_ASTER_ORDER_TYPE = {
+    "LIMIT": OrderType.LIMIT,
+    "MARKET": OrderType.MARKET,
+    "STOP_MARKET": OrderType.STOP_MARKET,
+    "TAKE_PROFIT_MARKET": OrderType.TAKE_PROFIT_MARKET,
+    "TRAILING_STOP_MARKET": OrderType.TRAILING_STOP_MARKET,
+}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Shared Client Managers for Perpetual/Futures
+# AsterPerpExchange
 # ──────────────────────────────────────────────────────────────────────────────
 
-class AsterPerpKlineClientManager:
-    """Shared WebSocket client for multiplex kline streams on perpetual market."""
-
-    def __init__(self):
-        self._websocket: Optional[Any] = None
-        self._queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
-        self._active_feeds: Dict[str, 'AsterPerpKlineFeed'] = {}
-        self._running = False
-        self._reader_task: Optional[asyncio.Task] = None
-        self._worker_tasks: List[asyncio.Task] = []
-        self._subscription_id = 1
-
-    async def start(self):
-        if self._running:
-            return
-        self._running = True
-        logger.info("AsterPerpKlineClientManager: Started shared perpetual kline client")
-
-    async def stop(self):
-        if not self._running:
-            return
-
-        self._running = False
-
-        # Cancel reader and worker tasks
-        if self._reader_task and not self._reader_task.done():
-            self._reader_task.cancel()
-            try:
-                await self._reader_task
-            except asyncio.CancelledError:
-                pass
-
-        for task in self._worker_tasks:
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-
-        # Close websocket
-        if self._websocket:
-            await self._websocket.close()
-            self._websocket = None
-
-        logger.info("AsterPerpKlineClientManager: Stopped shared perpetual kline client")
-
-    def register_feed(self, feed: 'AsterPerpKlineFeed'):
-        self._active_feeds[feed._name] = feed
-
-    def unregister_feed(self, symbol: str):
-        self._active_feeds.pop(symbol, None)
-
-    async def _reader_coroutine(self):
-        """Network reader: connects WebSocket and reads messages."""
-        if not self._active_feeds:
-            logger.warning("AsterPerpKlineClientManager: No feeds registered for reader")
-            return
-
-        # Create stream params for all symbols (1m klines)
-        streams = [f"{symbol.lower()}@kline_1m" for symbol in self._active_feeds.keys()]
-        
-        reconnect_delay = 1
-        while self._running:
-            try:
-                async with websockets.connect(f"{WEBSOCKET_FUTURES_ENDPOINT}/stream?streams={'/'.join(streams)}") as websocket:
-                    self._websocket = websocket
-                    logger.info(f"AsterPerpKlineClientManager: WebSocket connected for {len(streams)} streams")
-                    reconnect_delay = 1
-
-                    while self._running:
-                        try:
-                            msg = await asyncio.wait_for(websocket.recv(), timeout=30)
-                            await self._queue.put(json.loads(msg))
-                        except asyncio.TimeoutError:
-                            # Send pong to keep connection alive
-                            try:
-                                await websocket.pong()
-                            except:
-                                pass
-                        except Exception as e:
-                            logger.error(f"AsterPerpKlineClientManager: Error in reader: {e}")
-                            await asyncio.sleep(0.1)
-
-            except Exception as e:
-                logger.error(f"AsterPerpKlineClientManager: WebSocket connection error: {e}", exc_info=False)
-
-            if self._running:
-                logger.warning(f"AsterPerpKlineClientManager: Reconnecting in {reconnect_delay}s...")
-                await asyncio.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 2, 60)
-
-    async def _worker_coroutine(self, worker_id: int):
-        """Worker coroutine: processes messages from queue."""
-        logger.debug(f"AsterPerpKlineClientManager: Worker {worker_id} started")
-
-        while self._running:
-            try:
-                msg = await self._queue.get()
-
-                # Aster wraps data in {"stream": "...", "data": {...}} or direct kline event
-                if "data" in msg and "stream" in msg:
-                    data = msg.get("data", {})
-                    stream = msg.get("stream", "")
-                elif "e" in msg and msg["e"] == "kline":
-                    data = msg
-                    stream = f"{msg.get('s', '').lower()}@kline_1m"
-                else:
-                    self._queue.task_done()
-                    continue
-
-                # Extract symbol from stream name
-                if "@kline" in stream:
-                    symbol = stream.split("@")[0].upper()
-                    feed = self._active_feeds.get(symbol)
-                    if feed:
-                        kline = feed._process_kline_event(data)
-                        if kline is not None:
-                            feed._kline = kline
-                            feed._historical.append(kline.close)
-
-                            if len(feed._historical) == 60:
-                                returns = [
-                                    (feed._historical[i] - feed._historical[i - 1]) / feed._historical[i - 1]
-                                    for i in range(1, len(feed._historical))
-                                ]
-                                feed._vol = statistics.stdev(returns) * math.sqrt(12)
-                                logger.info(f"[{symbol}] Perpetual Volatility: {feed._vol * 1e4:.2f} bps (60-candle window)")
-
-                self._queue.task_done()
-
-            except Exception as e:
-                logger.error(f"AsterPerpKlineClientManager: Worker {worker_id} error: {e}")
-                await asyncio.sleep(0.1)
-
-        logger.debug(f"AsterPerpKlineClientManager: Worker {worker_id} stopped")
-
-    async def run_multiplex_feeds(self):
-        """Run multiplex socket with reader and worker pool."""
-        if not self._active_feeds:
-            logger.warning("AsterPerpKlineClientManager: No feeds registered")
-            return
-
-        # Start reader coroutine
-        self._reader_task = asyncio.create_task(self._reader_coroutine())
-
-        # Start worker pool
-        num_workers = min(8, len(self._active_feeds))
-        self._worker_tasks = [
-            asyncio.create_task(self._worker_coroutine(i))
-            for i in range(num_workers)
-        ]
-
-        logger.info(f"AsterPerpKlineClientManager: Started with {num_workers} workers")
-        await self._reader_task
-
-
-class AsterPerpOrderBookClientManager:
-    """Shared WebSocket client for multiplex orderbook streams on perpetual market."""
-
-    def __init__(self):
-        self._websocket: Optional[Any] = None
-        self._queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
-        self._active_feeds: Dict[str, 'AsterPerpOrderBookFeed'] = {}
-        self._running = False
-        self._reader_task: Optional[asyncio.Task] = None
-        self._worker_tasks: List[asyncio.Task] = []
-        self._subscription_id = 1
-
-    async def start(self):
-        if self._running:
-            return
-        self._running = True
-        logger.info("AsterPerpOrderBookClientManager: Started shared perpetual orderbook client")
-
-    async def stop(self):
-        if not self._running:
-            return
-
-        self._running = False
-
-        # Cancel reader and worker tasks
-        if self._reader_task and not self._reader_task.done():
-            self._reader_task.cancel()
-            try:
-                await self._reader_task
-            except asyncio.CancelledError:
-                pass
-
-        for task in self._worker_tasks:
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-
-        # Close websocket
-        if self._websocket:
-            await self._websocket.close()
-            self._websocket = None
-
-        logger.info("AsterPerpOrderBookClientManager: Stopped shared perpetual orderbook client")
-
-    def register_feed(self, feed: 'AsterPerpOrderBookFeed'):
-        self._active_feeds[feed._name] = feed
-
-    def unregister_feed(self, symbol: str):
-        self._active_feeds.pop(symbol, None)
-
-    async def _reader_coroutine(self):
-        """Network reader: connects WebSocket and reads messages."""
-        if not self._active_feeds:
-            logger.warning("AsterPerpOrderBookClientManager: No feeds registered for reader")
-            return
-
-        # Create stream params for all symbols (20-level depth updates at 100ms)
-        streams = [f"{symbol.lower()}@depth@100ms" for symbol in self._active_feeds.keys()]
-        
-        reconnect_delay = 1
-        while self._running:
-            try:
-                async with websockets.connect(f"{WEBSOCKET_FUTURES_ENDPOINT}/stream?streams={'/'.join(streams)}") as websocket:
-                    self._websocket = websocket
-                    logger.info(f"AsterPerpOrderBookClientManager: WebSocket connected for {len(streams)} streams")
-                    reconnect_delay = 1
-
-                    while self._running:
-                        try:
-                            msg = await asyncio.wait_for(websocket.recv(), timeout=30)
-                            await self._queue.put(json.loads(msg))
-                        except asyncio.TimeoutError:
-                            # Send pong to keep connection alive
-                            try:
-                                await websocket.pong()
-                            except:
-                                pass
-                        except Exception as e:
-                            logger.error(f"AsterPerpOrderBookClientManager: Error in reader: {e}")
-                            await asyncio.sleep(0.1)
-
-            except Exception as e:
-                logger.error(f"AsterPerpOrderBookClientManager: WebSocket connection error: {e}", exc_info=False)
-
-            if self._running:
-                logger.warning(f"AsterPerpOrderBookClientManager: Reconnecting in {reconnect_delay}s...")
-                await asyncio.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 2, 60)
-
-    async def _worker_coroutine(self, worker_id: int):
-        """Worker coroutine: processes messages from queue."""
-        logger.debug(f"AsterPerpOrderBookClientManager: Worker {worker_id} started")
-
-        while self._running:
-            try:
-                msg = await self._queue.get()
-                if "e" in msg and msg["e"] == "depthUpdate":
-                    data = msg
-                    stream = f"{msg.get('s', '').lower()}@depth"
-                elif "data" in msg and "stream" in msg:
-                    data = msg.get("data", {})
-                    stream = msg.get("stream", "")
-                else:
-                    self._queue.task_done()
-                    continue
-
-                # Extract symbol from stream name
-                if "@depth" in stream:
-                    symbol = stream.split("@")[0].upper()
-                    feed = self._active_feeds.get(symbol)
-                    if feed:
-                        feed._data = await feed._process_depth_event(data)
-
-                        if feed.save_data:
-                            asyncio.create_task(feed._append_to_df(feed._data))
-
-                self._queue.task_done()
-
-            except Exception as e:
-                logger.error(f"AsterPerpOrderBookClientManager: Worker {worker_id} error: {e}")
-                await asyncio.sleep(0.1)
-
-        logger.debug(f"AsterPerpOrderBookClientManager: Worker {worker_id} stopped")
-
-    async def run_multiplex_feeds(self):
-        """Run multiplex socket with reader and worker pool."""
-        if not self._active_feeds:
-            logger.warning("AsterPerpOrderBookClientManager: No feeds registered")
-            return
-
-        # Start reader coroutine
-        self._reader_task = asyncio.create_task(self._reader_coroutine())
-        num_workers = min(8, len(self._active_feeds))
-        self._worker_tasks = [
-            asyncio.create_task(self._worker_coroutine(i))
-            for i in range(num_workers)
-        ]
-
-        logger.info(f"AsterPerpOrderBookClientManager: Started with {num_workers} workers")
-        await self._reader_task
-
-
-# Global client managers for perpetual market
-aster_perp_kline_client_manager = AsterPerpKlineClientManager()
-aster_perp_ob_client_manager = AsterPerpOrderBookClientManager()
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# AsterPerpKlineFeed
-# ──────────────────────────────────────────────────────────────────────────────
-
-class AsterPerpKlineFeed(AbstractDataFeed):
+class AsterPerpExchange(FuturesExchangeConnector):
     """
-    Real-time closed kline (candle) feed for a single Aster Perpetual DEX symbol.
-    Produces Kline objects and maintains a 60-candle rolling close-price window
-    for realised volatility.
+    Authenticated Aster USDS-M futures exchange client for multiple symbols.
+
+    Manages:
+      - Account balances and positions (via polling + user data stream)
+      - Per-symbol leverage and margin type
+      - Open orders registry using Order dataclass
+      - Market, limit, and stop order placement / cancellation
+      - Position management (close, adjust leverage)
+      - Real-time order updates via futures user data stream
 
     Usage:
-        feed = AsterPerpKlineFeed()
-        feed.create_new(asset="BTCUSDT", interval="1m")
-        await feed()
+        exchange = AsterPerpExchange(
+            args=args,
+            api_key="...", api_secret="...",
+            symbols=["ETHUSDT", "BTCUSDT"],
+        )
+        await exchange.run()
+        await exchange.place_market_order("ETHUSDT", Side.BUY, 0.1)
     """
 
-    def __init__(self, save_data: bool = False, file_dir: Optional[str] = None):
-        super().__init__(save_data=save_data, file_dir=file_dir)
-        self._kline: Optional[Kline] = None   # latest closed kline
-
-    def create_new(self, asset: str, interval: str = "1m"):
-        self._name = asset
-        self._interval = interval
-
-    @property
-    def latest_kline(self) -> Optional[Kline]:
-        return self._kline
-
-    @property
-    def latest_close(self) -> Optional[float]:
-        return self._historical[-1] if self._historical else None
-
-    # rolling vol from close prices — override base which uses mid-price
-    async def update_current_stats(self):
-        pass  # klines update _historical inline on each closed candle
-
-    def _process_kline_event(self, raw: dict) -> Optional[Kline]:
-        k = raw.get("k", {})
-        if not k.get("x"):         # only process closed candles
-            return None
-        
-        kline = Kline(
-            ticker=k["s"],
-            interval=k["i"],
-            start_time=dt.fromtimestamp(k["t"] / 1000),
-            end_time=dt.fromtimestamp(k["T"] / 1000),
-            open=float(k["o"]),
-            high=float(k["h"]),
-            low=float(k["l"]),
-            close=float(k["c"]),
-            volume=float(k["v"]),
+    def __init__(
+        self,
+        args: argparse.Namespace = argparse.Namespace(),
+        api_key: str = "",
+        api_secret: str = "",
+        symbols: Optional[List[str]] = None,
+        file_path: Optional[str] = None,
+        kline_manager: Optional[AsterPerpKlineClientManager] = None,
+        ob_manager: Optional[AsterPerpOrderBookClientManager] = None,
+        user_data_manager: Optional[AsterPerpUserDataClientManager] = None,
+        default_leverage: int = 1,
+    ):
+        super().__init__(
+            args=args,
+            api_key=api_key,
+            api_secret=api_secret,
+            symbols=symbols or [],
+            file_path=file_path,
+            kline_manager=kline_manager,
+            ob_manager=ob_manager,
+            default_leverage=default_leverage,
         )
-        return kline
 
-    async def __call__(self):
-        """Register with shared client manager and wait for multiplex events."""
-        global aster_perp_kline_client_manager
+        self.user_data_manager = user_data_manager or AsterPerpUserDataClientManager(api_key, api_secret)
+        self._session: Optional[aiohttp.ClientSession] = None
 
-        # Register this feed with the shared manager
-        aster_perp_kline_client_manager.register_feed(self)
+        self.strategy_name = getattr(args, "strategy_name", "")
+        self.strategy_id = getattr(args, "strategy_id", "")
 
-        # Start the shared manager if not already running
-        if not aster_perp_kline_client_manager._running:
-            await aster_perp_kline_client_manager.start()
-            # Start the multiplex feed runner in background
-            asyncio.create_task(aster_perp_kline_client_manager.run_multiplex_feeds())
+    # ── HTTP helpers ──────────────────────────────────────────────────────────
 
-        # Keep the feed alive
-        while True:
-            await asyncio.sleep(1)
+    def _sign(self, params: dict) -> dict:
+        """Add timestamp + HMAC SHA256 signature to a params dict (in-place)."""
+        params["timestamp"] = int(time.time() * 1000)
+        qs = urlencode(params)
+        sig = hmac.new(self._api_secret.encode(), qs.encode(), hashlib.sha256).hexdigest()
+        params["signature"] = sig
+        return params
 
+    def _headers(self) -> dict:
+        return {"X-MBX-APIKEY": self._api_key}
 
-# ──────────────────────────────────────────────────────────────────────────────
-# AsterPerpOrderBookFeed
-# ──────────────────────────────────────────────────────────────────────────────
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        params: Optional[dict] = None,
+        signed: bool = False,
+    ) -> Any:
+        """Async HTTP request against the Aster Futures REST API."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
 
-class AsterPerpOrderBookFeed(AbstractDataFeed):
-    """
-    Real-time depth (order book) feed for a single Aster Perpetual DEX symbol.
-    Produces OrderBook snapshots updated at 100ms intervals.
+        url = FUTURES_BASE_ENDPOINT + path
+        p = dict(params or {})
+        if signed:
+            self._sign(p)
 
-    Usage:
-        feed = AsterPerpOrderBookFeed()
-        feed.create_new(asset="BTCUSDT")
-        await feed()
-    """
+        async with self._session.request(
+            method, url, params=p if method.upper() == "GET" else None,
+            data=p if method.upper() != "GET" else None,
+            headers=self._headers(),
+        ) as resp:
+            body = await resp.json(content_type=None)
+            if resp.status >= 400:
+                logger.error(f"Aster Futures API error {resp.status}: {body}")
+                resp.raise_for_status()
+            return body
 
-    def __init__(self, save_data: bool = False, file_dir: Optional[str] = None):
-        super().__init__(save_data=save_data, file_dir=file_dir)
-        
-        # Aster Specific Parameters
-        self.last_update_id: Optional[int] = None
-        self.snapshot_ready: bool = False
-        self.event_buffer: List[dict] = []  # Buffer events while waiting for snapshot
-        self.first_update_processed: bool = False  # Track if we've synced with snapshot
+    # ── Initialisation ────────────────────────────────────────────────────────
 
-    def create_new(self, asset: str, interval: str = "100ms"):
-        self._name = asset
-        self._interval = interval
+    async def initialize(self):
+        """Ping the exchange, fetch symbol metadata, set leverage, refresh balances and start user-data stream."""
+        self._session = aiohttp.ClientSession()
 
-    def _fetch_rest_snapshot(self, limit: int = 100) -> dict:
-        resp = requests.get(
-            f"{FUTURES_BASE_ENDPOINT}/fapi/v1/depth",
-            params={"symbol": self._name, "limit": min(limit, 5000)},
-        )
-        resp.raise_for_status()
-        return resp.json()
+        # Health check
+        try:
+            await self._request("GET", "/fapi/v1/ping")
+            logger.info("AsterPerpExchange: ping OK")
+        except Exception as e:
+            logger.warning(f"AsterPerpExchange: ping failed: {e}")
 
-    async def get_initial_snapshot(self):
-        """Fetch snapshot and process any buffered events that cover it."""
-        raw = self._fetch_rest_snapshot(100)
-        ts = int(time.time() * 1000)
-        bids = [[float(b[0]), float(b[1])] for b in raw["bids"]]
-        asks = [[float(a[0]), float(a[1])] for a in raw["asks"]]
-        
-        self._data = AsterOrderBook.from_lists(
-            last_update_id=raw["lastUpdateId"],
-            last_timestamp=ts,
-            ticker=self._name,
-            interval=self._interval,
-            bid_levels=bids,
-            ask_levels=asks,
-        )
-        
-        self.snapshot_ready = True
-        self.first_update_processed = False  # Reset for new snapshot sync
-        logger.info(f"Fetched initial perpetual snapshot for [{self._name}] OB snapshot id={raw['lastUpdateId']}")
-        
-        # Process any buffered events now that snapshot is ready
-        if self.event_buffer:
-            logger.info(f"[{self._name}] Processing {len(self.event_buffer)} buffered depth events")
-            await self._process_buffered_events()
+        for sym in self._symbols:
+            await self._fetch_symbol_info(sym)
+            await self.set_leverage(sym, self._default_leverage)
 
-    async def _process_buffered_events(self):
-        """Process buffered events after snapshot is ready."""
-        buffered_events = self.event_buffer[:]
-        self.event_buffer.clear()
-        
-        logger.info(f"[{self._name}] Processing {len(buffered_events)} buffered perpetual events for snapshot sync")
-        for buffered_event in buffered_events:
-            # Skip events that are too old (u < lastUpdateId)
-            if buffered_event['u'] < self._data.last_update_id:
-                logger.info(f"[{self._name}] Skipping old buffered event u={buffered_event['u']}")
-                continue
-            
-            # Find first event that covers the snapshot
-            if buffered_event['U'] <= self._data.last_update_id and buffered_event['u'] >= self._data.last_update_id:
-                logger.info(f"[{self._name}] Found sync point: buffered event u={buffered_event['u']} covers snapshot id={self._data.last_update_id}")
-                await self._apply_depth_update(buffered_event)
-                self.first_update_processed = True
-                self._data.last_update_id = buffered_event['u']
-                
-            elif self.first_update_processed and buffered_event['pu'] == self._data.last_update_id:
-                logger.info(f"[{self._name}] Applying buffered event with pu={buffered_event['pu']} matching last_update_id={self._data.last_update_id}")
-                await self._apply_depth_update(buffered_event)
-                
-                
-            elif self.first_update_processed and buffered_event['pu'] != self._data.last_update_id:
-                logger.warning(f"[{self._name}] Gap detected: buffered event U={buffered_event['U']} > snapshot id={self.last_update_id}")
-                self.snapshot_ready = False
-                asyncio.create_task(self.get_initial_snapshot())
+        await self.refresh_balances()
+
+        # Start user data listener
+        try:
+            self.user_data_manager.register(self._handle_user_data)
+            await self.user_data_manager.start()
+            logger.info("AsterPerpExchange: user data stream started")
+        except Exception as e:
+            logger.error(f"AsterPerpExchange: failed to start user data stream: {e}")
+
+        logger.info("AsterPerpExchange initialised.")
+
+    async def _fetch_symbol_info(self, symbol: str):
+        """Fetch symbol filters (step size, min notional, tick size) from /fapi/v1/exchangeInfo."""
+        try:
+            data = await self._request("GET", "/fapi/v1/exchangeInfo", params={"symbol": symbol})
+            symbols = data.get("symbols", [])
+            info = next((s for s in symbols if s["symbol"] == symbol), None)
+            if not info:
+                logger.warning(f"[{symbol}] exchangeInfo: symbol not found")
                 return
-    
-    
-    async def _process_depth_event(self, event: dict) -> OrderBook:
-        """Process depth updates following Aster Perpetual API spec."""
-        
-        # Phase 1: Buffer events while snapshot is being fetched
-        if not self.snapshot_ready:
-            self.event_buffer.append(event)
-            logger.warning(f"[{self._name}] Buffering depth event (snapshot not ready). Buffer size: {len(self.event_buffer)}")
-            return self._data if self._data else None
-        
-        # Validate pu (previous update id)
-        if event.get('pu') != self._data.last_update_id:
-            if event.get('pu') < self._data.last_update_id:
-                logger.warning(f"[{self._name}] Received out-of-order event with pu={event.get('pu')} < last_update_id={self._data.last_update_id}. Ignoring event.")
-                return self._data
-            elif event.get('pu') > self._data.last_update_id:
-                logger.error(f"[{self._name}] Sequence break: event pu={event.get('pu')} > last_update_id={self._data.last_update_id}")
-                self.snapshot_ready = False
-                await asyncio.sleep(3.0)
-                asyncio.create_task(self.get_initial_snapshot())
-                raise ValueError("Invalid event sequence")
-        else:
-            #logger.info(f"[{self._name}] Processing perpetual depth event: U={event['U']} u={event['u']} (last_update_id={self._data.last_update_id})")
-            await self._apply_depth_update(event)
-        return self._data
-    
-    
-    async def _apply_depth_update(self, event: dict):
-        """Apply depth update to order book."""
-        ts = int(time.time() * 1000)
-        await self._data.apply_both_updates(ts, event['u'], 
-                                            bid_levels=event.get("b", []), ask_levels=event.get("a", []))
-        logger.success(f"[{self._name}] Perpetual OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
 
+            filters = info.get("filters", [])
 
-    async def __call__(self):
-        """Register with shared client manager and wait for multiplex events."""
-        global aster_perp_ob_client_manager
+            step_size = float(
+                next((f["stepSize"] for f in filters if f["filterType"] == "LOT_SIZE"), "0.0001")
+            )
+            min_notional = float(
+                next(
+                    (f.get("minNotional", f.get("minQty", 0))
+                     for f in filters
+                     if f["filterType"] in ("NOTIONAL", "MIN_NOTIONAL")),
+                    0.0,
+                )
+            )
+            tick_size = float(
+                next((f["tickSize"] for f in filters if f["filterType"] == "PRICE_FILTER"), "0.01")
+            )
 
-        # Register this feed with the shared manager (WebSocket will start buffering)
-        aster_perp_ob_client_manager.register_feed(self)
+            self._token_infos[symbol] = {
+                "step_size": step_size,
+                "min_notional": min_notional,
+                "tick_size": tick_size,
+                "base_asset": info.get("baseAsset", ""),
+                "quote_asset": info.get("quoteAsset", ""),
+                "base_asset_precision": info.get("baseAssetPrecision", 8),
+                "quote_asset_precision": info.get("quoteAssetPrecision", 8),
+            }
+            logger.info(f"[{symbol}] Futures step={step_size} min_notional={min_notional} tick={tick_size}")
+        except Exception as e:
+            logger.error(f"[{symbol}] _fetch_symbol_info error: {e}")
 
-        # Start the shared manager if not already running
-        if not aster_perp_ob_client_manager._running:
-            await aster_perp_ob_client_manager.start()
-            
-            # Start the multiplex feed runner in background (WebSocket reader/workers)
-            asyncio.create_task(aster_perp_ob_client_manager.run_multiplex_feeds())
+    # ── Leverage & Margin ─────────────────────────────────────────────────────
 
-        # Give WebSocket a moment to start buffering events
-        await asyncio.sleep(0.1)
-        
-        # NOW fetch the snapshot while events are being buffered
-        await self.get_initial_snapshot()
+    async def set_leverage(self, symbol: str, leverage: int):
+        try:
+            await self._request(
+                "POST", "/fapi/v1/leverage",
+                params={"symbol": symbol, "leverage": leverage},
+                signed=True,
+            )
+            self._leverages[symbol] = leverage
+            logger.info(f"[{symbol}] Leverage set to {leverage}x")
+        except Exception as e:
+            logger.error(f"[{symbol}] Failed to set leverage: {e}")
 
-        # Keep the feed alive
-        while True:
-            await asyncio.sleep(1)
+    async def set_margin_type(self, symbol: str, margin_type: str):
+        """Set margin type: 'ISOLATED' or 'CROSSED'."""
+        try:
+            await self._request(
+                "POST", "/fapi/v1/marginType",
+                params={"symbol": symbol, "marginType": margin_type},
+                signed=True,
+            )
+            self._margin_types[symbol] = margin_type
+            logger.info(f"[{symbol}] Margin type set to {margin_type}")
+        except aiohttp.ClientResponseError as e:
+            # Handle "margin type already set" gracefully
+            if e.status == 400:
+                self._margin_types[symbol] = margin_type
+                logger.debug(f"[{symbol}] Margin type already {margin_type}")
+            else:
+                logger.error(f"[{symbol}] Failed to set margin type: {e}")
+        except Exception as e:
+            logger.error(f"[{symbol}] Failed to set margin type: {e}")
+
+    # ── Account ───────────────────────────────────────────────────────────────
+
+    async def refresh_balances(self):
+        """Refresh balances and positions from the futures account endpoint."""
+        try:
+            account = await self._request("GET", "/fapi/v4/account", signed=True)
+            for asset in account.get("assets", []):
+                self._balances[asset["asset"]] = float(asset.get("walletBalance", 0))
+            # Also update positions while we have the data
+            self._update_positions_from_account(account)
+        except Exception as e:
+            logger.error(f"AsterPerpExchange: refresh_balances error: {e}")
+
+    async def refresh_positions(self):
+        """Refresh positions only (uses same endpoint as balances)."""
+        try:
+            account = await self._request("GET", "/fapi/v4/account", signed=True)
+            self._update_positions_from_account(account)
+        except Exception as e:
+            logger.error(f"AsterPerpExchange: refresh_positions error: {e}")
+
+    def _update_positions_from_account(self, account: dict):
+        """Extract position data from a futures account response."""
+        for position in account.get("positions", []):
+            symbol = position["symbol"]
+            amt = float(position.get("positionAmt", 0))
+            if amt != 0:
+                self._positions[symbol] = {
+                    "amount": amt,
+                    "entry_price": float(position.get("entryPrice", 0)),
+                    "unrealized_pnl": float(position.get("unrealizedProfit", 0)),
+                    "leverage": int(position.get("leverage", self._default_leverage)),
+                }
+            else:
+                self._positions.pop(symbol, None)
+
+    # ── User Data Stream Handling ─────────────────────────────────────────────
+
+    def _handle_user_data(self, msg: dict):
+        """Callback invoked by the user-data manager when an event arrives."""
+        et = msg.get("e")
+        if et == "ACCOUNT_UPDATE":
+            self._handle_account_update(msg)
+        elif et == "ORDER_TRADE_UPDATE":
+            self._handle_order_trade_update(msg)
+        elif et == "MARGIN_CALL":
+            logger.warning(f"MARGIN CALL received: {msg}")
+        elif et == "ACCOUNT_CONFIG_UPDATE":
+            self._handle_account_config_update(msg)
+
+    def _handle_account_update(self, msg: dict):
+        """
+        Handle ACCOUNT_UPDATE events — balance + position changes.
+
+        Structure:
+          msg["a"]["B"] -> list of {"a": asset, "wb": wallet_balance, "cw": cross_wallet_balance}
+          msg["a"]["P"] -> list of {"s": symbol, "pa": position_amt, "ep": entry_price, "up": unrealized_pnl}
+        """
+        account_data = msg.get("a", {})
+
+        # Update balances
+        for bal in account_data.get("B", []):
+            asset = bal.get("a")
+            wallet_balance = float(bal.get("wb", 0))
+            self._balances[asset] = wallet_balance
+
+        # Update positions
+        for pos in account_data.get("P", []):
+            symbol = pos.get("s")
+            amt = float(pos.get("pa", 0))
+            if amt != 0:
+                self._positions[symbol] = {
+                    "amount": amt,
+                    "entry_price": float(pos.get("ep", 0)),
+                    "unrealized_pnl": float(pos.get("up", 0)),
+                    "leverage": self._leverages.get(symbol, self._default_leverage),
+                }
+            else:
+                self._positions.pop(symbol, None)
+
+        logger.info(f"ACCOUNT_UPDATE applied: {len(account_data.get('B', []))} balance(s), {len(account_data.get('P', []))} position(s)")
+
+    def _handle_order_trade_update(self, msg: dict):
+        """
+        Handle ORDER_TRADE_UPDATE events — order status changes and fills.
+
+        Key fields in msg["o"]:
+          s  -> Symbol
+          i  -> Order ID
+          S  -> Side (BUY/SELL)
+          o  -> Order type (LIMIT, MARKET, STOP_MARKET, etc.)
+          X  -> Order status (NEW, PARTIALLY_FILLED, FILLED, CANCELED, etc.)
+          x  -> Execution type
+          q  -> Original quantity
+          p  -> Original price
+          ap -> Average price (cumulative)
+          z  -> Cumulative filled quantity
+          n  -> Commission of this trade
+          N  -> Commission asset
+          rp -> Realized profit of this trade
+        """
+        o = msg.get("o", {})
+        order_id = str(o.get("i"))
+        symbol = o.get("s")
+        exec_type = o.get("x")
+        raw_status = o.get("X")
+
+        internal_status = _BINANCE_STATUS.get(raw_status)
+        if internal_status is None:
+            logger.warning(f"[{symbol}] Unknown futures order status '{raw_status}' for order {order_id}")
+            return
+
+        symbol_orders = self._open_orders.get(symbol, {})
+
+        # ── NEW order arriving for the first time ────────────────────────────
+        if exec_type == "NEW" and order_id not in symbol_orders:
+            side = Side.BUY if o.get("S") == "BUY" else Side.SELL
+            order_type = _ASTER_ORDER_TYPE.get(o.get("o", "LIMIT"), OrderType.OTHERS)
+
+            order = Order(
+                id=order_id,
+                symbol=symbol,
+                side=side,
+                order_type=order_type,
+                quantity=float(o.get("q", 0)),
+                price=float(o.get("p", 0)) or None,
+                status=internal_status,
+                timestamp=datetime.datetime.fromtimestamp(
+                    msg.get("T", 0) / 1000, tz=datetime.timezone.utc
+                ),
+                venue=Venue.ASTER,
+                commission=float(o.get("n", 0)),
+                commission_asset=o.get("N"),
+                last_updated_timestamp=int(msg.get("E", 0)),
+            )
+            self._open_orders[symbol][order_id] = order
+            logger.info(f"[{symbol}] New futures order registered: {order}")
+            return
+
+        # ── Update existing order ────────────────────────────────────────────
+        order = symbol_orders.get(order_id)
+        if order is None:
+            logger.warning(f"[{symbol}] ORDER_TRADE_UPDATE for unknown order {order_id} (status={raw_status}), skipping")
+            return
+
+        cum_filled_qty = float(o.get("z", 0))
+        avg_price = float(o.get("ap", 0))
+
+        if cum_filled_qty > order.filled_qty:
+            order.update_fill(cum_filled_qty, avg_price)
+
+        order.commission += float(o.get("n", 0))
+        order.commission_asset = o.get("N") or order.commission_asset
+        order.status = internal_status
+
+        logger.info(f"[{symbol}] Futures order updated: {order}")
+
+        # Remove terminal orders from open-orders registry
+        if not order.is_active:
+            self._open_orders[symbol].pop(order_id, None)
+            logger.info(f"[{symbol}] Futures order {order_id} removed from open orders (status={raw_status})")
+
+    def _handle_account_config_update(self, msg: dict):
+        """Handle ACCOUNT_CONFIG_UPDATE — leverage or multi-asset mode changes."""
+        ac = msg.get("ac", {})
+        if ac:
+            symbol = ac.get("s")
+            leverage = int(ac.get("l", self._default_leverage))
+            self._leverages[symbol] = leverage
+            logger.info(f"[{symbol}] Leverage updated to {leverage}x via stream")
+
+    # ── Price helper ──────────────────────────────────────────────────────────
+
+    def last_price(self, symbol: str) -> Optional[float]:
+        """Best available mid-price: OB mid -> last kline close -> None."""
+        if self.ob_manager:
+            feed = self.ob_manager.get_feed(symbol)
+            if feed and feed.data:
+                return feed.data.mid_price
+
+        if self.kline_manager:
+            feed = self.kline_manager.get_feed(symbol)
+            if feed and feed.latest_close:
+                return feed.latest_close
+
+        return None
+
+    # ── Order Health Check ────────────────────────────────────────────────────
+
+    def order_health_check(self, symbol: str, side: Side, quantity: float) -> bool:
+        """Validate minimum notional and approximate balance sufficiency for a futures order."""
+        price = self.last_price(symbol) or 0.0
+        notional = price * abs(quantity)
+        min_notional = self._token_infos.get(symbol, {}).get("min_notional", 0.0)
+
+        if notional < min_notional:
+            logger.error(f"[{symbol}] Estimated notional {notional:.4f} < min {min_notional}")
+            return False
+
+        # Check approximate margin availability (wallet balance in quote)
+        quote_asset = self._token_infos.get(symbol, {}).get("quote_asset", "USDT")
+        leverage = self.get_leverage(symbol)
+        required_margin = notional / leverage
+        available = self._balances.get(quote_asset, 0.0)
+
+        if available < required_margin:
+            logger.error(
+                f"[{symbol}] Insufficient margin for {side.value} {quantity}. "
+                f"Need ~{required_margin:.2f} {quote_asset} (at {leverage}x), have {available:.2f}"
+            )
+            return False
+
+        return True
+
+    # ── Orders ────────────────────────────────────────────────────────────────
+
+    async def place_limit_order(
+        self, symbol: str, side: Side, price: float, quantity: float,
+        reduce_only: bool = False, time_in_force: str = "GTC"
+    ):
+        """Place a GTC limit order on Aster Futures."""
+        params = {
+            "symbol": symbol,
+            "side": side.value.upper(),
+            "type": "LIMIT",
+            "timeInForce": time_in_force,
+            "quantity": self._round_step(symbol, quantity),
+            "price": str(price),
+            "reduceOnly": str(reduce_only).lower(),
+        }
+        try:
+            resp = await self._request("POST", "/fapi/v1/order", params=params, signed=True)
+
+            order_id = str(resp["orderId"])
+            order = Order(
+                id=order_id,
+                symbol=symbol,
+                side=side,
+                order_type=OrderType.LIMIT,
+                quantity=float(resp.get("origQty", quantity)),
+                price=float(resp.get("price", price)),
+                status=_BINANCE_STATUS.get(resp.get("status", "NEW"), OrderStatus.OPEN),
+                timestamp=datetime.datetime.fromtimestamp(
+                    resp.get("updateTime", 0) / 1000, tz=datetime.timezone.utc
+                ),
+                venue=Venue.ASTER,
+                last_updated_timestamp=resp.get("updateTime"),
+            )
+            self._open_orders[symbol][order_id] = order
+            logger.info(f"Futures limit order placed: {order}")
+            return order
+
+        except Exception as e:
+            logger.error(f"[{symbol}] place_limit_order error: {e}")
+
+    async def place_stop_order(
+        self, symbol: str, side: Side, quantity: float, stop_price: float,
+        reduce_only: bool = True
+    ):
+        """Place a stop-market order on Aster Futures."""
+        params = {
+            "symbol": symbol,
+            "side": side.value.upper(),
+            "type": "STOP_MARKET",
+            "stopPrice": str(stop_price),
+            "quantity": self._round_step(symbol, quantity),
+            "reduceOnly": str(reduce_only).lower(),
+        }
+        try:
+            resp = await self._request("POST", "/fapi/v1/order", params=params, signed=True)
+
+            order_id = str(resp["orderId"])
+            order = Order(
+                id=order_id,
+                symbol=symbol,
+                side=side,
+                order_type=OrderType.STOP_MARKET,
+                quantity=float(resp.get("origQty", quantity)),
+                price=stop_price,
+                status=_BINANCE_STATUS.get(resp.get("status", "NEW"), OrderStatus.OPEN),
+                timestamp=datetime.datetime.fromtimestamp(
+                    resp.get("updateTime", 0) / 1000, tz=datetime.timezone.utc
+                ),
+                venue=Venue.ASTER,
+                last_updated_timestamp=resp.get("updateTime"),
+            )
+            self._open_orders[symbol][order_id] = order
+            logger.info(f"Futures stop order placed: {order}")
+            return order
+
+        except Exception as e:
+            logger.error(f"[{symbol}] place_stop_order error: {e}")
+
+    async def place_take_profit_order(
+        self, symbol: str, side: Side, quantity: float, stop_price: float,
+        reduce_only: bool = True
+    ):
+        """Place a take-profit market order on Aster Futures."""
+        params = {
+            "symbol": symbol,
+            "side": side.value.upper(),
+            "type": "TAKE_PROFIT_MARKET",
+            "stopPrice": str(stop_price),
+            "quantity": self._round_step(symbol, quantity),
+            "reduceOnly": str(reduce_only).lower(),
+        }
+        try:
+            resp = await self._request("POST", "/fapi/v1/order", params=params, signed=True)
+
+            order_id = str(resp["orderId"])
+            order = Order(
+                id=order_id,
+                symbol=symbol,
+                side=side,
+                order_type=OrderType.TAKE_PROFIT_MARKET,
+                quantity=float(resp.get("origQty", quantity)),
+                price=stop_price,
+                status=_BINANCE_STATUS.get(resp.get("status", "NEW"), OrderStatus.OPEN),
+                timestamp=datetime.datetime.fromtimestamp(
+                    resp.get("updateTime", 0) / 1000, tz=datetime.timezone.utc
+                ),
+                venue=Venue.ASTER,
+                last_updated_timestamp=resp.get("updateTime"),
+            )
+            self._open_orders[symbol][order_id] = order
+            logger.info(f"Futures take-profit order placed: {order}")
+            return order
+
+        except Exception as e:
+            logger.error(f"[{symbol}] place_take_profit_order error: {e}")
+
+    async def place_market_order(
+        self,
+        symbol: str,
+        side: Side,
+        quantity: float,
+        reduce_only: bool = False,
+    ):
+        """Place a futures market order."""
+        if not self.order_health_check(symbol, side, quantity):
+            logger.error(f"[{symbol}] Futures market order health check failed. Order not placed.")
+            return
+
+        price = self.last_price(symbol) or 0.0
+        base_asset = self._token_infos.get(symbol, {}).get("base_asset", "")
+        quote_asset = self._token_infos.get(symbol, {}).get("quote_asset", "USDT")
+
+        qty = self._round_step(symbol, abs(quantity))
+
+        logger.info(f"[{symbol}] Futures Market {side.value.upper()} qty={qty} (~{qty * price:.2f} {quote_asset})")
+
+        params = {
+            "symbol": symbol,
+            "side": side.value.upper(),
+            "type": "MARKET",
+            "quantity": qty,
+            "reduceOnly": str(reduce_only).lower(),
+        }
+
+        try:
+            resp = await self._request("POST", "/fapi/v1/order", params=params, signed=True)
+
+            avg_price, total_comm = self._average_fill_price(resp)
+            total_base_quantity = float(resp.get("executedQty", 0))
+            total_quote_quantity = float(resp.get("cumQuote", resp.get("cummulativeQuoteQty", 0)))
+            order_id = int(resp.get("orderId", 0))
+            status = str(resp.get("status", "FILLED"))
+            side_str = str(resp.get("side", side.value.upper()))
+            comm_asset = (resp.get("fills") or [{}])[0].get("commissionAsset", quote_asset)
+
+            logger.success(
+                f"[{symbol}] Futures Filled: {side_str} {total_base_quantity} @ {avg_price:.6f} "
+                f"comm={total_comm} {comm_asset}"
+            )
+
+            asyncio.create_task(self._record_trade(
+                base_asset=base_asset,
+                quote_asset=quote_asset,
+                base_amount_executed=total_base_quantity,
+                quote_amount_executed=total_quote_quantity,
+                order_type=OrderType.MARKET,
+                price=avg_price,
+                commission=total_comm,
+                order_id=order_id,
+                status=status,
+                side_str=side_str,
+                comm_asset=comm_asset,
+            ))
+            return resp
+
+        except Exception as e:
+            logger.error(f"[{symbol}] place_market_order error: {e}")
+
+    async def cancel_order(self, symbol: str, order_id: str):
+        """Cancel an active futures order by id."""
+        try:
+            resp = await self._request(
+                "DELETE", "/fapi/v1/order",
+                params={"symbol": symbol, "orderId": order_id},
+                signed=True,
+            )
+            self._open_orders[symbol].pop(order_id, None)
+            logger.info(f"[{symbol}] Futures order {order_id} cancelled: {resp}")
+        except Exception as e:
+            logger.error(f"[{symbol}] cancel_order error: {e}")
+
+    async def get_open_orders(self, symbol: str):
+        """Fetch and reconcile open orders for a specific symbol."""
+        try:
+            raw_orders = await self._request(
+                "GET", "/fapi/v1/openOrders",
+                params={"symbol": symbol},
+                signed=True,
+            )
+
+            # Build new OrderedDict from exchange response
+            refreshed = collections.OrderedDict()
+            for o in raw_orders:
+                order_id = str(o.get("orderId"))
+                updated_time = o.get("updateTime")
+
+                # Keep local version if it's more recent
+                existing = self._open_orders[symbol].get(order_id)
+                if existing and updated_time and existing.last_updated_timestamp and updated_time < existing.last_updated_timestamp:
+                    refreshed[order_id] = existing
+                    continue
+
+                raw_status = o.get("status", "NEW")
+                raw_type = o.get("type", "LIMIT")
+                raw_side = o.get("side", "BUY")
+
+                cum_filled_qty = float(o.get("executedQty", 0))
+                avg_price = float(o.get("avgPrice", 0)) or float(o.get("price", 0))
+
+                order = Order(
+                    id=order_id,
+                    symbol=symbol,
+                    side=Side.BUY if raw_side == "BUY" else Side.SELL,
+                    order_type=_ASTER_ORDER_TYPE.get(raw_type, OrderType.OTHERS),
+                    quantity=float(o.get("origQty", 0)),
+                    price=float(o.get("price", 0)) or None,
+                    status=_BINANCE_STATUS.get(raw_status, OrderStatus.OPEN),
+                    avg_fill_price=avg_price,
+                    filled_qty=cum_filled_qty,
+                    timestamp=datetime.datetime.fromtimestamp(
+                        o.get("time", 0) / 1000, tz=datetime.timezone.utc
+                    ),
+                    venue=Venue.ASTER,
+                    last_updated_timestamp=updated_time,
+                )
+                refreshed[order_id] = order
+
+            self._open_orders[symbol] = refreshed
+
+        except Exception as e:
+            logger.error(f"[{symbol}] get_open_orders error: {e}")
+
+    # ── Position Management ───────────────────────────────────────────────────
+
+    async def close_position(self, symbol: str):
+        """Close entire position for a symbol via market order."""
+        position = self.get_position(symbol)
+        if not position:
+            logger.warning(f"[{symbol}] No position to close")
+            return
+
+        amount = position["amount"]
+        close_side = Side.SELL if amount > 0 else Side.BUY
+        qty = abs(amount)
+
+        params = {
+            "symbol": symbol,
+            "side": close_side.value.upper(),
+            "type": "MARKET",
+            "quantity": self._round_step(symbol, qty),
+            "reduceOnly": "true",
+        }
+        try:
+            resp = await self._request("POST", "/fapi/v1/order", params=params, signed=True)
+            logger.info(f"[{symbol}] Position closed: {resp}")
+        except Exception as e:
+            logger.error(f"[{symbol}] Failed to close position: {e}")
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _round_step(self, symbol: str, qty: float) -> float:
+        """Round quantity down to the exchange's step size."""
+        step = self._token_infos.get(symbol, {}).get("step_size", 0.0001)
+        if step <= 0:
+            return qty
+        precision = max(0, round(-math.log10(step)))
+        return round(math.floor(qty / step) * step, precision)
+
+    @staticmethod
+    def _average_fill_price(resp: dict):
+        """
+        Compute VWAP from a market order fill response.
+        Falls back to cummulativeQuoteQty / executedQty if fills list is absent.
+        """
+        fills = resp.get("fills", [])
+        if fills:
+            total_qty = sum(float(f["qty"]) for f in fills)
+            total_notional = sum(float(f["qty"]) * float(f["price"]) for f in fills)
+            total_comm = sum(float(f["commission"]) for f in fills)
+            avg = total_notional / total_qty if total_qty else 0.0
+            return avg, total_comm
+
+        # Fallback for exchanges that omit fills
+        exec_qty = float(resp.get("executedQty", 0))
+        quote_qty = float(resp.get("cummulativeQuoteQty", resp.get("cumQuote", 0)))
+        avg = quote_qty / exec_qty if exec_qty else 0.0
+        return avg, 0.0
+
+    # ── Trade Recording ───────────────────────────────────────────────────────
+
+    async def _record_trade(
+        self,
+        base_asset: str,
+        quote_asset: str,
+        base_amount_executed: float,
+        quote_amount_executed: float,
+        order_type: OrderType,
+        price: float,
+        commission: float,
+        order_id: int,
+        status: str,
+        side_str: str,
+        comm_asset: str,
+    ):
+        ts = datetime.datetime.now(self._utc8)
+        try:
+            CexTrade.create(
+                id=ts.strftime("%Y-%m-%d_%H-%M-%S") + "_aster_perp_" + self.strategy_name,
+                datetime=ts,
+                strategy_id=self.strategy_id,
+                strategy_name=self.strategy_name,
+                venue=Venue.ASTER,
+                asset_type=AssetType.PERPETUAL,
+                symbol=base_asset + quote_asset,
+                side=Side.BUY if side_str.upper() == "BUY" else Side.SELL,
+                base_amount=base_amount_executed,
+                quote_amount=quote_amount_executed,
+                price=price,
+                commission_asset=comm_asset,
+                total_commission=commission,
+                total_commission_quote=(
+                    commission * price
+                    if comm_asset.upper() not in _STABLECOINS
+                    else commission
+                ),
+                order_id=str(order_id),
+                status=_BINANCE_STATUS.get(status, OrderStatus.OPEN),
+                order_side=_BINANCE_SIDE.get(side_str.upper(), Side.BUY),
+                order_type=order_type,
+            )
+            logger.info(f"Futures trade recorded at {ts.strftime('%Y-%m-%d_%H-%M-%S')}")
+        except Exception as e:
+            logger.error(f"_record_trade DB error: {e}")
+
+    # ── Run / Cleanup ─────────────────────────────────────────────────────────
+
+    async def run(self):
+        """
+        Initialise the futures client and start background monitoring tasks.
+        Data feeds are NOT started here — pass them to your ThreadPoolExecutor separately.
+        """
+        await self.initialize()
+        asyncio.create_task(self.monitor_balances(interval_secs=10, name="AsterPerp"))
+        asyncio.create_task(self.monitor_open_orders())
+        asyncio.create_task(self.print_snapshot())
+        await asyncio.sleep(0.5)
+        logger.info("AsterPerpExchange running.")
+
+    async def cleanup(self):
+        """Stop data managers and close the HTTP session."""
+        await self.user_data_manager.stop()
+
+        if self.kline_manager:
+            await self.kline_manager.stop()
+        if self.ob_manager:
+            await self.ob_manager.stop()
+
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
+
+        logger.info("AsterPerpExchange cleanup completed.")
