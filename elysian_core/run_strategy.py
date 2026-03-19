@@ -29,12 +29,14 @@ from elysian_core.connectors.BinanceFuturesDataConnectors import (
 )
 from elysian_core.connectors.BinanceFuturesExchange import BinanceFuturesExchange
 
-from elysian_core.connectors.AsterExchange import (
-    AsterOrderBookFeed,
+from elysian_core.connectors.AsterDataConnectors import (
     AsterKlineFeed,
+    AsterOrderBook,
     AsterKlineClientManager,
     AsterOrderBookClientManager
 )
+
+from elysian_core.connectors.AsterExchange import AsterSpotExchange
 
 from elysian_core.connectors.AsterPerpDataConnectors import (
     AsterPerpKlineClientManager,
@@ -50,12 +52,17 @@ from elysian_core.utils.logger import setup_custom_logger
 from elysian_core.utils.utils import load_config, replace_placeholders, config_to_args
 from pathlib import Path
 import json
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
+from elysian_core.core.event_bus import EventBus
+from elysian_core.core.enums import Venue
+from elysian_core.strategy.base_strategy import SpotStrategy
 
 import sys
-    # Worker processes on Windows default to ProactorEventLoop, which breaks
-    # aiohttp (causes TimeoutError). Force the selector-based policy here so
-    # that each spawned process matches the policy set in __main__.
+
+
+# Strategy Imports
+from elysian_core.strategy.test_strategy import TestPrintStrategy
+    
 if sys.platform.startswith('win'):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         
@@ -232,14 +239,14 @@ class StrategyRunner:
         # Initialize Binance spot exchange
         if hasattr(self, 'binance_tokens') and self.binance_tokens:
             self.binance_exchange = BinanceSpotExchange(
-                args = self.args,
+                args=self.args,
                 api_key=self._get_env('BINANCE_API_KEY', required=True),
                 api_secret=self._get_env('BINANCE_API_SECRET', required=True),
                 symbols=self.binance_token_symbols,
                 kline_manager=self.binance_kline_manager,
-                ob_manager=self.binance_ob_manager
+                ob_manager=self.binance_ob_manager,
+                event_bus=getattr(self, 'event_bus', None),
             )
-            #logger.info("Binance spot exchange initialized")
         
         # Initialize Binance futures exchange
         if hasattr(self, 'binance_futures_tokens') and self.binance_futures_tokens:
@@ -323,30 +330,6 @@ class StrategyRunner:
             await asyncio.gather(*multiplex_tasks)
             
     
-    
-    # Sync Wrappers
-    def setup_and_run_binance_feeds_and_exchange(self):
-        '''Helper function to setup Binance feeds and return the multiplex tasks.
-           Wraps around _setup_data_feeds for better modularity and testing.'''
-
-        """Sync wrapper — runs both coroutines concurrently in a single event loop."""
-        
-
-        async def _inner():
-            try:
-                # Initialize the exchange first so its AsyncClient and
-                # get_exchange_info() call don't compete with the kline/OB
-                # managers creating their own AsyncClients concurrently.
-                # Running them together causes the large exchangeInfo response
-                # to be starved and timeout under aiohttp 3.13+.
-                await self.binance_exchange.run()
-                await self._setup_binance_data_feeds()
-            finally:
-                await self.binance_exchange.cleanup()
-
-        asyncio.run(_inner())
-    
-    
 # --------- Setting up Binance Futures Kline and OB Feeds with Multiplex Architecture --------- # 
     async def _setup_binance_futures_data_feeds(self) -> None:
         """Initialize all futures data feeds with multiplex architecture"""
@@ -404,11 +387,6 @@ class StrategyRunner:
             await asyncio.gather(*multiplex_tasks)
             
             
-    def setup_and_run_binance_futures_feeds(self):
-        '''Helper function to setup Binance futures feeds and return the multiplex tasks. 
-           Wraps around _setup_binance_futures_data_feeds for better modularity and testing.'''
-        
-        asyncio.run(self._setup_binance_futures_data_feeds())
 
 
 
@@ -470,11 +448,7 @@ class StrategyRunner:
             await asyncio.gather(*multiplex_tasks)
             
     
-    def setup_and_run_aster_feeds(self):
-        '''Helper function to setup Aster feeds and return the multiplex tasks. 
-           Wraps around _setup_data_feeds for better modularity and testing.'''
-        
-        asyncio.run(self._setup_aster_data_feeds())
+    # Legacy sync wrapper removed — see run().
         
         
         
@@ -535,76 +509,59 @@ class StrategyRunner:
             await asyncio.gather(*multiplex_tasks)
             
     
-    def setup_and_run_aster_futures_feeds(self):
-        '''Helper function to setup Aster Perp feeds and return the multiplex tasks. 
-           Wraps around _setup_data_feeds for better modularity and testing.'''
-        
-        asyncio.run(self._setup_aster_futures_data_feeds())
-        
+    async def run(self, strategy: SpotStrategy = None) -> None:
+        """Run the complete strategy in a single event loop.
 
-    
-    
-    # # TO DO
-    # async def _setup_volatility_feed(self) -> None:
-    #     """Initialize volatility feed from Redis."""
-    #     logger.info("Setting up volatility feed...")
-        
-    #     redis_port = int(os.getenv('REDIS_PORT'))
-    #     redis_host = os.getenv('REDIS_HOST')
-        
-    #     redis = RedisConfig(host=redis_host, port=redis_port).local()
-    #     self.vol_feed = await VolatilityBarbClientLocal.new(redis=redis)
-        
-        
-    # async def _setup_processor(self) -> None:
-    #     """Initialize main processor."""
-    #     logger.info("Setting up processor...")
-        
-    #     self.processor = Processor(
-    #         datafeed=self.data_feed,
-    #         tokenlist=self.total_token_pairs,
-    #         eventfilter=self.event_filter,
-    #         bidBuilder=self.shio_bid_builder,
-    #         poolManager=self.pool_state,
-    #         sui_event_listener=self.sui_event_listener,
-    #         tq_hedger=self.tq_hedger,
-    #         vol_feed=self.vol_feed,
-    #         timestamp=self.timestamp,
-    #     )
-    
-    
-    async def run(self) -> None:
-        """Run the complete strategy. Main Async loop that kick starts all asynchronous components"""
+        All feeds, exchange connectors and the optional *strategy* share one
+        asyncio event loop.  Heavy compute is offloaded via
+        ``strategy.run_heavy()``.
+        """
         try:
             logger.info("Starting strategy runner...")
-            
+
             # Setup phase
             self._setup_config()
+
+            # Create shared event bus BEFORE exchanges so it can be injected
+            self.event_bus = EventBus()
+
             self._setup_exchanges()
-            #await self._setup_processor()
-            
-            logger.info("All components initialized. Starting event loops...")            
-            # Initialize the BinanceExchange Connector
 
-            process_jobs = [
-                (self.setup_and_run_binance_feeds_and_exchange, [], "binance_feeds and binance exchange connector"),
-                # (self.setup_and_run_aster_feeds, [], "aster_feeds"),
-                # (self.setup_and_run_binance_futures_feeds, [], "binance_futures_feeds"),
-                # (self.setup_and_run_aster_futures_feeds, [], "aster_futures_feeds")
+            # Inject event bus into client managers
+            self.binance_kline_manager.set_event_bus(self.event_bus)
+            self.binance_ob_manager.set_event_bus(self.event_bus)
+
+            # Wire runner's event bus and exchanges into strategy, then start
+            if strategy is not None:
+                strategy._event_bus = self.event_bus
+                strategy._exchanges = {Venue.BINANCE: self.binance_exchange}
+                await strategy.start()
+
+            logger.info("All components initialized. Starting event loops...")
+
+            # Run exchange + feeds in single event loop
+            # Initialize the exchange first so its AsyncClient and get_exchange_info() call don't compete with the kline/OB
+            # managers creating their own AsyncClients concurrently.
+            try:
+                # Initialize the exchange first so its AsyncClient and get_exchange_info() call don't compete with the kline/OB
+                # managers creating their own AsyncClients concurrently.
+                await self.binance_exchange.run()
+
+                # _setup_binance_data_feeds blocks forever (runs multiplex feed tasks).  If the strategy has its own long-running coroutine (e.g. periodic rebalance timer), gather them
+                # so both run concurrently in the same event loop.
+                coros = [self._setup_binance_data_feeds()]
                 
-            ]
-            
-            # Run all task groups concurrently using ProcessPoolExecutor
-            loop = asyncio.get_running_loop()
-            logger.info(f"Running {len(process_jobs)} task group(s) with ProcessPoolExecutor...")
-            with ProcessPoolExecutor(max_workers=4) as executor:
-                futures = [
-                    loop.run_in_executor(executor, func, *args)
-                    for func, args, process_name in process_jobs
-                ]
-                await asyncio.gather(*futures)
+                if strategy is not None:
+                    
+                    # Entry corou for a strategy
+                    coros.append(strategy.run_forever())
+                await asyncio.gather(*coros)
+                
+            finally:
+                await self.binance_exchange.cleanup()
+                if strategy is not None:
+                    await strategy.stop()
 
-        
         except asyncio.CancelledError:
             logger.warning("Strategy cancelled")
         except Exception as e:
@@ -614,28 +571,12 @@ class StrategyRunner:
             logger.info("Cleaning up...")
             await self._cleanup([])
             logger.info("Strategy runner shutdown complete")
-
-    
-    
     
 
     
 #############################################################################################################################################################
 ######## Testing functions for individual components in isolation   #########################################################################################
 #############################################################################################################################################################
-    
-
-# Standalone functions for backward compatibility
-def run_event_loop_in_thread(tasks):
-    """Runs a group of coroutines in a separate thread with a dedicated event loop."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(asyncio.gather(*tasks))
-    finally:
-        loop.close()
-
-
 async def cleanup(tasks_groups):
     """Cleanup function to properly shutdown all tasks"""
     for tasks in tasks_groups:
@@ -650,29 +591,23 @@ async def cleanup(tasks_groups):
             await asyncio.gather(*tasks, return_exceptions=True)
 
 
-async def run_strategy():
-    """Main entry point for running the strategy."""
+async def run_test_strategy():
+
     runner = StrategyRunner()
-    await runner.run()
+    strategy = TestPrintStrategy(exchanges={}, event_bus=EventBus())
+    await runner.run(strategy=strategy)
+
 
 if __name__ == "__main__":
-    
+
     # Fix for aiodns on Windows
     if sys.platform.startswith('win'):
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     # Parse command line arguments
-    if len(sys.argv) > 1 and sys.argv[1] == "test":
-        # Test mode: run Binance feed test
-        feed_type = sys.argv[2] if len(sys.argv) > 2 else "kline"
-        duration = int(sys.argv[3]) if len(sys.argv) > 3 else 60
-        logger.info(f"Running in TEST mode: {feed_type} feed for {duration}s")
-        asyncio.run(test_binance_feed(feed_type=feed_type, duration=duration))
-    else:
-        # Production mode: run full strategy
-        logger.info("Running in PRODUCTION mode")
-        asyncio.run(run_strategy())
     
+    logger.info("Running in TEST-STRATEGY mode")
+    asyncio.run(run_test_strategy())
     
     
     

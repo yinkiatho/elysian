@@ -288,24 +288,34 @@ class MarketMakerOMS:
             await asyncio.sleep(60)  # Check every minute
 ```
 
-### Strategy Engine Integration
+### SpotStrategy Integration
 ```python
-class MarketMakingStrategy(StrategyEngine):
+from elysian_core.strategy.base_strategy import SpotStrategy
+from elysian_core.core.events import OrderBookUpdateEvent, KlineEvent
+
+class MarketMakingStrategy(SpotStrategy):
     def __init__(self, market_maker, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.market_maker = market_maker
-    
-    async def on_event(self, event):
-        """Handle market events for market making."""
-        # Update order book
+
+    async def on_orderbook_update(self, event: OrderBookUpdateEvent):
+        """React to orderbook updates for market making."""
+        # Update internal order book state
         await self.market_maker.order_book.update_order_book()
-        
-        # Generate new quotes
-        mid_price = await self.get_current_price(self.market_maker.symbol)
+
+        # Generate new quotes based on live spread
+        mid_price = event.orderbook.mid_price
         quotes = self.market_maker.generate_quotes(mid_price)
-        
-        # Place orders
-        await self.market_maker.place_orders(quotes)
+
+        # Place orders via exchange connector
+        exchange = self.get_exchange()
+        await self.market_maker.place_orders(quotes, exchange)
+
+    async def on_kline(self, event: KlineEvent):
+        """Adjust spread based on volatility from kline data."""
+        vol = self.get_current_vol(event.symbol)
+        if vol:
+            self.market_maker.adjust_spread(vol)
 ```
 
 ## Configuration

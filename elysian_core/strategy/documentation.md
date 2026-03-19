@@ -1,233 +1,341 @@
 # Strategy Documentation
 
 ## Overview
-The strategy module provides a framework for implementing event-driven trading strategies. It includes base classes for strategy development and signal processing components.
 
-## Key Classes and Functions
+The strategy module provides a hook-based, event-driven framework for implementing spot trading strategies. The core class is `SpotStrategy`, which subscribes to an `EventBus` and receives typed events (kline, orderbook, order, balance) through async hook functions. Strategies override only the hooks they need — all others are no-op by default.
 
-### StrategyEngine (strategy_engine.py)
-**Abstract base class for trading strategies with event-driven execution.**
+## Key Classes
 
-**Methods:**
-- `__init__(feeds, exchange)`: Initialize with data feeds and exchange client
-- `get_feed(symbol)`: Get data feed for specific symbol
-- `get_current_price(pair, side)`: Get current market price with fallback logic
-- `get_current_vol(symbol)`: Get rolling volatility for symbol
-- `_split_pair(pair)`: Parse trading pair into base/quote components
-- `on_event(event)`: Abstract method for strategy logic (must be implemented)
-- `run(event_sources)`: Start strategy execution with event sources
+### SpotStrategy (base_strategy.py)
 
-**Price Resolution Logic:**
-1. Direct feed lookup (bid/ask/mid based on side)
-2. Inverted pair lookup
-3. Stablecoin proxy (e.g., ETHUSDC → ETHUSDT)
-4. Synthetic construction via USDT legs
+**Event-driven base class for spot trading strategies. Subclass and override `on_*` hooks.**
 
-**Attributes:**
-- `_feeds`: Dict of symbol → AbstractDataFeed
-- `_exchange`: Exchange client for order execution
-- `_trade_id`: Incremental trade identifier
+#### Constructor
 
-### Processor (processor.py)
-**Event processing and signal generation component.**
-
-**Methods:**
-- `__init__(datafeed, tokenlist, eventfilter, bidBuilder, poolManager, sui_event_listener, tq_hedger, vol_feed, timestamp)`: Initialize processor with dependencies
-- `process_event(event)`: Process incoming market events
-- `generate_signals()`: Generate trading signals from processed data
-- `execute_signals()`: Execute generated signals through order management
-
-**Event Processing Pipeline:**
-1. **Pre-processing**: Filter and normalize incoming events
-2. **Signal Generation**: Apply strategy logic to generate signals
-3. **Risk Management**: Apply position limits and risk checks
-4. **Order Generation**: Create orders from signals
-5. **Post-processing**: Log and monitor execution
-
-## Strategy Implementation
-
-### Basic Strategy Template
 ```python
-from elysian_core.strategy.strategy_engine import StrategyEngine
-from elysian_core.core.enums import Side
-
-class MyStrategy(StrategyEngine):
-    async def on_event(self, event: dict):
-        # Get current price
-        price = await self.get_current_price("BTCUSDT")
-        
-        # Get volatility
-        vol = self.get_current_vol("BTCUSDT")
-        
-        # Strategy logic
-        if price > self.target_price and vol < self.vol_threshold:
-            # Place buy order
-            await self._exchange.place_order(
-                symbol="BTCUSDT",
-                side=Side.BUY,
-                order_type="LIMIT",
-                quantity=0.001,
-                price=price * 0.99  # 1% below current price
-            )
+SpotStrategy(
+    exchanges: Dict[Venue, SpotExchangeConnector],
+    event_bus: EventBus,
+    feeds: Optional[Dict[str, AbstractDataFeed]] = None,
+    max_heavy_workers: int = 4,
+)
 ```
 
-### Event Types
-- **Market Data Events**: Price updates, order book changes
-- **Order Events**: Order fills, cancellations, rejections
-- **Portfolio Events**: Balance updates, position changes
-- **System Events**: Connection status, error notifications
+- `exchanges`: Map of venue → exchange connector for order execution
+- `event_bus`: Shared EventBus instance (injected by StrategyRunner)
+- `feeds`: Optional map of symbol → data feed for price lookups
+- `max_heavy_workers`: Number of ProcessPoolExecutor workers for `run_heavy()`
 
-## Signal Processing
+**Note:** When using `StrategyRunner.run(strategy)`, the runner re-wires `strategy._event_bus` and `strategy._exchanges` before calling `start()`. Initial constructor values are placeholders.
 
-### Signal Types
-- **Entry Signals**: Open new positions
-- **Exit Signals**: Close existing positions
-- **Adjustment Signals**: Modify position sizes
-- **Hedge Signals**: Manage risk exposures
+#### Lifecycle Methods
 
-### Risk Management
-- **Position Limits**: Maximum position sizes
-- **Volatility Filters**: Avoid trading in high volatility
-- **Drawdown Limits**: Stop trading after losses
-- **Correlation Checks**: Diversify across assets
+- `start()`: Registers all `_dispatch_*` callbacks with EventBus, then calls `on_start()`. Called by the runner.
+- `stop()`: Unsubscribes from EventBus, shuts down ProcessPoolExecutor, calls `on_stop()`. Called by the runner on shutdown.
+- `run_forever()`: Optional long-running coroutine. If overridden, runs concurrently with feed tasks via `asyncio.gather()`. Default implementation returns immediately.
 
-## Configuration
+#### Hook Functions (Override These)
 
-### Strategy Parameters
-```yaml
-strategy:
-  name: "momentum_strategy"
-  symbols: ["BTCUSDT", "ETHUSDT"]
-  position_limit: 0.1
-  vol_threshold: 0.05
-  rebalance_interval: 300
-```
+All hooks are `async def` with default no-op implementations. Override only what you need.
 
-### Feed Configuration
-```yaml
-feeds:
-  BTCUSDT:
-    interval: "1s"
-    depth: 20
-  ETHUSDT:
-    interval: "1s"
-    depth: 20
-```
+| Hook | Event Type | Frequency | Description |
+|------|-----------|-----------|-------------|
+| `on_start()` | — | Once | Called after EventBus subscription. Initialize strategy state here. |
+| `on_stop()` | — | Once | Called on shutdown. Cleanup, log totals, persist state. |
+| `on_kline(event: KlineEvent)` | KLINE | ~1/sec per symbol | Fired on each closed kline candle. Access OHLCV via `event.kline`. |
+| `on_orderbook_update(event: OrderBookUpdateEvent)` | ORDERBOOK_UPDATE | ~10/sec per symbol | Fired on each depth update. Access bids/asks via `event.orderbook`. Keep fast or use `run_heavy()`. |
+| `on_order_update(event: OrderUpdateEvent)` | ORDER_UPDATE | On order state change | Fired on fills, cancels, rejects. Access order via `event.order`. |
+| `on_balance_update(event: BalanceUpdateEvent)` | BALANCE_UPDATE | On balance change | Fired on balance delta. Access `event.asset`, `event.delta`. |
 
-## Performance Monitoring
+#### Internal Dispatch (Error Isolation)
 
-### Metrics Collection
-- **Execution Time**: Event processing latency
-- **Signal Accuracy**: Win/loss ratio
-- **Slippage**: Realized vs expected prices
-- **Position Turnover**: Trading frequency
+Each hook is wrapped in a `_dispatch_*` method that catches exceptions, logs them, and prevents errors from propagating to the EventBus or workers:
 
-### Logging
 ```python
-import elysian_core.utils.logger as log
-
-logger = log.setup_custom_logger("strategy")
-
-# Log signal generation
-logger.info(f"Generated {len(signals)} signals")
-
-# Log order execution
-logger.info(f"Executed order: {order.id} {order.side} {order.quantity}")
+async def _dispatch_kline(self, event: KlineEvent):
+    try:
+        await self.on_kline(event)
+    except Exception as e:
+        logger.error(f"SpotStrategy.on_kline error: {e}", exc_info=True)
 ```
 
-## Error Handling
+The EventBus subscribes to `_dispatch_kline`, not `on_kline` directly. This ensures a strategy bug never crashes the feed worker.
 
-### Exception Types
-- **FeedErrors**: Data feed connectivity issues
-- **ExchangeErrors**: Order execution failures
-- **ValidationErrors**: Invalid order parameters
-- **RiskErrors**: Risk limit violations
+#### Exchange & Feed Access
 
-### Recovery Strategies
-- **Circuit Breakers**: Pause trading on errors
-- **Fallback Feeds**: Switch to backup data sources
-- **Order Retries**: Retry failed orders with backoff
-- **Position Reconciliation**: Sync positions after outages
+- `get_exchange(venue=Venue.BINANCE) -> SpotExchangeConnector`: Returns the exchange connector for order execution.
+- `get_feed(symbol: str) -> Optional[AbstractDataFeed]`: Returns the data feed for a symbol, or None.
 
-## Testing and Simulation
+#### Price Helpers
 
-### Backtesting Framework
+- `get_current_price(pair: str, side: Optional[Side] = None) -> Optional[float]`
+
+  Resolution order:
+  1. Direct feed lookup (bid/ask/mid depending on side)
+  2. Inverted pair (e.g., USDTETH → 1/ETHUSDT)
+  3. Stablecoin proxy (e.g., ETHUSDC → ETHUSDT if USDC feed missing)
+  4. Synthetic via USDT legs (e.g., ETHBTC → ETHUSDT / BTCUSDT)
+
+- `get_current_vol(symbol: str) -> Optional[float]`: Returns annualised rolling volatility in basis points, or None.
+
+#### Heavy Compute Offloading
+
 ```python
-class BacktestStrategy(MyStrategy):
-    def __init__(self, historical_data):
-        self.historical_data = historical_data
-        self.current_index = 0
-    
-    async def on_event(self, event):
-        # Process historical events
-        current_data = self.historical_data[self.current_index]
-        await super().on_event(current_data)
-        self.current_index += 1
+result = await self.run_heavy(fn, *args)
 ```
 
-### Paper Trading
+Runs `fn(*args)` in a `ProcessPoolExecutor` (separate OS process). Returns the function's result.
+
+**Constraints:**
+- `fn` must be a **top-level picklable function** (not a lambda, method, or closure)
+- Arguments must be picklable
+- Results must be picklable
+
+### TestPrintStrategy (test_strategy.py)
+
+**Verification strategy that prints a one-liner for every event received. No trading logic.**
+
+Used to verify EventBus wiring end-to-end. Tracks event counts and logs totals on stop.
+
 ```python
-class PaperTradingStrategy(MyStrategy):
-    async def execute_order(self, order):
-        # Simulate order execution without real trading
-        simulated_fill = self.simulate_fill(order)
-        await self.update_portfolio(simulated_fill)
-        return simulated_fill
+class TestPrintStrategy(SpotStrategy):
+    async def on_start(self):
+        # Initialize counters
+        self._kline_count = 0
+        self._ob_count = 0
+        self._order_count = 0
+        self._balance_count = 0
+
+    async def on_stop(self):
+        # Log totals
+
+    async def on_kline(self, event: KlineEvent):
+        # Log OHLC for every kline
+
+    async def on_orderbook_update(self, event: OrderBookUpdateEvent):
+        # Log every 50th OB update (throttled to avoid flooding)
+
+    async def on_order_update(self, event: OrderUpdateEvent):
+        # Log order details
+
+    async def on_balance_update(self, event: BalanceUpdateEvent):
+        # Log balance delta
 ```
 
-## Advanced Features
+### Processor (processor.py) — Legacy
 
-### Multi-Asset Strategies
+Event processing and signal generation component from the older pull-based architecture. Still functional but not used by the new `SpotStrategy` event-driven flow.
+
+### StrategyEngine (strategy_engine.py) — Legacy
+
+Abstract base class with `on_event()` from the older architecture. Superseded by `SpotStrategy` for new strategies but preserved for backward compatibility.
+
+## Strategy Implementation Guide
+
+### Minimal Strategy
+
 ```python
-class CrossAssetStrategy(StrategyEngine):
-    async def on_event(self, event):
-        # Monitor correlations between assets
-        btc_price = await self.get_current_price("BTCUSDT")
-        eth_price = await self.get_current_price("ETHUSDT")
-        
-        # Trade based on relative strength
-        if btc_price / eth_price > self.threshold:
-            await self._exchange.place_order("ETHUSDT", Side.BUY, ...)
+from elysian_core.strategy.base_strategy import SpotStrategy
+from elysian_core.core.events import KlineEvent
+
+class MinimalStrategy(SpotStrategy):
+    async def on_kline(self, event: KlineEvent):
+        print(f"{event.symbol} close={event.kline.close}")
 ```
 
-### Machine Learning Integration
+That's it. All other hooks are no-op. The runner handles wiring, startup, and shutdown.
+
+### Full Strategy Example
+
 ```python
-class MLStrategy(StrategyEngine):
-    def __init__(self, model_path, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.model = self.load_model(model_path)
-    
-    async def on_event(self, event):
-        features = self.extract_features(event)
-        prediction = self.model.predict(features)
-        
-        if prediction > self.threshold:
-            await self.place_order(...)
+from elysian_core.strategy.base_strategy import SpotStrategy
+from elysian_core.core.events import (
+    KlineEvent, OrderBookUpdateEvent, OrderUpdateEvent, BalanceUpdateEvent
+)
+from elysian_core.core.enums import Venue, Side
+import asyncio
+
+# Top-level function for run_heavy() — must be picklable
+def compute_signal(prices: list) -> float:
+    """CPU-intensive signal calculation."""
+    import numpy as np
+    returns = np.diff(prices) / prices[:-1]
+    return float(np.mean(returns) / np.std(returns))  # Sharpe-like metric
+
+
+class MyArbStrategy(SpotStrategy):
+    async def on_start(self):
+        self.prices = {"ETHUSDT": [], "BTCUSDT": []}
+        self.position = {}
+        logger.info("ArbStrategy started")
+
+    async def on_kline(self, event: KlineEvent):
+        if event.symbol in self.prices:
+            self.prices[event.symbol].append(event.kline.close)
+
+            # Keep last 100 prices
+            if len(self.prices[event.symbol]) > 100:
+                self.prices[event.symbol] = self.prices[event.symbol][-100:]
+
+            # Offload heavy computation
+            if len(self.prices[event.symbol]) >= 60:
+                signal = await self.run_heavy(
+                    compute_signal, self.prices[event.symbol]
+                )
+                if signal > 2.0:
+                    exchange = self.get_exchange(Venue.BINANCE)
+                    await exchange.place_limit_order(
+                        symbol=event.symbol, side=Side.BUY,
+                        quantity=0.01, price=event.kline.close * 0.999
+                    )
+
+    async def on_orderbook_update(self, event: OrderBookUpdateEvent):
+        # ~10/sec per symbol — keep fast
+        if event.orderbook.spread_bps > 15.0:
+            logger.warning(f"Wide spread on {event.symbol}: {event.orderbook.spread_bps:.1f} bps")
+
+    async def on_order_update(self, event: OrderUpdateEvent):
+        o = event.order
+        if o.status.value == "FILLED":
+            logger.info(f"FILLED {o.side.value} {o.quantity} {event.symbol} @ {o.avg_fill_price}")
+
+    async def on_balance_update(self, event: BalanceUpdateEvent):
+        logger.info(f"Balance change: {event.asset} delta={event.delta:+.8f}")
+
+    async def on_stop(self):
+        logger.info(f"ArbStrategy stopped. Tracked {len(self.prices)} symbols.")
+
+    async def run_forever(self):
+        """Periodic health check — runs alongside feed tasks."""
+        while True:
+            await asyncio.sleep(300)
+            logger.info(f"Health: {sum(len(v) for v in self.prices.values())} prices tracked")
 ```
+
+### Running a Strategy
+
+```python
+from elysian_core.run_strategy import StrategyRunner
+from elysian_core.core.event_bus import EventBus
+
+async def main():
+    runner = StrategyRunner()
+    strategy = MyArbStrategy(exchanges={}, event_bus=EventBus())
+    await runner.run(strategy=strategy)
+
+asyncio.run(main())
+```
+
+## Event Types
+
+All events are `@dataclass(frozen=True)` — immutable after creation.
+
+### KlineEvent
+| Field | Type | Description |
+|-------|------|-------------|
+| `symbol` | `str` | Trading pair (e.g., "ETHUSDT") |
+| `venue` | `Venue` | Exchange enum (e.g., `Venue.BINANCE`) |
+| `kline` | `Kline` | OHLCV candle data |
+| `timestamp` | `int` | Epoch milliseconds |
+| `event_type` | `EventType` | Auto-set to `EventType.KLINE` |
+
+### OrderBookUpdateEvent
+| Field | Type | Description |
+|-------|------|-------------|
+| `symbol` | `str` | Trading pair |
+| `venue` | `Venue` | Exchange enum |
+| `orderbook` | `OrderBook` | Bid/ask snapshot with spread properties |
+| `timestamp` | `int` | Epoch milliseconds |
+| `event_type` | `EventType` | Auto-set to `EventType.ORDERBOOK_UPDATE` |
+
+### OrderUpdateEvent
+| Field | Type | Description |
+|-------|------|-------------|
+| `symbol` | `str` | Trading pair |
+| `venue` | `Venue` | Exchange enum |
+| `order` | `Order` | Parsed order with status, fills, fees |
+| `timestamp` | `int` | Epoch milliseconds |
+| `event_type` | `EventType` | Auto-set to `EventType.ORDER_UPDATE` |
+
+### BalanceUpdateEvent
+| Field | Type | Description |
+|-------|------|-------------|
+| `asset` | `str` | Asset symbol (e.g., "USDT") |
+| `venue` | `Venue` | Exchange enum |
+| `delta` | `float` | Balance change amount |
+| `new_balance` | `float` | New balance after change |
+| `timestamp` | `int` | Epoch milliseconds |
+| `event_type` | `EventType` | Auto-set to `EventType.BALANCE_UPDATE` |
+
+## Architecture Notes
+
+### Event Flow: Worker → EventBus → Strategy
+
+```
+Worker dequeues WebSocket message
+    ↓
+Worker mutates feed state (feed._kline = kline)
+    ↓
+Worker calls: await self._event_bus.publish(KlineEvent(...))
+    ↓
+EventBus iterates subscribers for KLINE
+    ↓
+EventBus calls: await strategy._dispatch_kline(event)
+    ↓
+_dispatch_kline calls: await strategy.on_kline(event)
+    ↓
+Strategy hook executes (user code)
+    ↓
+Control returns to worker (backpressure: worker waited)
+```
+
+### Backpressure
+
+`EventBus.publish()` is `await`ed by the worker, not fire-and-forget. If `on_orderbook_update()` takes 50ms, the OB worker blocks for 50ms before processing the next message. This provides natural backpressure — slow strategies automatically throttle the data rate.
+
+### Object Sharing
+
+Events carry **references** to live objects (e.g., `event.orderbook` is the same `OrderBook` instance the feed holds). If your strategy needs a consistent snapshot that won't be mutated by the next update, copy the object immediately:
+
+```python
+async def on_orderbook_update(self, event: OrderBookUpdateEvent):
+    # event.orderbook may be mutated by the next depth update
+    snapshot = copy.deepcopy(event.orderbook)
+    # ... use snapshot safely
+```
+
+### run_forever() vs Hooks
+
+- **Hooks** are reactive — they fire when events arrive
+- **run_forever()** is proactive — it runs as a long-lived coroutine alongside feeds via `asyncio.gather()`
+- Use `run_forever()` for periodic tasks (rebalancing, health checks, timers) that don't depend on specific events
+
+## Performance Considerations
+
+- **on_orderbook_update**: ~10 calls/sec per symbol. Keep execution under 10ms or use `run_heavy()`.
+- **on_kline**: ~1 call/sec per symbol. Can tolerate heavier logic.
+- **run_heavy()**: Crosses process boundary — adds ~1-5ms overhead. Use only for genuinely CPU-bound work (numpy, signal processing, ML inference).
+- **Event creation**: Frozen dataclasses are lightweight. No significant overhead from event emission.
 
 ## Best Practices
 
-### Code Organization
-- Separate signal generation from execution
-- Use configuration files for parameters
-- Implement comprehensive logging
-- Add unit tests for strategy logic
+### Strategy Design
+- Override only the hooks you need
+- Keep `on_orderbook_update()` fast (it fires ~10x/sec per symbol)
+- Use `on_start()` for initialization, not `__init__()`
+- Use `on_stop()` for cleanup and logging final metrics
 
-### Performance Optimization
-- Minimize synchronous operations
-- Use async/await for I/O operations
-- Cache frequently accessed data
-- Profile and optimize hot paths
+### CPU-Bound Work
+- Use `run_heavy(fn, *args)` for calculations >10ms
+- `fn` must be a top-level function (not a method or lambda)
+- Pass data by value (it gets pickled across process boundary)
 
-### Risk Management
-- Implement position size limits
-- Add volatility-based filters
-- Monitor drawdowns and stop losses
-- Diversify across multiple strategies
+### State Management
+- Strategy instance state persists across events (use `self.` attributes)
+- Initialize state in `on_start()`, not in `__init__()`
+- Events are immutable — don't try to modify them
 
-### Monitoring and Alerting
-- Track key performance metrics
-- Set up alerts for anomalies
-- Log all trading decisions
-- Regular strategy reviews</content>
-<parameter name="filePath">c:\Users\yinki\Coding Work\elysian\elysian_core\strategy\documentation.md
+### Error Handling
+- Each hook is wrapped in try/except — exceptions are logged but don't crash the system
+- The EventBus also catches exceptions per-callback
+- For critical errors, raise in `on_start()` to prevent the strategy from running

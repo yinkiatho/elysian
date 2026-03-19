@@ -74,8 +74,9 @@ class BinanceSpotExchange(SpotExchangeConnector):
         kline_manager: Optional[BinanceKlineClientManager] = None,
         ob_manager: Optional[BinanceOrderBookClientManager] = None,
         user_data_manager: Optional[BinanceUserDataClientManager] = None,
+        event_bus=None,
     ):
-        
+
         super().__init__(
             args=args,
             api_key=api_key,
@@ -85,9 +86,14 @@ class BinanceSpotExchange(SpotExchangeConnector):
             kline_manager=kline_manager,
             ob_manager=ob_manager
         )
-        
+
         # user data
         self.user_data_manager = user_data_manager or BinanceUserDataClientManager(api_key, api_secret)
+
+        # Event bus for strategy hooks
+        self._event_bus = event_bus
+        if event_bus and self.user_data_manager:
+            self.user_data_manager.set_event_bus(event_bus)
 
         # Initialize strategy id
         self.strategy_name = args.strategy_name

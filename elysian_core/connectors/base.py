@@ -299,6 +299,11 @@ class AbstractClientManager(ABC):
         self._queue: asyncio.Queue = asyncio.Queue()
         self._reader_task: Optional[asyncio.Task] = None
         self._worker_tasks: List[asyncio.Task] = []
+        self._event_bus = None  # Optional EventBus — set via set_event_bus()
+
+    def set_event_bus(self, event_bus):
+        """Inject an EventBus for pushing typed events to strategy hooks."""
+        self._event_bus = event_bus
 
     @abstractmethod
     async def start(self):

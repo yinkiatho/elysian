@@ -4,154 +4,218 @@
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────┐
-│                                                                                  │
+│                                                                                │
 │                           STRATEGY RUNNER (Main Entry)                          │
-│                     orchestrates setup and execution of all                     │
-│                         trading components and event loops                      │
-│                                                                                  │
-└──────────────────────────┬───────────────────────────────────────────────────────┘
-                           │
-                           │ setup_config() & await setup_data_feeds()
-                           │
-            ┌──────────────┴───────────────┬────────────────────────────┐
-            │                              │                            │
-            │                              │                            │
-    ┌───────▼────────────────┐  ┌──────────▼────────────────┐  ┌───────▼──────────────┐
-    │  MARKET DATA LAYER     │  │   ORDER MANAGEMENT LAYER  │  │   CORE MODELS        │
-    │  (elysian_core/        │  │   (elysian_core/oms/)     │  │   (elysian_core/     │
-    │   connectors/)         │  │                           │  │    core/)            │
-    ├────────────────────────┤  ├───────────────────────────┤  ├──────────────────────┤
-    │                        │  │                           │  │                      │
-    │ BinanceExchange.py:    │  │ oms.py:                   │  │ market_data.py:      │
-    │ • KlineClientMgr (*)   │  │ • AbstractOMS             │  │ • Kline              │
-    │   - create_client()    │  │ • place_order()           │  │   - ticker           │
-    │   - register_feed()    │  │ • cancel_order()          │  │   - interval         │
-    │   - run_multiplex_     │  │ • get_balance()           │  │   - OHLCV            │
-    │     feeds()            │  │                           │  │                      │
-    │   - start/stop()       │  │ order_tracker.py:         │  │ • OrderBook          │
-    │   - worker_pool        │  │ • OrderTracker            │  │   - bid_orders       │
-    │   - queue (10k max)    │  │ • track_order()           │  │   - ask_orders       │
-    │                        │  │ • get_status()            │  │   - spread           │
-    │ • OBClientMgr (*)      │  │ • fill_history()          │  │   - mid_price        │
-    │   - create_client()    │  │                           │  │                      │
-    │   - register_feed()    │  │ Portfolio state:          │  │ order.py:            │
-    │   - run_multiplex_     │  │ • balances                │  │ • Order (base)       │
-    │     feeds()            │  │ • positions               │  │ • LimitOrder         │
-    │   - start/stop()       │  │ • pnl                     │  │ • RangeOrder         │
-    │   - worker_pool        │  │                           │  │                      │
-    │   - queue (10k max)    │  │                           │  │ enums.py:            │
-    │                        │  │                           │  │ • OrderStatus        │
-    │ BinanceKlineFeed:      │  │                           │  │ • Side               │
-    │ • create_new()         │  │                           │  │ • TradeType          │
-    │ • run()                │  │                           │  │                      │
-    │ • stop()               │  │                           │  │ trade.py:            │
-    │ • current (latest)     │  │                           │  │ • Trade              │
-    │ • history (cache)      │  │                           │  │                      │
-    │                        │  │                           │  │ portfolio.py:        │
-    │ BinanceOrderBookFeed:  │  │                           │  │ • Portfolio          │
-    │ • create_new()         │  │                           │  │                      │
-    │ • run()                │  │                           │  │                      │
-    │ • stop()               │  │                           │  │                      │
-    │ • current (latest)     │  │                           │  │                      │
-    │ • history (cache)      │  │                           │  │                      │
-    │                        │  │                           │  │                      │
-    │ VolatilityFeed:        │  │                           │  │                      │
-    │ • volume volatility    │  │                           │  │                      │
-    │ • historical vol       │  │                           │  │                      │
-    │ • redis backed         │  │                           │  │                      │
-    │                        │  │                           │  │                      │
-    │ (*) = Multiplex design │  │                           │  │                      │
-    │ Single socket per      │  │                           │  │                      │
-    │ client manager serves  │  │                           │  │                      │
-    │ multiple feeds         │  │                           │  │                      │
-    └────────┬───────────────┘  └─────────┬────────────────┘  └──────┬───────────────┘
-             │                            │                          │
-             └────────────────┬───────────┘                          │
-                              │                                      │
-                    ┌─────────▼──────────┬───────────────────────────┘
-                    │                    │
-            ┌───────▼────────────┐  ┌────▼──────────────────┐
-            │  STRATEGY LAYER    │  │  MARKET MAKER LAYER   │
-            │  (elysian_core/    │  │  (elysian_core/       │
-            │   strategy/)       │  │   market_maker/)      │
-            ├────────────────────┤  ├───────────────────────┤
-            │                    │  │                       │
-            │ strategy_engine.py:│  │ order_book.py:        │
-            │ • StrategyEngine   │  │ • OrderBook analysis  │
-            │ • on_event()       │  │ • spread calc         │
-            │ • get_feed()       │  │ • level extraction    │
-            │ • get_price()      │  │                       │
-            │ • place_order()    │  │ order_management.py:  │
-            │ • cancel_order()   │  │ • create range order  │
-            │ • _feeds: dict     │  │ • update positions    │
-            │ • _exchange        │  │ • manage lifecycle    │
-            │                    │  │                       │
-            │ processor.py:      │  │ order_tracker.py:     │
-            │ • Processor        │  │ • track MM orders     │
-            │ • event chain      │  │ • monitor fills       │
-            │ • pre/post hooks   │  │ • adjust levels       │
-            │ • signal processing│  │                       │
-            └────────┬───────────┘  └───────────────────────┘
-                     │
-            ┌────────▼─────────────────┐
-            │   EVENT FLOW             │
-            ├──────────────────────────┤
-            │                          │
-            │  1. Market Data Event    │
-            │     (from feed)          │
-            │         ↓                │
-            │  2. Strategy.on_event()  │
-            │         ↓                │
-            │  3. Processor.process()  │
-            │     (signal generation)  │
-            │         ↓                │
-            │  4. OMS.place_order()    │
-            │     (via exchange)       │
-            │         ↓                │
-            │  5. OrderTracker.track() │
-            │     (status + history)   │
-            │         ↓                │
-            │  6. Portfolio.update()   │
-            │     (balance + pnl)      │
-            │         ↓                │
-            │  7. DB.save()            │
-            │         ↓                │
-            │  8. Next Event...        │
-            │                          │
-            └──────────────────────────┘
-                     │
-            ┌────────▼──────────────────┐
-            │  PERSISTENCE LAYER        │
-            │  (elysian_core/db/)       │
-            ├───────────────────────────┤
-            │                           │
-            │ database.py:              │
-            │ • PostgreSQL connection   │
-            │ • connection pooling      │
-            │ • error handling          │
-            │                           │
-            │ models.py:                │
-            │ • Peewee ORM models       │
-            │ • BinanceTrade            │
-            │ • OrderHistory            │
-            │ • PortfolioState          │
-            │                           │
-            │ Storage Backends:         │
-            │ • PostgreSQL              │
-            │   (trade history,         │
-            │    order records,         │
-            │    portfolio state)       │
-            │                           │
-            │ • Redis                   │
-            │   (volatility cache,      │
-            │    live order tracking,   │
-            │    balance cache)         │
-            │                           │
-            │ • File System             │
-            │   (logs, config,          │
-            │    backtesting data)      │
-            │                           │
-            └───────────────────────────┘
+│               Single asyncio event loop orchestrating all components            │
+│           Creates EventBus, wires exchanges/feeds/strategy, runs forever        │
+│                                                                                │
+└──────────┬─────────────────────────────────┬───────────────────────────────────┘
+           │                                 │
+           │  _setup_config()                │  EventBus created here
+           │  _setup_exchanges()             │  Injected into all managers
+           │  _setup_*_data_feeds()          │  and exchange connectors
+           │                                 │
+     ┌─────┴──────────┐              ┌──────┴────────────────────────────────┐
+     │                 │              │                                       │
+     │                 │              │         EVENT BUS                     │
+     │                 │              │     (elysian_core/core/event_bus.py)  │
+     │                 │              │                                       │
+     │                 │              │  In-process async pub/sub:            │
+     │                 │              │  • subscribe(EventType, callback)     │
+     │                 │              │  • unsubscribe(EventType, callback)   │
+     │                 │              │  • publish(event) — awaited for       │
+     │                 │              │    natural backpressure               │
+     │                 │              │                                       │
+     │                 │              │  Zero serialization overhead —        │
+     │                 │              │  events are direct object refs        │
+     │                 │              │                                       │
+     │                 │              └──────┬────────────────────────────────┘
+     │                 │                     │
+     │                 │        ┌────────────┴──────────────┐
+     │                 │        │  publishes                │  subscribes
+     │                 │        │                           │
+┌────▼─────────────────▼──┐  ┌─▼───────────────────────┐  │
+│  MARKET DATA LAYER      │  │  ORDER MANAGEMENT LAYER  │  │
+│  (elysian_core/         │  │  (elysian_core/oms/)     │  │
+│   connectors/)          │  │                          │  │
+├─────────────────────────┤  ├──────────────────────────┤  │
+│                         │  │                          │  │
+│ BinanceDataConnectors:  │  │ oms.py:                  │  │
+│ • KlineClientMgr (*)    │  │ • AbstractOMS            │  │
+│   - register_feed()     │  │ • place_order()          │  │
+│   - run_multiplex_      │  │ • cancel_order()         │  │
+│     feeds()             │  │ • get_balance()          │  │
+│   - set_event_bus()     │  │                          │  │
+│   - worker → publish    │  │ order_tracker.py:        │  │
+│     KlineEvent          │  │ • OrderTracker           │  │
+│   - queue (10k max)     │  │ • track_order()          │  │
+│                         │  │ • get_status()           │  │
+│ • OBClientMgr (*)       │  │ • fill_history()         │  │
+│   - register_feed()     │  │                          │  │
+│   - run_multiplex_      │  │                          │  │
+│     feeds()             │  │                          │  │
+│   - set_event_bus()     │  │                          │  │
+│   - worker → publish    │  │                          │  │
+│     OrderBookUpdate     │  │                          │  │
+│     Event               │  │                          │  │
+│   - queue (10k max)     │  │                          │  │
+│                         │  │                          │  │
+│ BinanceExchange:        │  │                          │  │
+│ • BinanceSpotExchange   │  │                          │  │
+│   - REST API orders     │  │                          │  │
+│   - user_data_manager   │  │                          │  │
+│     → publishes         │  │                          │  │
+│     OrderUpdateEvent    │  │                          │  │
+│     BalanceUpdateEvent  │  │                          │  │
+│                         │  │                          │  │
+│ (*) = Multiplex design  │  │                          │  │
+│ Single socket per       │  │                          │  │
+│ client manager serves   │  │                          │  │
+│ multiple feeds          │  │                          │  │
+└────────┬────────────────┘  └─────────┬────────────────┘  │
+         │                             │                    │
+         └──────────┬──────────────────┘                    │
+                    │                                       │
+          ┌─────────▼──────────┬────────────────────────────┘
+          │                    │
+  ┌───────▼────────────┐  ┌───▼───────────────────┐
+  │  STRATEGY LAYER    │  │  MARKET MAKER LAYER   │
+  │  (elysian_core/    │  │  (elysian_core/       │
+  │   strategy/)       │  │   market_maker/)      │
+  ├────────────────────┤  ├───────────────────────┤
+  │                    │  │                       │
+  │ base_strategy.py:  │  │ order_book.py:        │
+  │ • SpotStrategy     │  │ • OrderBook analysis  │
+  │   base class       │  │ • spread calc         │
+  │                    │  │ • level extraction    │
+  │ Hook functions:    │  │                       │
+  │ • on_start()       │  │ order_management.py:  │
+  │ • on_stop()        │  │ • create range order  │
+  │ • on_kline()       │  │ • update positions    │
+  │ • on_orderbook_    │  │ • manage lifecycle    │
+  │   update()         │  │                       │
+  │ • on_order_        │  │ order_tracker.py:     │
+  │   update()         │  │ • track MM orders     │
+  │ • on_balance_      │  │ • monitor fills       │
+  │   update()         │  │ • adjust levels       │
+  │ • run_forever()    │  │                       │
+  │                    │  │                       │
+  │ Utilities:         │  │                       │
+  │ • get_exchange()   │  │                       │
+  │ • get_current_     │  │                       │
+  │   price()          │  │                       │
+  │ • get_current_     │  │                       │
+  │   vol()            │  │                       │
+  │ • run_heavy()      │  │                       │
+  │   (ProcessPool)    │  │                       │
+  │                    │  │                       │
+  │ test_strategy.py:  │  │                       │
+  │ • TestPrint        │  │                       │
+  │   Strategy         │  │                       │
+  └────────┬───────────┘  └───────────────────────┘
+           │
+  ┌────────▼──────────────────┐
+  │   EVENT FLOW              │
+  ├───────────────────────────┤
+  │                           │
+  │  1. WebSocket message     │
+  │     arrives in worker     │
+  │         ↓                 │
+  │  2. Worker mutates feed   │
+  │     (feed._kline = ...)   │
+  │         ↓                 │
+  │  3. Worker publishes      │
+  │     typed event to        │
+  │     EventBus              │
+  │         ↓                 │
+  │  4. EventBus dispatches   │
+  │     to SpotStrategy       │
+  │     hook (awaited)        │
+  │         ↓                 │
+  │  5. Strategy.on_kline()   │
+  │     or on_orderbook_      │
+  │     update() fires        │
+  │         ↓                 │
+  │  6. Strategy logic:       │
+  │     get_current_price(),  │
+  │     run_heavy(), or       │
+  │     exchange.place_order()│
+  │         ↓                 │
+  │  7. Order fills → user    │
+  │     data stream emits     │
+  │     OrderUpdateEvent      │
+  │         ↓                 │
+  │  8. on_order_update()     │
+  │     fires in strategy     │
+  │                           │
+  └───────────────────────────┘
+           │
+  ┌────────▼──────────────────┐
+  │  CORE MODELS              │
+  │  (elysian_core/core/)     │
+  ├───────────────────────────┤
+  │                           │
+  │ events.py:                │
+  │ • EventType enum          │
+  │ • KlineEvent              │
+  │ • OrderBookUpdateEvent    │
+  │ • OrderUpdateEvent        │
+  │ • BalanceUpdateEvent      │
+  │ (all frozen dataclasses)  │
+  │                           │
+  │ event_bus.py:             │
+  │ • EventBus                │
+  │   subscribe/publish       │
+  │                           │
+  │ market_data.py:           │
+  │ • Kline (OHLCV)          │
+  │ • OrderBook (bids/asks)  │
+  │                           │
+  │ order.py:                 │
+  │ • Order, LimitOrder       │
+  │ • RangeOrder              │
+  │                           │
+  │ enums.py:                 │
+  │ • Side, Venue, OrderStatus│
+  │ • OrderType, TradeType    │
+  │                           │
+  │ portfolio.py:             │
+  │ • Portfolio, Position     │
+  │                           │
+  └───────────────────────────┘
+           │
+  ┌────────▼──────────────────┐
+  │  PERSISTENCE LAYER        │
+  │  (elysian_core/db/)       │
+  ├───────────────────────────┤
+  │                           │
+  │ database.py:              │
+  │ • PostgreSQL connection   │
+  │ • connection pooling      │
+  │ • error handling          │
+  │                           │
+  │ models.py:                │
+  │ • Peewee ORM models       │
+  │ • BinanceTrade            │
+  │ • OrderHistory            │
+  │ • PortfolioState          │
+  │                           │
+  │ Storage Backends:         │
+  │ • PostgreSQL              │
+  │   (trade history,         │
+  │    order records,         │
+  │    portfolio state)       │
+  │                           │
+  │ • Redis                   │
+  │   (volatility cache,      │
+  │    live order tracking,   │
+  │    balance cache)         │
+  │                           │
+  │ • File System             │
+  │   (logs, config,          │
+  │    backtesting data)      │
+  │                           │
+  └───────────────────────────┘
 ```
 
 ## Component Interaction Flow
@@ -164,85 +228,99 @@ StrategyRunner.__init__()
     ├─ Load configs (YAML, JSON)
     ├─ Initialize client managers
     │  ├─ BinanceKlineClientManager
-    │  └─ BinanceOrderBookClientManager
+    │  ├─ BinanceOrderBookClientManager
+    │  ├─ BinanceFuturesKlineClientManager
+    │  ├─ BinanceFuturesOrderBookClientManager
+    │  ├─ AsterKlineClientManager
+    │  ├─ AsterOrderBookClientManager
+    │  ├─ AsterPerpKlineClientManager
+    │  └─ AsterPerpOrderBookClientManager
     │
     └─ Setup logging & environment
 
-StrategyRunner.run()
+StrategyRunner.run(strategy=SpotStrategy)
     │
     ├─ _setup_config()
-    │  └─ Load trading pairs from config.json
+    │  └─ Load trading pairs from config.json (Binance, Aster, Futures)
     │
-    ├─ await _setup_data_feeds()
-    │  ├─ Create BinanceKlineFeed instances
-    │  │  └─ Register with BinanceKlineClientManager
-    │  │      └─ client_manager.register_feed()
-    │  │
-    │  ├─ Create BinanceOrderBookFeed instances
-    │  │  └─ Register with BinanceOrderBookClientManager
-    │  │      └─ client_manager.register_feed()
-    │  │
-    │  ├─ await client_manager1.start()
-    │  │  ├─ Create AsyncClient
-    │  │  └─ Create BinanceSocketManager
-    │  │
-    │  └─ await client_manager2.start()
+    ├─ Create shared EventBus
+    │  └─ self.event_bus = EventBus()
     │
-    ├─ setup_binance_feeds()
-    │  ├─ Create multiplex_tasks = []
-    │  ├─ asyncio.create_task(kline_manager.run_multiplex_feeds())
-    │  │  └─ Network reader (reads from socket)
-    │  │      └─ Worker pool (processes messages)
-    │  │
-    │  └─ asyncio.create_task(ob_manager.run_multiplex_feeds())
-    │      └─ Network reader (reads from socket)
-    │          └─ Worker pool (processes messages)
+    ├─ _setup_exchanges()
+    │  ├─ BinanceSpotExchange(event_bus=self.event_bus)
+    │  │  └─ Injects event_bus into user_data_manager
+    │  ├─ BinanceFuturesExchange
+    │  └─ AsterPerpExchange
     │
-    └─ ThreadPoolExecutor(max_workers=4)
-       ├─ executor.submit(run_event_loop_in_thread, multiplex_tasks)
-       │  └─ Creates new event loop in thread
-       │     └─ loop.run_until_complete() all tasks
-       │
-       └─ future.result() - wait for completion
+    ├─ Inject event_bus into data client managers
+    │  ├─ binance_kline_manager.set_event_bus(self.event_bus)
+    │  └─ binance_ob_manager.set_event_bus(self.event_bus)
+    │
+    ├─ Wire strategy (if provided)
+    │  ├─ strategy._event_bus = self.event_bus
+    │  ├─ strategy._exchanges = {Venue.BINANCE: exchange}
+    │  └─ await strategy.start()
+    │     ├─ Subscribes on_kline, on_orderbook_update,
+    │     │  on_order_update, on_balance_update to EventBus
+    │     └─ Calls strategy.on_start()
+    │
+    ├─ await binance_exchange.run()
+    │  └─ Initializes AsyncClient, starts user data stream
+    │
+    └─ asyncio.gather(
+         _setup_binance_data_feeds(),   ← blocks forever (multiplex feeds)
+         strategy.run_forever()          ← optional long-running coroutine
+       )
 ```
 
-### Runtime Event Loop
+### Runtime Event Loop (Single asyncio.run())
 
 ```
-BinanceKlineClientManager.run_multiplex_feeds()
+asyncio.run() — ONE event loop for everything
     │
-    ├─ Start network reader task
-    │  └─ Reads from self._socket (multiplex WebSocket)
-    │     ├─ Receives message for symbol1, symbol2, symbol3, etc.
-    │     └─ Queues message to self._queue
+    ├─ BinanceKlineClientManager.run_multiplex_feeds()
+    │  ├─ Network reader task
+    │  │  └─ Reads from multiplex WebSocket
+    │  │     └─ Queues messages to self._queue
+    │  │
+    │  └─ Worker pool (4 workers)
+    │     └─ Worker dequeues message
+    │        ├─ Parses kline data
+    │        ├─ Mutates feed: feed._kline = kline
+    │        ├─ Calculates rolling volatility
+    │        └─ if self._event_bus is not None:
+    │           await self._event_bus.publish(KlineEvent(...))
+    │              └─ EventBus dispatches to strategy._dispatch_kline()
+    │                 └─ try: await strategy.on_kline(event)
     │
-    └─ Start worker pool (4 workers)
-       ├─ Worker 1: await queue.get() → process kline → feed1.update()
-       ├─ Worker 2: await queue.get() → process kline → feed2.update()
-       ├─ Worker 3: await queue.get() → process kline → feed3.update()
-       └─ Worker 4: await queue.get() → process kline → feed4.update()
-
-BinanceFeed (Kline or OrderBook)
+    ├─ BinanceOrderBookClientManager.run_multiplex_feeds()
+    │  ├─ Network reader task
+    │  │  └─ Reads from multiplex WebSocket
+    │  │     └─ Queues messages to self._queue
+    │  │
+    │  └─ Worker pool (4 workers)
+    │     └─ Worker dequeues message
+    │        ├─ Processes depth update
+    │        ├─ Mutates feed: feed._data = orderbook
+    │        └─ if self._event_bus is not None:
+    │           await self._event_bus.publish(OrderBookUpdateEvent(...))
+    │              └─ EventBus dispatches to strategy._dispatch_ob()
+    │                 └─ try: await strategy.on_orderbook_update(event)
     │
-    ├─ Receives update from manager worker
-    │  └─ self._current = new_data
+    ├─ BinanceUserDataClientManager._reader_loop()
+    │  └─ On WebSocket message:
+    │     ├─ FIRST: Sync callbacks (exchange._handle_user_data)
+    │     │  └─ Mutates exchange state (orders, balances)
+    │     │
+    │     └─ THEN: Async event bus dispatch
+    │        ├─ executionReport → OrderUpdateEvent
+    │        │  └─ EventBus → strategy.on_order_update()
+    │        └─ balanceUpdate → BalanceUpdateEvent
+    │           └─ EventBus → strategy.on_balance_update()
     │
-    ├─ Calls parent run() method
-    │  └─ Emits event to strategies
-    │
-    └─ Strategies listen via on_event()
-       ├─ StrategyEngine.on_event(event)
-       │  └─ get_feed() → get_current_price() → create signals
-       │
-       └─ Processor chains the signal
-          └─ OMS.place_order() via exchange
-
-OrderTracker manages order state
-    │
-    ├─ Calls _place_order() (exchange specific)
-    ├─ Tracks fill status
-    └─ Updates portfolio
-       └─ Persists to database
+    └─ strategy.run_forever()  (optional)
+       └─ Long-running coroutine for periodic tasks
+          (e.g., rebalancing, timer-based signals)
 ```
 
 ### Multiplex Socket Design
@@ -263,92 +341,237 @@ Single AsyncClient
             └─ On message receipt:
                ├─ Decode message
                ├─ Extract symbol & data
-               ├─ Queue message
-               └─ Worker processes
+               ├─ Queue message (asyncio.Queue, maxsize=10k)
+               └─ Worker dequeues → processes → publishes event
 ```
 
 ## Concurrency Model
 
 ```
-Main Thread (asyncio.run())
+Main Thread — asyncio.run() — SINGLE EVENT LOOP
     │
-    └─ StrategyRunner.run() (async)
+    └─ StrategyRunner.run(strategy) (async)
        │
        ├─ await setup_config()
-       ├─ await setup_data_feeds()
-       │  └─ await client_manager.start() (creates AsyncClient)
+       ├─ Create EventBus (shared by all components)
+       ├─ await setup_exchanges()
+       ├─ Inject event_bus into managers
+       ├─ Wire and start strategy
        │
-       └─ ThreadPoolExecutor(max_workers=4)
+       └─ asyncio.gather(
+            _setup_binance_data_feeds(),   ← runs kline + OB multiplex feeds
+            strategy.run_forever()          ← optional strategy coroutine
+          )
           │
-          ├─ Thread 1: run_event_loop_in_thread(kline_tasks)
-          │  ├─ Creates new event loop
-          │  └─ Runs: kline_manager.run_multiplex_feeds()
-          │     ├─ Reader task (I/O bound)
-          │     └─ 4 workers (CPU bound processing)
+          ├─ Kline manager: reader task + 4 worker tasks
+          │  └─ Workers publish KlineEvent to EventBus
           │
-          └─ (Single task group for now)
-             (Can expand to multiple task groups)
+          ├─ OB manager: reader task + 4 worker tasks
+          │  └─ Workers publish OrderBookUpdateEvent to EventBus
+          │
+          ├─ User data manager: reader loop
+          │  └─ Publishes OrderUpdateEvent, BalanceUpdateEvent
+          │
+          └─ Strategy hooks run IN the same event loop
+             └─ For CPU-heavy work: strategy.run_heavy(fn, *args)
+                └─ Offloads to ProcessPoolExecutor (separate OS process)
+                   └─ fn must be a top-level picklable function
+
+KEY DESIGN DECISIONS:
+  • Everything runs in ONE asyncio event loop (no ThreadPoolExecutor for feeds)
+  • EventBus.publish() is awaited — natural backpressure from strategy to worker
+  • ProcessPoolExecutor reserved ONLY for CPU-bound strategy calculations
+  • Events carry references to live objects — copy if you need a snapshot
+  • Sync callbacks (exchange state mutation) run BEFORE async event dispatch
+```
+
+## Event System Architecture
+
+### Event Types (elysian_core/core/events.py)
+
+```
+EventType enum:
+  ├─ KLINE              → KlineEvent
+  ├─ ORDERBOOK_UPDATE   → OrderBookUpdateEvent
+  ├─ ORDER_UPDATE       → OrderUpdateEvent
+  └─ BALANCE_UPDATE     → BalanceUpdateEvent
+
+All events are @dataclass(frozen=True) — immutable after creation.
+event_type field is set automatically via field(default=..., init=False).
+
+KlineEvent:
+  ├─ symbol: str        (e.g., "ETHUSDT")
+  ├─ venue: Venue       (e.g., Venue.BINANCE)
+  ├─ kline: Kline       (OHLCV data)
+  └─ timestamp: int     (epoch ms)
+
+OrderBookUpdateEvent:
+  ├─ symbol: str
+  ├─ venue: Venue
+  ├─ orderbook: OrderBook  (bid/ask snapshot)
+  └─ timestamp: int
+
+OrderUpdateEvent:
+  ├─ symbol: str
+  ├─ venue: Venue
+  ├─ order: Order       (parsed from execution report)
+  └─ timestamp: int
+
+BalanceUpdateEvent:
+  ├─ asset: str         (e.g., "USDT")
+  ├─ venue: Venue
+  ├─ delta: float       (balance change)
+  ├─ new_balance: float
+  └─ timestamp: int
+```
+
+### EventBus (elysian_core/core/event_bus.py)
+
+```
+EventBus
+  │
+  ├─ _subscribers: Dict[EventType, List[Callable]]
+  │
+  ├─ subscribe(event_type, callback)
+  │  └─ Appends callback to subscriber list for event_type
+  │
+  ├─ unsubscribe(event_type, callback)
+  │  └─ Removes callback (no-op if not found)
+  │
+  └─ publish(event)  [async]
+     └─ For each subscriber of event.event_type:
+        ├─ await callback(event)        ← sequential, backpressure
+        └─ On exception: log and continue to next callback
+```
+
+### Event Emission Points
+
+```
+BinanceKlineClientManager._worker_coroutine():
+  └─ After feed._kline = kline and volatility calculation:
+     await self._event_bus.publish(KlineEvent(
+         symbol=symbol, venue=Venue.BINANCE,
+         kline=kline, timestamp=int(time.time() * 1000)
+     ))
+
+BinanceOrderBookClientManager._worker_coroutine():
+  └─ After feed._data = orderbook:
+     await self._event_bus.publish(OrderBookUpdateEvent(
+         symbol=symbol, venue=Venue.BINANCE,
+         orderbook=feed._data, timestamp=int(time.time() * 1000)
+     ))
+
+BinanceUserDataClientManager._reader_loop():
+  └─ After sync callbacks complete:
+     ├─ executionReport → _parse_execution_to_order() → OrderUpdateEvent
+     └─ balanceUpdate → BalanceUpdateEvent
+```
+
+## SpotStrategy Architecture
+
+### Class Hierarchy
+
+```
+SpotStrategy (base class — NOT abstract, all hooks are no-op)
+    │
+    ├─ __init__(exchanges, event_bus, feeds=None, max_heavy_workers=4)
+    │
+    ├─ Lifecycle:
+    │  ├─ start()        → subscribe all hooks to EventBus, call on_start()
+    │  ├─ stop()         → unsubscribe, shutdown executor, call on_stop()
+    │  └─ run_forever()  → optional long-running coroutine (gathered with feeds)
+    │
+    ├─ Hook functions (override what you need):
+    │  ├─ on_start()              → initialization logic
+    │  ├─ on_stop()               → cleanup logic
+    │  ├─ on_kline(KlineEvent)    → react to closed candles
+    │  ├─ on_orderbook_update(OrderBookUpdateEvent) → react to depth updates
+    │  ├─ on_order_update(OrderUpdateEvent)         → react to order fills
+    │  └─ on_balance_update(BalanceUpdateEvent)     → react to balance changes
+    │
+    ├─ Internal dispatch (error isolation):
+    │  ├─ _dispatch_kline()    → try/except wraps on_kline()
+    │  ├─ _dispatch_ob()       → try/except wraps on_orderbook_update()
+    │  ├─ _dispatch_order()    → try/except wraps on_order_update()
+    │  └─ _dispatch_balance()  → try/except wraps on_balance_update()
+    │
+    ├─ Exchange access:
+    │  └─ get_exchange(venue)  → returns SpotExchangeConnector
+    │
+    ├─ Feed access:
+    │  └─ get_feed(symbol)     → returns AbstractDataFeed or None
+    │
+    ├─ Price helpers:
+    │  ├─ get_current_price(pair, side) → direct/inverted/synthetic lookup
+    │  └─ get_current_vol(symbol)       → annualised rolling vol in bps
+    │
+    └─ Heavy compute:
+       └─ run_heavy(fn, *args) → ProcessPoolExecutor offload
+          └─ fn must be top-level picklable (not lambda/method)
+```
+
+### Strategy Wiring in StrategyRunner.run()
+
+```
+1. runner creates EventBus
+2. runner creates exchanges with event_bus injected
+3. runner injects event_bus into kline/ob client managers
+4. runner sets strategy._event_bus = self.event_bus
+5. runner sets strategy._exchanges = {Venue.BINANCE: exchange}
+6. runner calls await strategy.start()
+   └─ strategy subscribes _dispatch_* to EventBus
+7. runner gathers [_setup_data_feeds(), strategy.run_forever()]
+   └─ feeds run, events fire, strategy hooks execute
+8. On shutdown: runner calls await strategy.stop()
+   └─ strategy unsubscribes from EventBus
 ```
 
 ## Data Flow Diagram
 
 ```
-Exchange (Binance)
+Exchange (Binance / Aster)
     │
-    └─ WebSocket Stream
+    └─ WebSocket Streams
         │
         ├─ Kline Stream @1s
         │  ├─ {open, high, low, close, volume}
-        │  └─ Symbol: ETHUSDT, BTCUSDT, SOLUSDT
+        │  └─ Symbols: ETHUSDT, BTCUSDT, SOLUSDT, etc.
         │
-        └─ OrderBook Stream @100ms
-           ├─ {bids[], asks[]}
-           └─ Symbol: ETHUSDT, BTCUSDT, SOLUSDT
+        ├─ OrderBook Stream @100ms
+        │  ├─ {bids[], asks[]}
+        │  └─ Symbols: ETHUSDT, BTCUSDT, SOLUSDT, etc.
+        │
+        └─ User Data Stream
+           ├─ executionReport (order fills/cancels)
+           └─ balanceUpdate (balance changes)
 
-BinanceKlineClientManager
+ClientManagers (one per asset class)
     │
-    ├─ Multiplex Socket (ONE TCP connection)
-    │  └─ Receives: ETHUSDT@1s, BTCUSDT@1s, SOLUSDT@1s
+    ├─ Multiplex Socket (ONE TCP connection per manager)
+    │  └─ Receives all symbols on single WebSocket
     │
-    ├─ Queue (FIFO, maxsize=10k)
+    ├─ Queue (asyncio.Queue, FIFO, maxsize=10,000)
     │  └─ Buffers incoming messages
     │
-    └─ Worker Pool (4 workers)
-       ├─ Worker 1 ┐
-       ├─ Worker 2 ├─ Dequeue → Parse → Update Feed
-       ├─ Worker 3 │
-       └─ Worker 4 ┘
+    └─ Worker Pool (4 async workers)
+       └─ Dequeue → Parse → Mutate Feed → Publish Event
+          │
+          └─ EventBus.publish(TypedEvent)
+             │
+             └─ SpotStrategy hook fires
+                ├─ on_kline(KlineEvent)
+                ├─ on_orderbook_update(OrderBookUpdateEvent)
+                ├─ on_order_update(OrderUpdateEvent)
+                └─ on_balance_update(BalanceUpdateEvent)
 
-BinanceKlineFeed
+SpotStrategy
     │
-    ├─ _current: Kline (latest)
-    │  └─ Timestamp, OHLCV, symbol
-    │
-    ├─ _history: deque[Kline] (max 1000)
-    │  └─ Historical candlesticks
-    │
-    └─ on_update()
-       └─ Trigger strategy.on_event()
-
-StrategyEngine
-    │
-    ├─ _feeds: {symbol → feed}
-    │  └─ Access to all market data
-    │
-    └─ on_event(event)
-       ├─ Read feed data
-       ├─ Generate signals
-       └─ If signal → OMS.place_order()
-
-AbstractOMS
-    │
-    ├─ _place_limit_order(order)
-    │  └─ Exchange-specific API call
-    │
-    └─ _tracker: OrderTracker
-       ├─ Active orders
-       ├─ Fill history
-       └─ Balance state
+    ├─ Hook receives typed, immutable event
+    ├─ Reads feed data via get_feed(), get_current_price()
+    ├─ Generates signals
+    ├─ Optionally offloads to run_heavy() for CPU work
+    └─ Places orders via get_exchange().place_order()
+       └─ Order fill comes back as OrderUpdateEvent
 
 Database
     │
@@ -378,104 +601,136 @@ config.yaml
    └─ Feed URL
 
 config.json
-├─ Trading Pairs
+├─ Spot Trading Pairs
 │  ├─ Binance Pairs (ETHUSDT, BTCUSDT)
-│  └─ Binance Symbols (ETH/USDT, BTC/USDT)
-└─ Total Tokens (ETH, BTC, ...)
+│  ├─ Binance Symbols (ETH/USDT, BTC/USDT)
+│  ├─ Aster Pairs
+│  └─ Aster Symbols
+├─ Futures Trading Pairs
+│  ├─ Binance Futures Pairs
+│  ├─ Binance Futures Symbols
+│  ├─ Aster Futures Pairs
+│  └─ Aster Futures Symbols
+├─ Spot Total Tokens
+└─ Futures Total Tokens
 
 .env
 ├─ DATABASE_* (credentials)
 ├─ REDIS_* (credentials)
 ├─ BINANCE_API_KEY / API_SECRET
+├─ ASTER_API_KEY / API_SECRET
 └─ Other exchange credentials
 ```
 
 ## Error Handling & Cleanup
 
 ```
-StrategyRunner.run()
+StrategyRunner.run(strategy)
     │
     try:
-    │  ├─ Setup phase
-    │  └─ Execution phase
+    │  ├─ Setup phase (config, event_bus, exchanges, managers)
+    │  ├─ Strategy start (subscribe hooks)
+    │  ├─ Exchange run (AsyncClient, user data stream)
+    │  └─ asyncio.gather(feeds, strategy.run_forever())
+    │
+    │  try (inner):
+    │  │  └─ Feed and strategy execution
+    │  finally:
+    │     ├─ await exchange.cleanup()
+    │     └─ await strategy.stop()
+    │        ├─ Unsubscribe all hooks from EventBus
+    │        ├─ Shutdown ProcessPoolExecutor
+    │        └─ Call strategy.on_stop()
     │
     except asyncio.CancelledError:
-    │  └─ Log and continue
+    │  └─ Log warning, graceful exit
     │
-    except Exception as e:
-    │  ├─ Log error
-    │  └─ Raise up
+    except Exception:
+    │  └─ Log error with traceback, re-raise
     │
     finally:
-    │  └─ _cleanup(task_groups)
+       └─ _cleanup([])
+          ├─ Stop all client managers (kline, OB, futures, aster)
+          │  ├─ Cancel reader_task
+          │  ├─ Cancel worker_tasks[]
+          │  ├─ Close WebSocket
+          │  └─ Close AsyncClient
+          └─ Cancel and gather remaining tasks
+
+SpotStrategy dispatch error isolation:
     │
-    _cleanup():
-    │  ├─ await _kline_client_manager.stop()
-    │  │  ├─ Cancel reader_task
-    │  │  ├─ Cancel worker_tasks[]
-    │  │  ├─ Close socket
-    │  │  └─ Close client connection
-    │  │
-    │  ├─ await _ob_client_manager.stop()
-    │  │  └─ Same cleanup sequence
-    │  │
-    │  └─ await asyncio.gather(*tasks, return_exceptions=True)
-    │     └─ Ensure all tasks properly terminate
+    └─ Each _dispatch_* wrapper catches exceptions:
+       try:
+           await self.on_kline(event)
+       except Exception as e:
+           logger.error(f"on_kline error: {e}", exc_info=True)
+       # Exception does NOT propagate to worker or EventBus
+
+EventBus error isolation:
+    │
+    └─ Each callback exception is caught and logged:
+       for cb in subscribers:
+           try:
+               await cb(event)
+           except Exception as e:
+               logger.error(...)
+       # Other subscribers still fire
 ```
 
 ## Scalability Considerations
 
 ### Horizontal Scaling
 
-1. **Multiple Task Groups**: Currently one multiplex task group, can add:
-   - Additional strategy processors
-   - Volatility feed aggregators
-   - Portfolio rebalancer
-   - Risk monitor
+1. **Multiple Exchanges**: Add new exchange connectors (Bybit, OKX, etc.)
+   - Each uses same multiplex architecture and AbstractClientManager base
+   - All publish events through shared EventBus
+   - Unified Venue enum for exchange identification
 
-2. **Exchange Expansion**: Add new exchange connectors:
-   - Bybit, OKX, Kraken, etc.
-   - Each uses same multiplex architecture
-   - Unified OMS interface
+2. **Multiple Strategies**: Run multiple SpotStrategy instances
+   - Each subscribes to the same EventBus independently
+   - EventBus dispatches to all subscribers sequentially
+   - Strategies share exchange connectors but have independent state
 
 3. **Worker Scalability**:
-   - Currently 4 workers per manager
-   - Increase `max_workers` for CPU-bound processing
-   - Use ThreadPoolExecutor for I/O-bound tasks
+   - Currently 4 workers per client manager
+   - Increase `max_workers` for higher-throughput symbols
+   - Workers are async tasks (not threads), so scaling is lightweight
 
 ### Vertical Scaling
 
-1. **Database**:
+1. **CPU-Bound Strategy Logic**:
+   - Use `strategy.run_heavy(fn, *args)` to offload to ProcessPoolExecutor
+   - Default 4 worker processes (configurable via `max_heavy_workers`)
+   - fn must be top-level picklable function
+
+2. **Database**:
    - Add read replicas for analytics
    - Partitioning by date for trade history
    - Materialized views for reporting
 
-2. **Redis**:
+3. **Redis**:
    - Cluster mode for cache scaling
    - Sentinel for high availability
-   - Queue optimization with lua scripts
-
-3. **Network**:
-   - Connection pooling in AsyncClient
-   - DNS caching
-   - Circuit breakers for API calls
 
 ## Performance Metrics
 
 ### Latency
 
-- **Feed Latency**: <100ms from exchange to update
-- **Order Latency**: <500ms from signal to execution
-- **Message Processing**: 1-5ms per message (worker threads)
+- **Feed Latency**: <100ms from exchange to feed update
+- **Event Dispatch**: <1ms from feed update to strategy hook (in-process, zero serialization)
+- **Order Latency**: <500ms from signal to exchange API call
+- **Message Processing**: 1-5ms per message (async workers)
 
 ### Throughput
 
 - **Kline Feed**: ~1000 messages/second per socket
-- **OrderBook Feed**: ~10000 messages/second per socket
+- **OrderBook Feed**: ~10,000 messages/second per socket (~10/sec per symbol)
 - **Queue Capacity**: 10,000 messages max (prevents unbounded memory)
+- **EventBus**: No overhead — direct async function calls
 
 ### Resource Usage
 
 - **Memory**: ~200MB base + ~50MB per 1000 active symbols
 - **CPU**: 1-2 cores for I/O, scales with strategy complexity
 - **Network**: 1-2 Mbps per 100 active symbols
+- **Processes**: 1 main process + up to max_heavy_workers for run_heavy()

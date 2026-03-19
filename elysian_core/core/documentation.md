@@ -1,9 +1,104 @@
 # Core Documentation
 
 ## Overview
-The core module contains fundamental data structures, enums, and business logic for trading operations. It provides normalized representations of market data, orders, portfolios, and trading primitives that are exchange-agnostic.
+The core module contains fundamental data structures, enums, business logic for trading operations, and the event system that drives the strategy framework. It provides exchange-agnostic representations of market data, orders, portfolios, and typed events consumed by `SpotStrategy` hooks.
 
-## Key Classes and Functions
+## Event System
+
+### EventType (events.py)
+**Enum identifying the kind of event flowing through the EventBus.**
+
+| Value | Associated Event Class | Emitted By |
+|-------|----------------------|------------|
+| `KLINE` | `KlineEvent` | Kline client manager workers |
+| `ORDERBOOK_UPDATE` | `OrderBookUpdateEvent` | OrderBook client manager workers |
+| `ORDER_UPDATE` | `OrderUpdateEvent` | User data client manager |
+| `BALANCE_UPDATE` | `BalanceUpdateEvent` | User data client manager |
+
+### KlineEvent (events.py)
+**Frozen dataclass emitted when a kline candle closes.**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `symbol` | `str` | Trading pair (e.g., "ETHUSDT") |
+| `venue` | `Venue` | Exchange enum |
+| `kline` | `Kline` | OHLCV candle data |
+| `timestamp` | `int` | Epoch milliseconds |
+| `event_type` | `EventType` | Auto-set to `KLINE` (not in `__init__`) |
+
+### OrderBookUpdateEvent (events.py)
+**Frozen dataclass emitted on each orderbook depth update.**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `symbol` | `str` | Trading pair |
+| `venue` | `Venue` | Exchange enum |
+| `orderbook` | `OrderBook` | Bid/ask snapshot (reference to live object) |
+| `timestamp` | `int` | Epoch milliseconds |
+| `event_type` | `EventType` | Auto-set to `ORDERBOOK_UPDATE` |
+
+### OrderUpdateEvent (events.py)
+**Frozen dataclass emitted when an order status changes (fill, cancel, reject).**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `symbol` | `str` | Trading pair |
+| `venue` | `Venue` | Exchange enum |
+| `order` | `Order` | Parsed order with status, fills, fees |
+| `timestamp` | `int` | Epoch milliseconds |
+| `event_type` | `EventType` | Auto-set to `ORDER_UPDATE` |
+
+### BalanceUpdateEvent (events.py)
+**Frozen dataclass emitted when account balance changes.**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `asset` | `str` | Asset symbol (e.g., "USDT") |
+| `venue` | `Venue` | Exchange enum |
+| `delta` | `float` | Balance change amount |
+| `new_balance` | `float` | New balance after change |
+| `timestamp` | `int` | Epoch milliseconds |
+| `event_type` | `EventType` | Auto-set to `BALANCE_UPDATE` |
+
+**Design notes:**
+- All event dataclasses use `@dataclass(frozen=True)` to prevent strategies from accidentally mutating shared data
+- `event_type` uses `field(default=..., init=False)` so it is set automatically and cannot be overridden
+- Events carry **references** to live objects (e.g., `orderbook`). Copy immediately if you need a snapshot
+
+### EventBus (event_bus.py)
+**Lightweight in-process async event bus with zero serialization overhead.**
+
+Workers publish typed events after mutating feed state; the bus dispatches to all registered async callbacks keyed by `EventType`.
+
+**Methods:**
+
+| Method | Description |
+|--------|-------------|
+| `subscribe(event_type, callback)` | Register an async callback for a specific event type |
+| `unsubscribe(event_type, callback)` | Remove a previously registered callback (no-op if not found) |
+| `publish(event)` | Dispatch event to all subscribers. Awaited sequentially for backpressure |
+
+**Key behaviors:**
+- `publish()` is `await`ed (not fire-and-forget) — if a strategy hook is slow, the emitting worker waits, providing natural backpressure
+- Exceptions in one callback are logged but do not prevent remaining callbacks from running
+- Uses `defaultdict(list)` internally — subscribing to an unused event type is zero-cost
+
+```python
+from elysian_core.core.event_bus import EventBus
+from elysian_core.core.events import EventType
+
+bus = EventBus()
+
+async def my_handler(event):
+    print(f"Got {event.symbol}")
+
+bus.subscribe(EventType.KLINE, my_handler)
+
+# Later, from a worker:
+await bus.publish(KlineEvent(symbol="ETHUSDT", venue=Venue.BINANCE, kline=k, timestamp=ts))
+```
+
+## Market Data Classes
 
 ### OrderBook (market_data.py)
 **Normalized order book snapshot with bid/ask management.**
@@ -37,6 +132,13 @@ The core module contains fundamental data structures, enums, and business logic 
 - `close`: Closing price
 - `volume`: Trading volume
 
+### Exchange-Specific OrderBooks
+
+- **BinanceOrderBook** (market_data.py): Binance-specific with async `apply_update_lists()` and `apply_both_updates()`
+- **AsterOrderBook** (market_data.py): Aster-specific with same async update interface
+
+## Order Classes
+
 ### Order (order.py)
 **Generic exchange order representation.**
 
@@ -48,6 +150,7 @@ The core module contains fundamental data structures, enums, and business logic 
 - `quantity`: Order quantity
 - `price`: Limit price (None for market orders)
 - `filled_qty`: Quantity already filled
+- `avg_fill_price`: Average fill price
 - `status`: Current order status
 - `timestamp`: Order creation time
 - `venue`: Exchange venue
@@ -63,32 +166,10 @@ The core module contains fundamental data structures, enums, and business logic 
 ### LimitOrder (order.py)
 **Liquidity provider limit order for AMM-style exchanges.**
 
-**Attributes:**
-- `id`: Order ID
-- `base_asset`: Base asset symbol
-- `quote_asset`: Quote asset symbol
-- `side`: BUY or SELL
-- `price`: Limit price
-- `amount`: Order amount
-- `lp_account`: Liquidity provider account
-- `timestamp`: Creation timestamp
-- `volatility`: Associated volatility
-
 ### RangeOrder (order.py)
 **Liquidity provider range order (concentrated liquidity).**
 
-**Attributes:**
-- `id`: Order ID
-- `base_asset`: Base asset
-- `quote_asset`: Quote asset
-- `lower_price`: Lower price bound
-- `upper_price`: Upper price bound
-- `order_type`: Range order type
-- `amount`: Liquidity amount
-- `min_amounts`: Minimum amounts tuple
-- `max_amounts`: Maximum amounts tuple
-- `lp_account`: LP account
-- `timestamp`: Creation timestamp
+## Portfolio Classes
 
 ### Position (portfolio.py)
 **Single asset position tracking.**
@@ -110,7 +191,6 @@ The core module contains fundamental data structures, enums, and business logic 
 **Methods:**
 - `__init__(initial_cash)`: Initialize with starting cash
 - `position(symbol)`: Get or create position for symbol
-- `positions`: Property returning all positions dict
 
 **Properties:**
 - `cash`: Available cash balance
@@ -119,107 +199,58 @@ The core module contains fundamental data structures, enums, and business logic 
 ## Enums
 
 ### Side (enums.py)
-- `BUY`: Buy side
-- `SELL`: Sell side
-
-**Methods:**
+- `BUY`, `SELL`
 - `opposite()`: Return opposite side
 
 ### AssetType (enums.py)
-- `SPOT`: Spot trading
-- `PERPETUAL`: Perpetual futures
+- `SPOT`, `PERPETUAL`
 
 ### OrderType (enums.py)
-- `LIMIT`: Limit order
-- `MARKET`: Market order
-- `RANGE`: Range/liquidity order
+- `LIMIT`, `MARKET`, `RANGE`
 
 ### OrderStatus (enums.py)
-- `PENDING`: Order submitted but not yet active
-- `OPEN`: Order active on exchange
-- `PARTIALLY_FILLED`: Partially executed
-- `FILLED`: Completely filled
-- `CANCELLED`: Cancelled by user or system
-- `REJECTED`: Rejected by exchange
-
-**Methods:**
+- `PENDING`, `OPEN`, `PARTIALLY_FILLED`, `FILLED`, `CANCELLED`, `REJECTED`
 - `is_active()`: Check if order can still be filled
 
 ### Venue (enums.py)
-- `BINANCE`: Binance exchange
-- `BYBIT`: Bybit exchange
-- `OKX`: OKX exchange
-- `CETUS`: Cetus protocol
-- `TURBOS`: Turbos protocol
-- `DEEPBOOK`: Deepbook protocol
-- `ASTER`: Aster exchange
+- `BINANCE`, `BYBIT`, `OKX`, `CETUS`, `TURBOS`, `DEEPBOOK`, `ASTER`
 
 ### Chain (enums.py)
-- `SUI`: Sui blockchain
-- `TON`: TON blockchain
-- `ETHEREUM`: Ethereum blockchain
-- `BITCOIN`: Bitcoin blockchain
-- `SOLANA`: Solana blockchain
-
-**Methods:**
-- `to_dict()`: Convert to dictionary
+- `SUI`, `TON`, `ETHEREUM`, `BITCOIN`, `SOLANA`
 
 ### TradeType (enums.py)
-- `REAL`: Real trading
-- `SIMULATED`: Paper trading
+- `REAL`, `SIMULATED`
 
 ### SwapType (enums.py)
-- `BLUEFIN`: Bluefin protocol
-- `CETUS`: Cetus protocol
-- `FLOW_X`: Flow X protocol
-- `TURBOS`: Turbos protocol
+- `BLUEFIN`, `CETUS`, `FLOW_X`, `TURBOS`
 
 ### WalletType (enums.py)
-- `WALLET`: Sui wallet
-- `CEX`: Centralized exchange
-
-## Exchange-Specific Classes
-
-### AsterOrderBook (market_data.py)
-**Aster exchange-specific order book with async update methods.**
-
-**Methods:**
-- `apply_update_lists(side, price_levels)`: Apply list of price level updates
-- `apply_both_updates(last_timestamp, new_update_id, bid_levels, ask_levels)`: Apply bid and ask updates concurrently
-
-### BinanceOrderBook (market_data.py)
-**Binance exchange-specific order book with async update methods.**
-
-**Methods:**
-- `apply_update_lists(side, price_levels)`: Apply list of price level updates
-- `apply_both_updates(last_timestamp, new_update_id, bid_levels, ask_levels)`: Apply bid and ask updates concurrently
+- `WALLET`, `CEX`
 
 ## Data Flow
 
-1. **Market Data**: OrderBook and Kline objects created from exchange feeds
-2. **Order Management**: Order objects track trade lifecycle
-3. **Portfolio Tracking**: Position objects updated with fills
-4. **P&L Calculation**: Realized/unrealized P&L computed from positions
+1. **Market Data**: Exchange workers create `Kline`/`OrderBook` objects and mutate feed state
+2. **Event Emission**: Workers publish `KlineEvent`/`OrderBookUpdateEvent` to EventBus
+3. **Strategy Hooks**: EventBus dispatches to `SpotStrategy.on_kline()` / `on_orderbook_update()`
+4. **Order Execution**: Strategy calls `exchange.place_order()` → creates `Order` objects
+5. **Order Updates**: User data stream emits `OrderUpdateEvent` → `on_order_update()` fires
+6. **Balance Updates**: User data stream emits `BalanceUpdateEvent` → `on_balance_update()` fires
+7. **Portfolio Tracking**: `Position`/`Portfolio` objects updated with fills
+8. **Persistence**: Trade/order records saved to database
 
 ## Key Design Patterns
 
-- **Dataclasses**: Immutable data structures with automatic methods
-- **Enums**: Type-safe constants with methods
-- **Properties**: Computed attributes for derived values
-- **Inheritance**: Exchange-specific subclasses extend base classes
+- **Frozen Dataclasses**: Event types are immutable to prevent shared-data mutation
+- **EventBus Pub/Sub**: Decouples data producers (workers) from consumers (strategies)
+- **Enums with Methods**: Type-safe constants with utility methods (e.g., `Side.opposite()`)
+- **Properties**: Computed attributes for derived values (spreads, midpoints)
+- **Inheritance**: Exchange-specific subclasses extend base OrderBook
 - **Async Methods**: Non-blocking updates for high-frequency data
-
-## Validation and Constraints
-
-- Price/quantity validation in order constructors
-- Status transition validation
-- Position size limits
-- Timestamp ordering checks
 
 ## Performance Considerations
 
 - Efficient data structures (SortedDict for order books)
 - Minimal object creation in hot paths
+- Frozen dataclasses are lightweight (no copy overhead for event creation)
 - Lazy computation of derived properties
-- Memory-efficient storage of historical data</content>
-<parameter name="filePath">c:\Users\yinki\Coding Work\elysian\elysian_core\core\documentation.md
+- EventBus dispatch is zero-overhead (direct async function calls, no serialization)

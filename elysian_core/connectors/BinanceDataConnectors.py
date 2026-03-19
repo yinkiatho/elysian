@@ -20,8 +20,9 @@ from binance.helpers import round_step_size
 
 from elysian_core.connectors.base import AbstractDataFeed, SpotExchangeConnector, AbstractClientManager, AbstractKlineFeed
 from elysian_core.core.enums import OrderStatus, Side, TradeType, _BINANCE_SIDE, _BINANCE_STATUS, AssetType, Venue, OrderType
-from elysian_core.core.order import Order   
+from elysian_core.core.order import Order
 from elysian_core.core.market_data import Kline, OrderBook, BinanceOrderBook
+from elysian_core.core.events import KlineEvent, OrderBookUpdateEvent, OrderUpdateEvent, BalanceUpdateEvent
 from elysian_core.db.database import DATABASE
 from elysian_core.db.models import CexTrade
 import elysian_core.utils.logger as log
@@ -175,7 +176,15 @@ class BinanceKlineClientManager:
                                     for i in range(1, len(feed._historical))
                                 ]
                                 feed._vol = statistics.stdev(returns) * math.sqrt(20)
-                                #logger.info(f"[{symbol}] Volatility: {feed._vol * 1e4:.2f} bps (60-kline window)")
+
+                            # Emit event to strategy via EventBus
+                            if self._event_bus is not None:
+                                await self._event_bus.publish(KlineEvent(
+                                    symbol=symbol,
+                                    venue=Venue.BINANCE,
+                                    kline=kline,
+                                    timestamp=int(time.time() * 1000),
+                                ))
 
                 self._queue.task_done()
 
@@ -337,6 +346,15 @@ class BinanceOrderBookClientManager:
 
                         if feed.save_data:
                             asyncio.create_task(feed._append_to_df(feed._data))
+
+                        # Emit event to strategy via EventBus
+                        if self._event_bus is not None and feed._data is not None:
+                            await self._event_bus.publish(OrderBookUpdateEvent(
+                                symbol=symbol,
+                                venue=Venue.BINANCE,
+                                orderbook=feed._data,
+                                timestamp=int(time.time() * 1000),
+                            ))
 
                 self._queue.task_done()
 
@@ -617,6 +635,7 @@ class BinanceUserDataClientManager:
         self._ws: Optional[Any] = None
         self._reader_task: Optional[asyncio.Task] = None
         self._subscribers: List[Callable[[dict], None]] = []
+        self._event_bus = None  # Optional EventBus — set via set_event_bus()
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -722,11 +741,34 @@ class BinanceUserDataClientManager:
                         if event is None:
                             continue
 
+                        # Existing sync callbacks (e.g. BinanceSpotExchange._handle_user_data)
                         for cb in self._subscribers:
                             try:
                                 cb(event)
                             except Exception as e:
                                 logger.error(f"BinanceUserDataClientManager: callback error: {e}")
+
+                        # Async event bus dispatch for strategy hooks
+                        if self._event_bus is not None:
+                            et = event.get("e")
+                            ts = int(event.get("E", time.time() * 1000))
+                            if et == "executionReport":
+                                order = self._parse_execution_to_order(event)
+                                if order:
+                                    await self._event_bus.publish(OrderUpdateEvent(
+                                        symbol=event.get("s"),
+                                        venue=Venue.BINANCE,
+                                        order=order,
+                                        timestamp=ts,
+                                    ))
+                            elif et == "balanceUpdate":
+                                await self._event_bus.publish(BalanceUpdateEvent(
+                                    asset=event.get("a"),
+                                    venue=Venue.BINANCE,
+                                    delta=float(event.get("d", 0)),
+                                    new_balance=0.0,
+                                    timestamp=ts,
+                                ))
 
             except asyncio.CancelledError:
                 break
@@ -754,3 +796,51 @@ class BinanceUserDataClientManager:
             logger.debug(f"BinanceUserDataClientManager: unregistered callback {callback.__name__}")
         except ValueError:
             pass
+
+    def set_event_bus(self, event_bus):
+        """Inject an EventBus for pushing typed events to strategy hooks."""
+        self._event_bus = event_bus
+
+    # ── Event parsing helpers ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _parse_execution_to_order(msg: dict) -> Optional[Order]:
+        """Parse a raw executionReport dict into an Order dataclass for event emission.
+
+        Field mappings mirror BinanceSpotExchange._handle_execution_report.
+        """
+        status = _BINANCE_STATUS.get(msg.get("X"))
+        if status is None:
+            return None
+
+        side = Side.BUY if msg.get("S") == "BUY" else Side.SELL
+        raw_type = msg.get("o", "LIMIT")
+        if raw_type.upper() == "MARKET":
+            order_type = OrderType.MARKET
+        elif raw_type.upper() == "LIMIT":
+            order_type = OrderType.LIMIT
+        else:
+            order_type = OrderType.OTHERS
+
+        cum_filled = float(msg.get("z", 0))
+        cum_quote = float(msg.get("Z", 0))
+        avg_price = (cum_quote / cum_filled) if cum_filled > 0 else float(msg.get("L", 0))
+
+        return Order(
+            id=str(msg.get("i")),
+            symbol=msg.get("s"),
+            side=side,
+            order_type=order_type,
+            quantity=float(msg.get("q", 0)),
+            price=float(msg.get("p", 0)) or None,
+            status=status,
+            avg_fill_price=avg_price,
+            filled_qty=cum_filled,
+            timestamp=datetime.datetime.fromtimestamp(
+                msg.get("O", 0) / 1000, tz=datetime.timezone.utc
+            ),
+            venue=Venue.BINANCE,
+            commission=float(msg.get("n", 0)),
+            commission_asset=msg.get("N"),
+            last_updated_timestamp=int(msg.get("E", 0)),
+        )

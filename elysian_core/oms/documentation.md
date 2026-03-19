@@ -321,20 +321,29 @@ else:
     print("Order placement failed")
 ```
 
-### Order Monitoring
+### Order Monitoring (Event-Driven)
+
+With the EventBus architecture, order monitoring is event-driven rather than poll-based. The `BinanceUserDataClientManager` publishes `OrderUpdateEvent` and `BalanceUpdateEvent` to the EventBus, which dispatches to strategy hooks:
+
 ```python
-async def monitor_orders(oms: AbstractOMS):
-    """Monitor order status and handle fills."""
-    while True:
-        # Check for order updates
-        for order in oms.open_orders:
-            if order.status == OrderStatus.FILLED:
-                await handle_fill(order)
-            elif order.status == OrderStatus.REJECTED:
-                await handle_rejection(order)
-        
-        await asyncio.sleep(1)  # Check every second
+from elysian_core.strategy.base_strategy import SpotStrategy
+from elysian_core.core.events import OrderUpdateEvent, BalanceUpdateEvent
+from elysian_core.core.enums import OrderStatus
+
+class OrderMonitorStrategy(SpotStrategy):
+    async def on_order_update(self, event: OrderUpdateEvent):
+        """React to order status changes in real-time."""
+        if event.order.status == OrderStatus.FILLED:
+            await self.handle_fill(event.order)
+        elif event.order.status == OrderStatus.REJECTED:
+            await self.handle_rejection(event.order)
+
+    async def on_balance_update(self, event: BalanceUpdateEvent):
+        """React to balance changes in real-time."""
+        logger.info(f"Balance {event.asset}: delta={event.delta:+.8f}")
 ```
+
+This replaces the legacy polling pattern (`while True: check orders, sleep(1)`) with zero-latency event dispatch.
 
 ### Risk Management Integration
 ```python
