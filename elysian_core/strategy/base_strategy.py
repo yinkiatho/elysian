@@ -24,19 +24,27 @@ Usage::
 """
 
 import asyncio
+import time
 from concurrent.futures import ProcessPoolExecutor
-from typing import Dict, Optional
+from typing import Any, Dict, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from elysian_core.execution.engine import ExecutionEngine
+    from elysian_core.risk.optimizer import PortfolioOptimizer
 
 from elysian_core.connectors.base import SpotExchangeConnector, AbstractDataFeed
 from elysian_core.core.enums import Side, Venue
 from elysian_core.core.event_bus import EventBus
+from elysian_core.core.portfolio import Portfolio
 from elysian_core.core.events import (
     EventType,
     KlineEvent,
     OrderBookUpdateEvent,
     OrderUpdateEvent,
     BalanceUpdateEvent,
+    RebalanceCompleteEvent,
 )
+from elysian_core.core.signals import RebalanceResult, TargetWeights
 import elysian_core.utils.logger as log
 
 logger = log.setup_custom_logger("root")
@@ -58,12 +66,17 @@ class SpotStrategy:
         event_bus: EventBus,
         feeds: Optional[Dict[str, AbstractDataFeed]] = None,
         max_heavy_workers: int = 4,
+        optimizer: Optional["PortfolioOptimizer"] = None,
+        execution_engine: Optional["ExecutionEngine"] = None,
     ):
         self._exchanges = exchanges
         self._event_bus = event_bus
         self._feeds = feeds or {}
         self._executor = ProcessPoolExecutor(max_workers=max_heavy_workers)
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._optimizer = optimizer
+        self._execution_engine = execution_engine
+        self.portfolio = Portfolio()
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -75,6 +88,7 @@ class SpotStrategy:
         self._event_bus.subscribe(EventType.ORDERBOOK_UPDATE, self._dispatch_ob)
         self._event_bus.subscribe(EventType.ORDER_UPDATE, self._dispatch_order)
         self._event_bus.subscribe(EventType.BALANCE_UPDATE, self._dispatch_balance)
+        self._event_bus.subscribe(EventType.REBALANCE_COMPLETE, self._dispatch_rebalance)
 
         await self.on_start()
         logger.info("SpotStrategy started")
@@ -85,6 +99,7 @@ class SpotStrategy:
         self._event_bus.unsubscribe(EventType.ORDERBOOK_UPDATE, self._dispatch_ob)
         self._event_bus.unsubscribe(EventType.ORDER_UPDATE, self._dispatch_order)
         self._event_bus.unsubscribe(EventType.BALANCE_UPDATE, self._dispatch_balance)
+        self._event_bus.unsubscribe(EventType.REBALANCE_COMPLETE, self._dispatch_rebalance)
 
         self._executor.shutdown(wait=False)
         await self.on_stop()
@@ -115,6 +130,12 @@ class SpotStrategy:
             await self.on_balance_update(event)
         except Exception as e:
             logger.error(f"SpotStrategy.on_balance_update error: {e}", exc_info=True)
+
+    async def _dispatch_rebalance(self, event: RebalanceCompleteEvent):
+        try:
+            await self.on_rebalance_complete(event)
+        except Exception as e:
+            logger.error(f"SpotStrategy.on_rebalance_complete error: {e}", exc_info=True)
 
     # ── Hook functions (override in subclass) ──────────────────────────────────
 
@@ -153,6 +174,64 @@ class SpotStrategy:
     async def on_balance_update(self, event: BalanceUpdateEvent):
         """Called when account balance changes."""
         pass
+
+    async def on_rebalance_complete(self, event: RebalanceCompleteEvent):
+        """Called after the execution engine completes a rebalance cycle.
+
+        Override to inspect :attr:`event.result` for submitted/failed counts,
+        or :attr:`event.validated_weights` to see what the optimizer changed.
+        """
+        pass
+
+    # ── Weight submission pipeline ───────────────────────────────────────────
+
+    async def submit_weights(
+        self,
+        weights: Dict[str, float],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[RebalanceResult]:
+        """Submit target portfolio weights through the risk / execution pipeline.
+
+        This is the primary output mechanism for weight-vector strategies.
+        The flow is::
+
+            strategy  ->  optimizer.validate()  ->  executor.execute()  ->  exchange
+
+        Returns a :class:`RebalanceResult` on success, or ``None`` if the
+        optimizer / executor are not configured or the signal was rejected.
+        """
+        if self._optimizer is None or self._execution_engine is None:
+            logger.warning(
+                "submit_weights called but optimizer/execution_engine not configured. "
+                "Use direct exchange access or configure the pipeline."
+            )
+            return None
+
+        target = TargetWeights(
+            weights=weights,
+            timestamp=int(time.time() * 1000),
+            metadata=metadata or {},
+        )
+
+        # Stage 4: Risk validation
+        validated = self._optimizer.validate(target)
+
+        if validated.rejected:
+            logger.warning(f"Weights rejected by optimizer: {validated.rejection_reason}")
+            return None
+
+        # Stage 5: Execution
+        result = await self._execution_engine.execute(validated)
+
+        # Publish rebalance-complete event for observability
+        if self._event_bus:
+            await self._event_bus.publish(RebalanceCompleteEvent(
+                result=result,
+                validated_weights=validated,
+                timestamp=int(time.time() * 1000),
+            ))
+
+        return result
 
     # ── Exchange access ────────────────────────────────────────────────────────
 

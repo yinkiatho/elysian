@@ -13,6 +13,7 @@ from typing import Optional
 from elysian_core.core.enums import Venue
 from elysian_core.core.market_data import Kline, OrderBook
 from elysian_core.core.order import Order
+from elysian_core.core.signals import RebalanceResult, ValidatedWeights
 
 
 class EventType(Enum):
@@ -20,6 +21,7 @@ class EventType(Enum):
     ORDERBOOK_UPDATE = auto()
     ORDER_UPDATE = auto()
     BALANCE_UPDATE = auto()
+    REBALANCE_COMPLETE = auto()
 
 
 @dataclass(frozen=True)
@@ -57,3 +59,13 @@ class BalanceUpdateEvent:
     new_balance: float
     timestamp: int
     event_type: EventType = field(default=EventType.BALANCE_UPDATE, init=False)
+
+
+@dataclass(frozen=True)
+class RebalanceCompleteEvent:
+    """Published after the execution engine completes a rebalance cycle."""
+
+    result: RebalanceResult
+    validated_weights: ValidatedWeights
+    timestamp: int
+    event_type: EventType = field(default=EventType.REBALANCE_COMPLETE, init=False)

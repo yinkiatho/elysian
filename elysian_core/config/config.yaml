@@ -1,11 +1,20 @@
-Pools:
+pools:
   - 
+
+spot:
+  venues: 
+    - "Binance"
+  #  - "Aster"
+
+futures:
+  venues: 
+    -
 
 version_name: "v0.0.0_test"
 strategy_id: 999
 strategy_name: "dev strategy"
 
-Database:
+database:
   postgres:
     Host: "localhost"
     Port: 5432
@@ -15,13 +24,3 @@ Database:
   redis:
     Host: "localhost"
     Port: 6379
-
-  
-Miscellaneous Addresses:
-  RPC URL: "https://rpc.getshio.com"
-  Package Address: "0x1889977f0fb56ae730e7bda8e8e32859ce78874458c74910d36121a81a615123"
-  Feed URL: "wss://rpc.getshio.com/feed"
-
-TOC Config:
-  URL: "https://prod.mo.api.intra.tokkalabs.com/onchain-transaction-service/trade"
-  T2X Account ID: 7007

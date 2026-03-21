@@ -31,7 +31,7 @@ from elysian_core.connectors.BinanceFuturesExchange import BinanceFuturesExchang
 
 from elysian_core.connectors.AsterDataConnectors import (
     AsterKlineFeed,
-    AsterOrderBook,
+    AsterOrderBookFeed,
     AsterKlineClientManager,
     AsterOrderBookClientManager
 )
@@ -55,6 +55,10 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from elysian_core.core.event_bus import EventBus
 from elysian_core.core.enums import Venue
+from elysian_core.core.events import EventType, BalanceUpdateEvent
+from elysian_core.execution.engine import ExecutionEngine
+from elysian_core.risk.optimizer import PortfolioOptimizer
+from elysian_core.risk.risk_config import RiskConfig
 from elysian_core.strategy.base_strategy import SpotStrategy
 
 import sys
@@ -237,7 +241,7 @@ class StrategyRunner:
         
         logger.info("Setting up exchange instances...")
         # Initialize Binance spot exchange
-        if hasattr(self, 'binance_tokens') and self.binance_tokens:
+        if hasattr(self, 'binance_tokens') and self.binance_tokens and 'Binance' in self.args.spot.venues:
             self.binance_exchange = BinanceSpotExchange(
                 args=self.args,
                 api_key=self._get_env('BINANCE_API_KEY', required=True),
@@ -249,7 +253,7 @@ class StrategyRunner:
             )
         
         # Initialize Binance futures exchange
-        if hasattr(self, 'binance_futures_tokens') and self.binance_futures_tokens:
+        if hasattr(self, 'binance_futures_tokens') and self.binance_futures_tokens and 'Binance' in self.args.futures.venues:
             self.binance_futures_exchange = BinanceFuturesExchange(
                 args=self.args,
                 api_key=self._get_env('BINANCE_API_KEY', required=True),
@@ -261,7 +265,7 @@ class StrategyRunner:
             logger.info("Binance futures exchange initialized")
         
         # Initialize Aster futures exchange
-        if hasattr(self, 'aster_futures_tokens') and self.aster_futures_tokens:
+        if hasattr(self, 'aster_futures_tokens') and self.aster_futures_tokens and 'Aster' in self.args.spot.venues:
             self.aster_futures_exchange = AsterPerpExchange(
                 args=self.args,
                 api_key=self._get_env('ASTER_API_KEY', required=True),
@@ -540,12 +544,43 @@ class StrategyRunner:
             logger.info("All components initialized. Starting event loops...")
 
             # Run exchange + feeds in single event loop
-            # Initialize the exchange first so its AsyncClient and get_exchange_info() call don't compete with the kline/OB
-            # managers creating their own AsyncClients concurrently.
             try:
-                # Initialize the exchange first so its AsyncClient and get_exchange_info() call don't compete with the kline/OB
+                # Initialize the exchange first so its AsyncClient and
+                # get_exchange_info() call don't compete with the kline/OB
                 # managers creating their own AsyncClients concurrently.
                 await self.binance_exchange.run()
+
+                # ── Stage 3-5 pipeline: Portfolio, Optimizer, ExecutionEngine ──
+                if strategy is not None:
+                    # Strategy owns the Portfolio — sync initial cash from exchange
+                    usdt_balance = self.binance_exchange.get_balance("USDT")
+                    strategy.portfolio.set_cash(usdt_balance)
+                    logger.info(f"Portfolio initialized with cash={usdt_balance:.2f} USDT")
+
+                    # Keep cash synced via EventBus
+                    async def _sync_portfolio_cash(event: BalanceUpdateEvent):
+                        if event.asset in ("USDT", "USDC", "BUSD"):
+                            strategy.portfolio.set_cash(event.new_balance)
+                    self.event_bus.subscribe(EventType.BALANCE_UPDATE, _sync_portfolio_cash)
+
+                    # Collect all registered feeds from kline managers
+                    all_feeds = {}
+                    for sym, feed in self.binance_kline_manager._active_feeds.items():
+                        all_feeds[sym] = feed
+
+                    risk_config = RiskConfig()
+                    self.optimizer = PortfolioOptimizer(risk_config=risk_config, portfolio=strategy.portfolio)
+                    self.execution_engine = ExecutionEngine(
+                        exchanges={Venue.BINANCE: self.binance_exchange},
+                        portfolio=strategy.portfolio,
+                        feeds=all_feeds,
+                        default_venue=Venue.BINANCE,
+                    )
+
+                    # Inject into strategy
+                    strategy._optimizer = self.optimizer
+                    strategy._execution_engine = self.execution_engine
+                    logger.info("Pipeline wired: Strategy.portfolio -> Optimizer -> ExecutionEngine")
 
                 # _setup_binance_data_feeds blocks forever (runs multiplex feed tasks).  If the strategy has its own long-running coroutine (e.g. periodic rebalance timer), gather them
                 # so both run concurrently in the same event loop.
