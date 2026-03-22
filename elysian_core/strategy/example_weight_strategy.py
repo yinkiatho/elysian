@@ -43,8 +43,9 @@ class EqualWeightStrategy(SpotStrategy):
     async def run_forever(self):
         """Periodic rebalance loop."""
         # Wait for initial data to arrive
-        await asyncio.sleep(5)
-
+        await asyncio.sleep(20)
+        
+        logger.info(f'Initiating Example Weight Strategy ')
         while True:
             try:
                 weights = self._compute_weights()

@@ -13,17 +13,16 @@ Pipeline per rebalance cycle:
   6. Execute *sells first* (free capital), then *buys*
   7. Return RebalanceResult
 
-Note: min_notional and balance checks are handled by the exchange connector's
-``order_health_check()`` — they are NOT duplicated here.
 """
 
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from elysian_core.connectors.base import AbstractDataFeed, SpotExchangeConnector
 from elysian_core.core.enums import OrderType, Side, Venue
 from elysian_core.core.portfolio import Portfolio
 from elysian_core.core.signals import OrderIntent, RebalanceResult, ValidatedWeights
+from elysian_core.risk.risk_config import RiskConfig
 import elysian_core.utils.logger as log
 
 logger = log.setup_custom_logger("root")
@@ -43,25 +42,36 @@ class ExecutionEngine:
         exchanges: Dict[Venue, SpotExchangeConnector],
         portfolio: Portfolio,
         feeds: Dict[str, AbstractDataFeed],
+        risk_config: Optional[RiskConfig] = None,
         default_venue: Venue = Venue.BINANCE,
         default_order_type: OrderType = OrderType.MARKET,
         symbol_venue_map: Optional[Dict[str, Venue]] = None,
+        args: Optional[Any] = None,
+        config_json: Optional[Dict] = None,
     ):
         self._exchanges = exchanges
         self._portfolio = portfolio
         self._feeds = feeds
+        self._risk_config = risk_config or RiskConfig()
         self._default_venue = default_venue
         self._default_order_type = default_order_type
         self._symbol_venue_map = symbol_venue_map or {}
+        self.args = args
+        self.config_json = config_json or {}
 
     # ── Public ───────────────────────────────────────────────────────────────
 
     async def execute(self, validated: ValidatedWeights) -> RebalanceResult:
         """Execute a full rebalance cycle from validated weights to exchange orders."""
+        logger.info(
+            f"[ExecutionEngine] Starting rebalance: {len(validated.weights)} symbols"
+        )
         mark_prices = self._get_mark_prices()
+        logger.info(f"[ExecutionEngine] Mark prices snapshot: {len(mark_prices)} symbols")
         intents = self.compute_order_intents(validated, mark_prices)
 
         if not intents:
+            logger.info("[ExecutionEngine] No order intents generated — portfolio already aligned")
             now_ms = int(time.time() * 1000)
             return RebalanceResult(
                 intents=(), submitted=0, failed=0, timestamp=now_ms,
@@ -70,6 +80,10 @@ class ExecutionEngine:
         # Partition: sells first (free capital), then buys
         sells = [i for i in intents if i.side == Side.SELL]
         buys = [i for i in intents if i.side == Side.BUY]
+        logger.info(
+            f"[ExecutionEngine] Order plan: {len(sells)} sells, {len(buys)} buys "
+            f"(sells execute first)"
+        )
 
         submitted = 0
         failed = 0
@@ -92,11 +106,16 @@ class ExecutionEngine:
             errors=tuple(errors),
         )
 
-        logger.info(
-            f"[ExecutionEngine] Rebalance complete: "
-            f"{submitted} submitted, {failed} failed, "
-            f"{len(intents)} total intents"
-        )
+        if failed > 0:
+            logger.warning(
+                f"[ExecutionEngine] Rebalance complete with errors: "
+                f"{submitted} submitted, {failed} FAILED — {errors}"
+            )
+        else:
+            logger.info(
+                f"[ExecutionEngine] Rebalance complete: "
+                f"{submitted}/{len(intents)} orders submitted successfully"
+            )
         return result
 
     def compute_order_intents(
@@ -112,6 +131,7 @@ class ExecutionEngine:
             logger.warning("[ExecutionEngine] Portfolio total value <= 0, skipping")
             return []
 
+        logger.info(f"[ExecutionEngine] Portfolio total value: {total_value:.2f}")
         intents: List[OrderIntent] = []
 
         for symbol, target_weight in validated.weights.items():
@@ -126,23 +146,38 @@ class ExecutionEngine:
                 logger.warning(f"[ExecutionEngine] No exchange for venue {venue}, skipping {symbol}")
                 continue
 
+            # Weight-delta filter: skip legs below threshold
+            current_weight = (self._portfolio.position(symbol).quantity * price) / total_value
+            weight_delta = abs(target_weight - current_weight)
+            if weight_delta < self._risk_config.min_weight_delta:
+                logger.debug(
+                    f"[ExecutionEngine] Skipping {symbol}: weight_delta={weight_delta:.4f} "
+                    f"< min={self._risk_config.min_weight_delta:.4f}"
+                )
+                continue
+
             # Target vs current quantity
             target_notional = target_weight * total_value
             target_qty = target_notional / price
             current_qty = self._portfolio.position(symbol).quantity
             delta_qty = target_qty - current_qty
 
-            if abs(delta_qty) < 1e-12:
-                continue
-
             # Round to exchange step size
             step_size = exchange._token_infos.get(symbol, {}).get("step_size", 0.0001)
             abs_qty = _round_step(abs(delta_qty), step_size)
 
             if abs_qty <= 0:
+                logger.debug(f"[ExecutionEngine] Skipping {symbol}: rounded qty is 0")
                 continue
 
             side = Side.BUY if delta_qty > 0 else Side.SELL
+
+            logger.info(
+                f"[ExecutionEngine] Intent: {side.value} {symbol} "
+                f"qty={abs_qty:.6f} @ ~{price:.4f} "
+                f"(target_w={target_weight:.4f} current_w={current_weight:.4f} "
+                f"delta_w={weight_delta:.4f})"
+            )
 
             intents.append(OrderIntent(
                 symbol=symbol,
@@ -153,6 +188,7 @@ class ExecutionEngine:
                 price=None if self._default_order_type == OrderType.MARKET else price,
             ))
 
+        logger.info(f"[ExecutionEngine] Generated {len(intents)} order intents")
         return intents
 
     # ── Private ──────────────────────────────────────────────────────────────
@@ -169,6 +205,10 @@ class ExecutionEngine:
             return False
 
         try:
+            logger.info(
+                f"[ExecutionEngine] Submitting {intent.order_type.value} {intent.side.value} "
+                f"{intent.symbol} qty={intent.quantity:.6f} on {intent.venue.value}"
+            )
             if intent.order_type == OrderType.MARKET:
                 await exchange.place_market_order(
                     symbol=intent.symbol,
@@ -188,9 +228,14 @@ class ExecutionEngine:
                 )
                 return False
 
+            logger.info(f"[ExecutionEngine] Order submitted OK: {intent.side.value} {intent.symbol}")
             return True
         except Exception as e:
-            logger.error(f"[ExecutionEngine] Order failed {intent.symbol}: {e}")
+            logger.error(
+                f"[ExecutionEngine] Order FAILED: {intent.side.value} {intent.symbol} "
+                f"qty={intent.quantity:.6f} — {e}",
+                exc_info=True,
+            )
             return False
 
     def _get_mark_prices(self) -> Dict[str, float]:

@@ -55,7 +55,6 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from elysian_core.core.event_bus import EventBus
 from elysian_core.core.enums import Venue
-from elysian_core.core.events import EventType, BalanceUpdateEvent
 from elysian_core.execution.engine import ExecutionEngine
 from elysian_core.risk.optimizer import PortfolioOptimizer
 from elysian_core.risk.risk_config import RiskConfig
@@ -513,6 +512,121 @@ class StrategyRunner:
             await asyncio.gather(*multiplex_tasks)
             
     
+    # ── Stage 3-5 setup helpers ────────────────────────────────────────────────────────────────────────────── # 
+
+    def _collect_all_feeds(self) -> dict:
+        """Gather all registered kline feeds across venues."""
+        all_feeds = {}
+        for sym, feed in self.binance_kline_manager._active_feeds.items():
+            all_feeds[sym] = feed
+        return all_feeds
+
+
+    async def _setup_portfolio(self, strategy: SpotStrategy) -> None:
+        """Initialize the strategy's portfolio with full exchange state sync.
+
+        Syncs cash, positions, mark prices, and open orders from
+        BinanceSpotExchange, then subscribes to EventBus so balance
+        deltas, kline prices, and weights stay in sync automatically.
+
+        For multi-venue expansion: call ``sync_from_exchange()`` once per
+        exchange — each venue's state accumulates into the portfolio.
+        """
+        # Pass args/config_json into portfolio
+        strategy.portfolio.args = self.args
+        strategy.portfolio.config_json = self.config_json
+
+        all_feeds = self._collect_all_feeds()
+
+        # Full sync: cash + positions + mark prices + open orders
+        strategy.portfolio.sync_from_exchange(
+            self.binance_exchange, venue=Venue.BINANCE, feeds=all_feeds
+        )
+
+        # Start event-driven portfolio (auto-updates weights, mark prices, cash)
+        strategy.portfolio.start(self.event_bus, feeds=all_feeds)
+
+        logger.info(
+            f"Portfolio initialized: cash={strategy.portfolio.cash:.2f}, "
+            f"{len(strategy.portfolio.active_positions)} positions, "
+            f"{len(all_feeds)} feeds wired"
+        )
+
+    def _setup_risk(self, strategy: SpotStrategy) -> None:
+        """Build a RiskConfig from ``self.args`` and create the PortfolioOptimizer.
+
+        Override-friendly: reads ``self.args.risk.*`` fields when present,
+        falls back to RiskConfig defaults otherwise.
+        """
+        risk_kwargs = {}
+        risk_section = getattr(self.args, "risk", None)
+        if risk_section is not None:
+            logger.info("[Runner] Reading risk config from args.risk")
+            _RISK_FIELDS = {
+                "max_weight_per_asset", "min_weight_per_asset",
+                "max_total_exposure", "min_cash_weight",
+                "max_turnover_per_rebalance", "max_leverage",
+                "max_short_weight", "min_order_notional",
+                "max_order_notional", "min_rebalance_interval_ms",
+                "min_weight_delta",
+            }
+            for field_name in _RISK_FIELDS:
+                val = getattr(risk_section, field_name, None)
+                if val is not None:
+                    risk_kwargs[field_name] = val
+                    logger.info(f"[Runner]   risk.{field_name} = {val}")
+        else:
+            logger.info("[Runner] No args.risk section — using RiskConfig defaults")
+
+        risk_config = RiskConfig(**risk_kwargs)
+        self.optimizer = PortfolioOptimizer(
+            risk_config=risk_config,
+            portfolio=strategy.portfolio,
+            args=self.args,
+            config_json=self.config_json,
+        )
+        strategy._optimizer = self.optimizer
+        logger.info(f"[Runner] Risk optimizer configured: {risk_config}")
+
+    def _setup_execution(self, strategy: SpotStrategy) -> None:
+        """Create the ExecutionEngine and inject it into the strategy.
+
+        Shares the same RiskConfig as the optimizer so the weight-delta
+        threshold is consistent between risk and execution stages.
+        """
+        all_feeds = self._collect_all_feeds()
+        risk_config = self.optimizer.config if hasattr(self, "optimizer") else RiskConfig()
+
+        self.execution_engine = ExecutionEngine(
+            exchanges={Venue.BINANCE: self.binance_exchange},
+            portfolio=strategy.portfolio,
+            feeds=all_feeds,
+            risk_config=risk_config,
+            default_venue=Venue.BINANCE,
+            args=self.args,
+            config_json=self.config_json,
+        )
+        strategy._execution_engine = self.execution_engine
+        logger.info(
+            f"[Runner] Execution engine configured: "
+            f"venue={Venue.BINANCE.value}, "
+            f"order_type={self.execution_engine._default_order_type.value}, "
+            f"min_weight_delta={self.execution_engine._risk_config.min_weight_delta}"
+        )
+
+    async def _setup_pipeline(self, strategy: SpotStrategy) -> None:
+        """Wire the full Stage 3-5 pipeline: Portfolio -> Risk -> Execution."""
+        logger.info("[Runner] ── Setting up Stage 3-5 pipeline ──")
+        await self._setup_portfolio(strategy)
+        self._setup_risk(strategy)
+        self._setup_execution(strategy)
+        logger.info(
+            f"[Runner] Pipeline complete: {strategy.__class__.__name__}.portfolio "
+            f"-> Optimizer -> ExecutionEngine"
+        )
+
+    # ── Main entry point ──────────────────────────────────────────────────────
+
     async def run(self, strategy: SpotStrategy = None) -> None:
         """Run the complete strategy in a single event loop.
 
@@ -521,86 +635,72 @@ class StrategyRunner:
         ``strategy.run_heavy()``.
         """
         try:
-            logger.info("Starting strategy runner...")
+            logger.info("[Runner] ════════════════════════════════════════════")
+            logger.info("[Runner] Starting strategy runner...")
+            logger.info("[Runner] ════════════════════════════════════════════")
 
             # Setup phase
             self._setup_config()
 
             # Create shared event bus BEFORE exchanges so it can be injected
             self.event_bus = EventBus()
+            logger.info("[Runner] EventBus created")
 
             self._setup_exchanges()
 
             # Inject event bus into client managers
             self.binance_kline_manager.set_event_bus(self.event_bus)
             self.binance_ob_manager.set_event_bus(self.event_bus)
+            logger.info("[Runner] EventBus injected into kline + OB client managers")
 
             # Wire runner's event bus and exchanges into strategy, then start
             if strategy is not None:
+                logger.info(f"[Runner] Wiring strategy: {strategy.__class__.__name__}")
                 strategy._event_bus = self.event_bus
                 strategy._exchanges = {Venue.BINANCE: self.binance_exchange}
+                strategy.args = self.args
+                strategy.config_json = self.config_json
                 await strategy.start()
 
-            logger.info("All components initialized. Starting event loops...")
+            logger.info("[Runner] All components initialized. Starting event loops...")
 
             # Run exchange + feeds in single event loop
             try:
                 # Initialize the exchange first so its AsyncClient and
                 # get_exchange_info() call don't compete with the kline/OB
                 # managers creating their own AsyncClients concurrently.
+                logger.info("[Runner] Binance exchange initialized")
                 await self.binance_exchange.run()
+                logger.info("[Runner] Binance exchange running")
 
-                # ── Stage 3-5 pipeline: Portfolio, Optimizer, ExecutionEngine ──
+                # ── Stage 3-5 pipeline ──
                 if strategy is not None:
-                    # Strategy owns the Portfolio — sync initial cash from exchange
-                    usdt_balance = self.binance_exchange.get_balance("USDT")
-                    strategy.portfolio.set_cash(usdt_balance)
-                    logger.info(f"Portfolio initialized with cash={usdt_balance:.2f} USDT")
+                    await self._setup_pipeline(strategy)
 
-                    # Keep cash synced via EventBus
-                    async def _sync_portfolio_cash(event: BalanceUpdateEvent):
-                        if event.asset in ("USDT", "USDC", "BUSD"):
-                            strategy.portfolio.set_cash(event.new_balance)
-                    self.event_bus.subscribe(EventType.BALANCE_UPDATE, _sync_portfolio_cash)
-
-                    # Collect all registered feeds from kline managers
-                    all_feeds = {}
-                    for sym, feed in self.binance_kline_manager._active_feeds.items():
-                        all_feeds[sym] = feed
-
-                    risk_config = RiskConfig()
-                    self.optimizer = PortfolioOptimizer(risk_config=risk_config, portfolio=strategy.portfolio)
-                    self.execution_engine = ExecutionEngine(
-                        exchanges={Venue.BINANCE: self.binance_exchange},
-                        portfolio=strategy.portfolio,
-                        feeds=all_feeds,
-                        default_venue=Venue.BINANCE,
-                    )
-
-                    # Inject into strategy
-                    strategy._optimizer = self.optimizer
-                    strategy._execution_engine = self.execution_engine
-                    logger.info("Pipeline wired: Strategy.portfolio -> Optimizer -> ExecutionEngine")
-
-                # _setup_binance_data_feeds blocks forever (runs multiplex feed tasks).  If the strategy has its own long-running coroutine (e.g. periodic rebalance timer), gather them
-                # so both run concurrently in the same event loop.
+                # _setup_binance_data_feeds blocks forever (runs multiplex
+                # feed tasks).  If the strategy has its own long-running
+                # coroutine (e.g. periodic rebalance timer), gather them so
+                # both run concurrently in the same event loop.
                 coros = [self._setup_binance_data_feeds()]
-                
+
                 if strategy is not None:
-                    
-                    # Entry corou for a strategy
+                    logger.info(f"[Runner] Launching strategy.run_forever() alongside data feeds")
                     coros.append(strategy.run_forever())
+
+                logger.info(f"[Runner] Entering main event loop ({len(coros)} coroutines)")
                 await asyncio.gather(*coros)
-                
+
             finally:
+                logger.info("[Runner] Shutting down exchange and strategy...")
                 await self.binance_exchange.cleanup()
                 if strategy is not None:
+                    strategy.portfolio.stop()
                     await strategy.stop()
 
         except asyncio.CancelledError:
-            logger.warning("Strategy cancelled")
+            logger.warning("[Runner] Strategy cancelled by user")
         except Exception as e:
-            logger.error(f"Error in strategy runner: {e}", exc_info=True)
+            logger.error(f"[Runner] Fatal error: {e}", exc_info=True)
             raise
         finally:
             logger.info("Cleaning up...")

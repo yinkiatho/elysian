@@ -103,10 +103,44 @@ class AccountSnapshots(BaseModel):
     balances = JSONField(null=False)  # { "USDT": 1000.0, "ETH": 2.5, ... }
     total_usd_value = FloatField(null=False)  # total account value in USD at the time of snapshot
     total_open_orders = IntegerField(null=False)  # total number of open orders at the time of snapshot
-    
+
     class Meta:
         table_name = "account_snapshots"
-    
+
+
+class PortfolioSnapshot(BaseModel):
+    """Point-in-time capture of the portfolio state.
+
+    Saved periodically (e.g. every kline) or on demand.  Useful for
+    equity-curve reconstruction, risk reporting, and post-trade analysis.
+    """
+    id = AutoField(primary_key=True)
+    datetime = DateTimeField(default=lambda: datetime.datetime.now(_UTC8), index=True)
+    strategy_id = IntegerField(null=True)
+    venue = EnumField(Venue, default=Venue.BINANCE)
+
+    # ── Valuation ─────────────────────────────────────────────────────────
+    nav = FloatField(null=False)                    # total portfolio value
+    cash = FloatField(null=False)                   # stablecoin balance
+    unrealized_pnl = FloatField(null=False)
+    realized_pnl = FloatField(null=False)
+    total_commission = FloatField(null=False)
+
+    # ── Risk ──────────────────────────────────────────────────────────────
+    peak_equity = FloatField(null=False)
+    max_drawdown = FloatField(null=False)           # fraction, e.g. 0.05 = 5%
+    current_drawdown = FloatField(null=False)
+    gross_exposure = FloatField(null=False)
+    net_exposure = FloatField(null=False)
+
+    # ── Detail (JSON blobs) ───────────────────────────────────────────────
+    positions = JSONField(null=False)               # { "ETHUSDT": {"qty": 1.5, "avg_entry": 3200, ...}, ... }
+    weights = JSONField(null=False)                 # { "ETHUSDT": 0.25, ... }
+    mark_prices = JSONField(null=False)             # { "ETHUSDT": 3250.0, ... }
+    num_fills = IntegerField(null=False)
+
+    class Meta:
+        table_name = "portfolio_snapshots"
 
 
 # ── Schema management ─────────────────────────────────────────────────────────
@@ -114,6 +148,7 @@ class AccountSnapshots(BaseModel):
 ALL_TABLES = [
     CexTrade,
     DexTrade,
+    PortfolioSnapshot,
 ]
 
 

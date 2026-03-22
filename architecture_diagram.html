@@ -3,131 +3,753 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Elysian Trading System Architecture</title>
+    <title>Elysian Trading System — Architecture Diagrams</title>
     <script type="module">
         import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-        mermaid.initialize({ startOnLoad: true });
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            flowchart: { curve: 'basis', padding: 20 },
+            themeVariables: {
+                primaryColor: '#1a1a2e',
+                primaryTextColor: '#e0e0e0',
+                primaryBorderColor: '#4a9eff',
+                lineColor: '#4a9eff',
+                secondaryColor: '#16213e',
+                tertiaryColor: '#0f3460',
+                fontSize: '14px'
+            }
+        });
     </script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #0a0a1a;
+            color: #e0e0e0;
+            padding: 40px 20px;
+            line-height: 1.6;
+        }
+        h1 {
+            text-align: center;
+            font-size: 2.2rem;
+            font-weight: 300;
+            margin-bottom: 8px;
+            color: #fff;
+            letter-spacing: 2px;
+        }
+        h1 span { color: #4a9eff; font-weight: 600; }
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 50px;
+            font-size: 1rem;
+        }
+        h2 {
+            font-size: 1.5rem;
+            font-weight: 400;
+            margin: 50px 0 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #222;
+            color: #4a9eff;
+        }
+        h2 span { color: #888; font-size: 0.9rem; font-weight: 300; margin-left: 12px; }
+        p.desc {
+            color: #aaa;
+            margin-bottom: 20px;
+            max-width: 900px;
+            font-size: 0.95rem;
+        }
+        .mermaid {
+            background: #0f0f1f;
+            border: 1px solid #1a1a3e;
+            border-radius: 12px;
+            padding: 30px 20px;
+            margin: 20px 0 40px;
+            overflow-x: auto;
+        }
+        .mermaid svg { max-width: 100%; }
+        .legend {
+            display: flex;
+            gap: 24px;
+            flex-wrap: wrap;
+            margin: 10px 0 20px;
+            font-size: 0.85rem;
+            color: #999;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .legend-color {
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+            border: 1px solid #333;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0 30px;
+            font-size: 0.9rem;
+        }
+        th {
+            background: #1a1a2e;
+            color: #4a9eff;
+            text-align: left;
+            padding: 10px 14px;
+            border-bottom: 2px solid #222;
+        }
+        td {
+            padding: 8px 14px;
+            border-bottom: 1px solid #1a1a1a;
+            color: #ccc;
+        }
+        tr:hover td { background: #111122; }
+        code {
+            background: #1a1a2e;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.88em;
+            color: #7cb7ff;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+    </style>
 </head>
 <body>
-    <h1>Elysian Trading System Architecture</h1>
-    <p>This diagram represents the detailed architecture of the Elysian automated trading system, showing class names, functions, and the event flow.</p>
+<div class="container">
+
+    <h1><span>ELYSIAN</span> Trading System</h1>
+    <p class="subtitle">Event-driven, multi-venue quantitative trading infrastructure</p>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>1. High-Level 6-Stage Pipeline <span>End-to-end data flow</span></h2>
+    <p class="desc">
+        Market data enters from the left (Stage 1), flows through feature computation, alpha
+        generation, risk validation, and execution, then exits as exchange orders on the right.
+        The return path (fills, balance updates) feeds back through the EventBus.
+    </p>
+    <div class="mermaid">
+        graph LR
+            subgraph S1["Stage 1: Market Data"]
+                WS["WebSocket Streams\n(Kline @1s, OB @100ms)"]
+                UD["User Data Stream\n(fills, balances)"]
+            end
+
+            subgraph S2["Stage 2: Feature Compute"]
+                KF["KlineFeed\n(OHLCV, rolling vol)"]
+                OBF["OrderBookFeed\n(L2 depth, VWAP)"]
+                PF["Portfolio\n(mark prices, weights,\nNAV, drawdown)"]
+            end
+
+            subgraph S3["Stage 3: Strategy / Alpha"]
+                SS["SpotStrategy\n.on_kline()\n.on_orderbook_update()\n.run_forever()"]
+                SW["submit_weights()\n{ETHUSDT: 0.4,\nBTCUSDT: 0.5}"]
+            end
+
+            subgraph S4["Stage 4: Risk"]
+                OP["PortfolioOptimizer\n.validate()"]
+                RC["RiskConfig\n(per-asset, exposure,\ncash floor, turnover)"]
+            end
+
+            subgraph S5["Stage 5: Execution"]
+                EE["ExecutionEngine\n.execute()"]
+                OI["OrderIntents\n(sells first, then buys)"]
+            end
+
+            subgraph S6["Stage 6: Exchange"]
+                EX["SpotExchangeConnector\n.place_market_order()\n.place_limit_order()"]
+            end
+
+            WS --> KF
+            WS --> OBF
+            UD --> PF
+            KF -->|KlineEvent| SS
+            OBF -->|OBUpdateEvent| SS
+            PF -.->|weights, NAV| SS
+            SS --> SW
+            SW -->|TargetWeights| OP
+            RC -.-> OP
+            OP -->|ValidatedWeights| EE
+            EE --> OI
+            OI --> EX
+            EX -.->|OrderUpdateEvent| SS
+            EX -.->|BalanceUpdateEvent| PF
+            EE -->|RebalanceCompleteEvent| SS
+
+            style S1 fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b
+            style S2 fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
+            style S3 fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
+            style S4 fill:#0a0a1a,stroke:#6b6bff,color:#6b6bff
+            style S5 fill:#1a0a1a,stroke:#ff6bff,color:#ff6bff
+            style S6 fill:#0a1a1a,stroke:#6bffff,color:#6bffff
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>2. EventBus Architecture <span>Pub/sub wiring</span></h2>
+    <p class="desc">
+        All market data events flow through a single in-process EventBus. Publishers (client manager
+        workers, user data stream) emit typed frozen events. Subscribers (strategy hooks, portfolio)
+        receive them sequentially with backpressure.
+    </p>
+    <div class="mermaid">
+        graph TB
+            subgraph Publishers["Event Publishers"]
+                KW["Kline Worker\n(4 async workers)"]
+                OBW["OB Worker\n(4 async workers)"]
+                UDM["UserData Manager\n(reader loop)"]
+                SEX["submit_weights()\n(post-execution)"]
+            end
+
+            EB["EventBus\nsubscribe() / publish()\nSequential dispatch\nBackpressure-aware"]
+
+            subgraph Subscribers["Event Subscribers"]
+                DK["strategy._dispatch_kline()"]
+                DOB["strategy._dispatch_ob()"]
+                DO["strategy._dispatch_order()"]
+                DB["strategy._dispatch_balance()"]
+                DR["strategy._dispatch_rebalance()"]
+                PK["portfolio._on_kline()"]
+                PB["portfolio._on_balance()"]
+            end
+
+            subgraph Hooks["Strategy Hooks (user overrides)"]
+                OK["on_kline()"]
+                OOB["on_orderbook_update()"]
+                OO["on_order_update()"]
+                OBU["on_balance_update()"]
+                ORC["on_rebalance_complete()"]
+            end
+
+            KW -->|"KlineEvent"| EB
+            OBW -->|"OBUpdateEvent"| EB
+            UDM -->|"OrderUpdateEvent\nBalanceUpdateEvent"| EB
+            SEX -->|"RebalanceCompleteEvent"| EB
+
+            EB --> DK
+            EB --> DOB
+            EB --> DO
+            EB --> DB
+            EB --> DR
+            EB --> PK
+            EB --> PB
+
+            DK -->|"try/except"| OK
+            DOB -->|"try/except"| OOB
+            DO -->|"try/except"| OO
+            DB -->|"try/except"| OBU
+            DR -->|"try/except"| ORC
+
+            style EB fill:#1a1a3e,stroke:#4a9eff,stroke-width:3px,color:#fff
+            style Publishers fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b
+            style Subscribers fill:#0a1a1a,stroke:#6bffff,color:#6bffff
+            style Hooks fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>3. Stage 3-5 Pipeline Detail <span>submit_weights() call chain</span></h2>
+    <p class="desc">
+        The risk/execution pipeline uses direct method calls (not EventBus) for deterministic
+        sequential flow. Only REBALANCE_COMPLETE is published at the end for observability.
+    </p>
     <div class="mermaid">
         graph TD
-            subgraph "Entry Point Layer"
-                SR[StrategyRunner\n__init__()\nrun()\n_setup_config()\n_setup_data_feeds()\nsetup_binance_feeds()]
-            end
+            A["strategy.submit_weights(weights)"] --> B["TargetWeights\n{weights, timestamp, metadata}"]
+            B --> C{"optimizer == None?"}
+            C -->|Yes| WARN["logger.warning()\nreturn None"]
+            C -->|No| D["optimizer.validate(target)"]
 
-            subgraph "Market Data Layer"
-                BKM[BinanceKlineClientManager\nstart()\nregister_feed()\nrun_multiplex_feeds()\n_reader_coroutine()\n_worker_coroutine()]
-                BOBM[BinanceOrderBookClientManager\nstart()\nregister_feed()\nrun_multiplex_feeds()]
-                BKF[BinanceKlineFeed\ncreate_new()\n_process_kline_event()]
-                BOBF[BinanceOrderBookFeed\ncreate_new()\n_process_depth_event()]
-                AKM[AsterKlineClientManager\nstart()\nregister_feed()]
-                AOBM[AsterOrderBookClientManager]
-                AKF[AsterKlineFeed\ncreate_new()\n_process_kline_event()]
-                AOBF[AsterOrderBookFeed\ncreate_new()\n_process_depth_event()]
-                VF[VolatilityFeed\nupdate_current_stats()]
-            end
+            D --> D1["1. Rate Limit Check\nelapsed < min_rebalance_interval_ms?"]
+            D1 -->|Reject| REJ["ValidatedWeights(rejected=True)\nreturn None"]
+            D1 -->|Pass| D2["2. Symbol Filter\nremove blocked / non-allowed"]
+            D2 --> D3["3. Per-Asset Clip\nclamp to [min_w, max_w]"]
+            D3 --> D4["4. Exposure Scaling\ngross <= max_total_exposure"]
+            D4 --> D5["5. Cash Floor\nsum(long) <= 1 - min_cash"]
+            D5 --> D6["6. Turnover Cap\nsum(|delta_w|) <= max_turnover"]
+            D6 --> VW["ValidatedWeights\n{weights, clipped, original}"]
 
-            subgraph "Order Management Layer"
-                OMS[AbstractOMS\nplace_order()\ncancel_order()\nget_balance()]
-                OT[OrderTracker\ntrack_order()\nget_status()\nfill_history()]
-            end
+            VW --> E["execution_engine.execute(validated)"]
+            E --> E1["_get_mark_prices()\nSnapshot from feeds"]
+            E1 --> E2["compute_order_intents()\nFor each symbol:"]
+            E2 --> E2a["target_qty = w * NAV / price\ndelta = target - current\nweight_delta filter\nstep_size rounding"]
+            E2a --> E3["Partition:\nSELLS first → BUYS second"]
+            E3 --> E4["_submit_order() per intent\n(error isolated)"]
+            E4 --> RR["RebalanceResult\n{intents, submitted, failed, errors}"]
 
-            subgraph "Core Models Layer"
-                KLINE[Kline\nticker, interval, OHLCV]
-                OB[OrderBook\nbid_orders, ask_orders\nspread, mid_price]
-                ORDER[Order\nLimitOrder, RangeOrder]
-                ENUMS[Enums\nOrderStatus, Side, TradeType]
-                TRADE[Trade]
-                PORTFOLIO[Portfolio\nbalances, positions, pnl]
-            end
+            RR --> PUB["event_bus.publish(\nRebalanceCompleteEvent)"]
+            PUB --> RET["return RebalanceResult\nto strategy"]
 
-            subgraph "Strategy Layer"
-                SE[StrategyEngine\non_event()\nget_feed()\nget_price()\nplace_order()\ncancel_order()]
-                PROC[Processor\nprocess()\nevent chain\nsignal processing]
-            end
-
-            subgraph "Market Maker Layer"
-                OBOOK[order_book.py\nOrderBook\nspread calc\nlevel extraction]
-                OMAN[order_management.py\ncreate range order\nupdate positions\nmanage lifecycle]
-                OTRACK[order_tracker.py\ntrack MM orders\nmonitor fills\nadjust levels]
-            end
-
-            subgraph "Event Flow"
-                EVT1[1. Market Data Event\n(from feed)]
-                EVT2[2. Strategy.on_event()]
-                EVT3[3. Processor.process()\n(signal generation)]
-                EVT4[4. OMS.place_order()\n(via exchange)]
-                EVT5[5. OrderTracker.track()\n(status + history)]
-                EVT6[6. Portfolio.update()\n(balance + pnl)]
-                EVT7[7. DB.save()]
-                EVT8[8. Next Event...]
-            end
-
-            subgraph "Persistence Layer"
-                DB[database.py\nPostgreSQL connection\nconnection pooling]
-                MODELS[models.py\nBinanceTrade\nOrderHistory\nPortfolioState]
-                REDIS[Redis\nvolatility cache\nlive order tracking\nbalance cache]
-                FS[File System\nlogs, config\nbacktesting data]
-            end
-
-            SR --> BKM
-            SR --> BOBM
-            SR --> AKM
-            SR --> AOBM
-            SR --> VF
-            SR --> OMS
-            SR --> OT
-            SR --> KLINE
-            SR --> OB
-            SR --> ORDER
-            SR --> ENUMS
-            SR --> TRADE
-            SR --> PORTFOLIO
-
-            BKM --> BKF
-            BOBM --> BOBF
-            AKM --> AKF
-            AOBM --> AOBF
-
-            BKF --> SE
-            BOBF --> SE
-            AKF --> SE
-            AOBF --> SE
-            VF --> SE
-            OMS --> SE
-            OT --> SE
-            KLINE --> SE
-            OB --> SE
-            ORDER --> SE
-            ENUMS --> SE
-            TRADE --> SE
-            PORTFOLIO --> SE
-
-            SE --> PROC
-            PROC --> OBOOK
-            PROC --> OMAN
-            PROC --> OTRACK
-
-            OBOOK --> EVT1
-            OMAN --> EVT1
-            OTRACK --> EVT1
-
-            EVT1 --> EVT2
-            EVT2 --> EVT3
-            EVT3 --> EVT4
-            EVT4 --> EVT5
-            EVT5 --> EVT6
-            EVT6 --> EVT7
-            EVT7 --> EVT8
-            EVT8 --> EVT1
-
-            EVT7 --> DB
-            EVT7 --> MODELS
-            EVT7 --> REDIS
-            EVT7 --> FS
+            style A fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
+            style D fill:#0a0a1a,stroke:#6b6bff,color:#6b6bff
+            style E fill:#1a0a1a,stroke:#ff6bff,color:#ff6bff
+            style REJ fill:#1a0a0a,stroke:#ff4444,color:#ff4444
+            style WARN fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
     </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>4. Portfolio State Machine <span>Lifecycle and event handlers</span></h2>
+    <p class="desc">
+        The Portfolio starts with a full exchange sync, then transitions to event-driven mode.
+        Kline events update mark prices and risk metrics; balance events sync cash.
+    </p>
+    <div class="mermaid">
+        stateDiagram-v2
+            [*] --> Empty: Portfolio()
+
+            Empty --> Synced: sync_from_exchange()
+            note right of Synced
+                1. Cash: stablecoin balances -> _cash_dict
+                2. Positions: non-stable balances -> Position objects
+                3. Mark prices: seed from feeds
+                4. Open orders: snapshot from exchange
+                5. _refresh_derived() -> NAV, weights, drawdown
+            end note
+
+            Synced --> EventDriven: start(event_bus, feeds)
+            note right of EventDriven
+                Subscribed to:
+                - KLINE -> _on_kline()
+                - BALANCE_UPDATE -> _on_balance()
+            end note
+
+            EventDriven --> EventDriven: KlineEvent
+            note right of EventDriven
+                _on_kline():
+                - Update mark_prices[symbol]
+                - _refresh_derived():
+                  - Recompute NAV
+                  - Recompute weight vector
+                  - Update peak equity
+                  - Track max drawdown
+            end note
+
+            EventDriven --> EventDriven: BalanceUpdateEvent
+            note left of EventDriven
+                _on_balance():
+                - _cash_dict[asset] += delta
+                - _cash = sum(values)
+            end note
+
+            EventDriven --> EventDriven: update_position()
+            note left of EventDriven
+                update_position():
+                - Same dir: VWAP avg entry
+                - Opp dir: realize PnL
+                - Adjust cash
+                - Record fill
+                - _refresh_derived()
+            end note
+
+            EventDriven --> Stopped: stop()
+            Stopped --> [*]
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>5. Multiplex Socket Architecture <span>Market data ingestion</span></h2>
+    <p class="desc">
+        Each venue uses a single WebSocket per data type (kline/OB), carrying all symbols
+        on one TCP connection. Messages are queued and processed by async worker pools.
+    </p>
+    <div class="mermaid">
+        graph LR
+            subgraph Exchange["Binance WebSocket API"]
+                KS["Kline Combined Stream\nethusdt@kline_1s\nbtcusdt@kline_1s\nsolusdt@kline_1s\n..."]
+                OBS["Depth Combined Stream\nethusdt@depth@100ms\nbtcusdt@depth@100ms\nsolusdt@depth@100ms\n..."]
+                UDS["User Data Stream\nexecutionReport\nbalanceUpdate"]
+            end
+
+            subgraph KlineMgr["BinanceKlineClientManager"]
+                KQ["asyncio.Queue\n(maxsize=10,000)"]
+                KR["Reader Task\n(1 coroutine)"]
+                KW1["Worker 1"]
+                KW2["Worker 2"]
+                KW3["Worker 3"]
+                KW4["Worker 4"]
+            end
+
+            subgraph OBMgr["BinanceOrderBookClientManager"]
+                OBQ["asyncio.Queue\n(maxsize=10,000)"]
+                OBR["Reader Task"]
+                OBW1["Worker 1-4"]
+            end
+
+            subgraph Feeds["Feed Objects (per symbol)"]
+                F1["BinanceKlineFeed\nETHUSDT"]
+                F2["BinanceKlineFeed\nBTCUSDT"]
+                F3["BinanceOrderBookFeed\nETHUSDT"]
+                F4["BinanceOrderBookFeed\nBTCUSDT"]
+            end
+
+            EB2["EventBus"]
+
+            KS -->|"Single TCP"| KR
+            KR --> KQ
+            KQ --> KW1 & KW2 & KW3 & KW4
+            KW1 & KW2 & KW3 & KW4 --> F1 & F2
+            KW1 & KW2 & KW3 & KW4 -->|"KlineEvent"| EB2
+
+            OBS -->|"Single TCP"| OBR
+            OBR --> OBQ
+            OBQ --> OBW1
+            OBW1 --> F3 & F4
+            OBW1 -->|"OBUpdateEvent"| EB2
+
+            UDS -->|"executionReport\nbalanceUpdate"| EB2
+
+            style Exchange fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b
+            style KlineMgr fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
+            style OBMgr fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
+            style Feeds fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
+            style EB2 fill:#1a1a3e,stroke:#4a9eff,stroke-width:3px,color:#fff
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>6. StrategyRunner Startup Sequence <span>Initialization order</span></h2>
+    <p class="desc">
+        The StrategyRunner orchestrates all component initialization in a specific order,
+        ensuring dependencies are met before downstream components start.
+    </p>
+    <div class="mermaid">
+        sequenceDiagram
+            participant U as User
+            participant SR as StrategyRunner
+            participant EB as EventBus
+            participant EX as BinanceSpotExchange
+            participant KM as KlineClientManager
+            participant OBM as OBClientManager
+            participant S as SpotStrategy
+            participant P as Portfolio
+            participant OPT as PortfolioOptimizer
+            participant EE as ExecutionEngine
+
+            U->>SR: run(strategy)
+
+            rect rgb(20, 20, 40)
+                Note over SR: Setup Phase
+                SR->>SR: _setup_config()
+                SR->>EB: new EventBus()
+                SR->>EX: new BinanceSpotExchange(event_bus)
+                SR->>KM: set_event_bus(event_bus)
+                SR->>OBM: set_event_bus(event_bus)
+            end
+
+            rect rgb(20, 40, 20)
+                Note over SR,S: Strategy Wiring
+                SR->>S: _event_bus = event_bus
+                SR->>S: _exchanges = {BINANCE: exchange}
+                SR->>S: args, config_json
+                S->>EB: subscribe(KLINE, ORDERBOOK_UPDATE, ...)
+                S->>S: on_start()
+            end
+
+            rect rgb(40, 20, 20)
+                Note over SR,EX: Exchange Init
+                SR->>EX: run()
+                EX->>EX: AsyncClient + exchange_info
+                EX->>EX: refresh_balances()
+                EX->>EX: start user_data_stream
+            end
+
+            rect rgb(20, 20, 60)
+                Note over SR,EE: Pipeline Setup (_setup_pipeline)
+                SR->>P: sync_from_exchange(exchange, feeds)
+                P->>P: cash + positions + mark_prices + open_orders
+                SR->>P: start(event_bus, feeds)
+                P->>EB: subscribe(KLINE, BALANCE_UPDATE)
+
+                SR->>OPT: new PortfolioOptimizer(risk_config, portfolio)
+                SR->>S: _optimizer = optimizer
+
+                SR->>EE: new ExecutionEngine(exchanges, portfolio, feeds)
+                SR->>S: _execution_engine = engine
+            end
+
+            rect rgb(30, 30, 30)
+                Note over SR: Main Loop
+                SR->>SR: asyncio.gather(data_feeds, strategy.run_forever())
+            end
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>7. RiskConfig Constraint Pipeline <span>Optimizer validation flow</span></h2>
+    <p class="desc">
+        Each constraint step projects the weight vector onto a feasible set. Steps execute
+        sequentially — the output of one feeds into the next.
+    </p>
+    <div class="mermaid">
+        graph TD
+            IN["Input: TargetWeights\n{ETHUSDT: 0.50, BTCUSDT: 0.40, SOLUSDT: 0.20}"]
+
+            R1["1. Rate Limit\nmin_rebalance_interval_ms: 60000"]
+            R1F{{"Elapsed < 60s?"}}
+            R1R["REJECTED\n'Rate limit: 45000ms < 60000ms'"]
+
+            R2["2. Symbol Filter\nallowed_symbols, blocked_symbols"]
+            R3["3. Per-Asset Clip\nmax_weight_per_asset: 0.25"]
+            R3E["ETHUSDT: 0.50 -> 0.25 (clipped 0.25)\nBTCUSDT: 0.40 -> 0.25 (clipped 0.15)\nSOLUSDT: 0.20 -> 0.20"]
+
+            R4["4. Exposure Scaling\nmax_total_exposure: 1.0\ngross = 0.70 <= 1.0 (pass)"]
+            R5["5. Cash Floor\nmin_cash_weight: 0.05\nsum_long = 0.70 <= 0.95 (pass)"]
+            R6["6. Turnover Cap\nmax_turnover_per_rebalance: 0.5"]
+
+            OUT["Output: ValidatedWeights\n{ETHUSDT: 0.25, BTCUSDT: 0.25, SOLUSDT: 0.20}\nclipped: {ETHUSDT: 0.25, BTCUSDT: 0.15}"]
+
+            IN --> R1
+            R1 --> R1F
+            R1F -->|Yes| R1R
+            R1F -->|No| R2
+            R2 --> R3
+            R3 --> R3E
+            R3E --> R4
+            R4 --> R5
+            R5 --> R6
+            R6 --> OUT
+
+            style IN fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
+            style OUT fill:#0a0a1a,stroke:#6b6bff,color:#6b6bff
+            style R1R fill:#1a0a0a,stroke:#ff4444,color:#ff4444
+            style R3E fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>8. Class Hierarchy <span>Core abstractions and implementations</span></h2>
+    <div class="mermaid">
+        classDiagram
+            class SpotStrategy {
+                -_exchanges: Dict~Venue, SpotExchangeConnector~
+                -_event_bus: EventBus
+                -_feeds: Dict~str, AbstractDataFeed~
+                -_optimizer: PortfolioOptimizer
+                -_execution_engine: ExecutionEngine
+                +portfolio: Portfolio
+                +args: Namespace
+                +config_json: dict
+                +start()
+                +stop()
+                +run_forever()
+                +submit_weights(weights, metadata) RebalanceResult
+                +on_kline(KlineEvent)
+                +on_orderbook_update(OrderBookUpdateEvent)
+                +on_order_update(OrderUpdateEvent)
+                +on_balance_update(BalanceUpdateEvent)
+                +on_rebalance_complete(RebalanceCompleteEvent)
+                +get_exchange(venue) SpotExchangeConnector
+                +get_current_price(pair, side) float
+                +run_heavy(fn, args)
+            }
+
+            class Portfolio {
+                -_positions: Dict~str, Position~
+                -_cash: float
+                -_cash_dict: Dict~str, float~
+                -_mark_prices: Dict~str, float~
+                -_weights: Dict~str, float~
+                -_nav: float
+                -_peak_equity: float
+                -_max_drawdown: float
+                -_fills: Deque~Fill~
+                +sync_from_exchange(exchange, venue, feeds)
+                +start(event_bus, feeds)
+                +stop()
+                +update_position(symbol, qty_delta, price, ...)
+                +save_snapshot(venue)
+                +total_value(mark_prices) float
+                +current_weights(mark_prices) dict
+                +current_drawdown() float
+            }
+
+            class PortfolioOptimizer {
+                -_config: RiskConfig
+                -_portfolio: Portfolio
+                -_last_rebalance_ts: int
+                +validate(target: TargetWeights) ValidatedWeights
+                +current_weights(mark_prices) dict
+            }
+
+            class ExecutionEngine {
+                -_exchanges: Dict~Venue, SpotExchangeConnector~
+                -_portfolio: Portfolio
+                -_feeds: Dict~str, AbstractDataFeed~
+                -_risk_config: RiskConfig
+                +execute(validated: ValidatedWeights) RebalanceResult
+                +compute_order_intents(validated, prices) List~OrderIntent~
+            }
+
+            class RiskConfig {
+                +max_weight_per_asset: float
+                +min_weight_per_asset: float
+                +max_total_exposure: float
+                +min_cash_weight: float
+                +max_turnover_per_rebalance: float
+                +min_weight_delta: float
+                +min_rebalance_interval_ms: int
+                +allowed_symbols: FrozenSet
+                +blocked_symbols: FrozenSet
+            }
+
+            class Position {
+                +symbol: str
+                +venue: Venue
+                +quantity: float
+                +avg_entry_price: float
+                +realized_pnl: float
+                +total_commission: float
+                +unrealized_pnl(mark_price) float
+                +is_flat() bool
+            }
+
+            class EventBus {
+                -_subscribers: Dict~EventType, List~
+                +subscribe(event_type, callback)
+                +unsubscribe(event_type, callback)
+                +publish(event)
+            }
+
+            class SpotExchangeConnector {
+                <<abstract>>
+                -_balances: Dict~str, float~
+                -_open_orders: Dict
+                -_token_infos: Dict
+                +place_market_order(symbol, side, qty)
+                +place_limit_order(symbol, side, price, qty)
+                +cancel_order(symbol, order_id)
+                +refresh_balances()
+                +get_balance(asset) float
+            }
+
+            SpotStrategy --> EventBus : subscribes to
+            SpotStrategy --> PortfolioOptimizer : Stage 4
+            SpotStrategy --> ExecutionEngine : Stage 5
+            SpotStrategy --> Portfolio : owns
+            SpotStrategy --> SpotExchangeConnector : escape hatch
+            PortfolioOptimizer --> RiskConfig : configured by
+            PortfolioOptimizer --> Portfolio : reads from
+            ExecutionEngine --> Portfolio : reads from
+            ExecutionEngine --> SpotExchangeConnector : submits to
+            ExecutionEngine --> RiskConfig : weight-delta filter
+            Portfolio --> Position : manages many
+            Portfolio --> EventBus : subscribes to
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>9. Data Persistence <span>Database schema and ORM</span></h2>
+    <div class="mermaid">
+        erDiagram
+            portfolio_snapshots {
+                int id PK
+                datetime datetime
+                int strategy_id
+                varchar venue
+                float nav
+                float cash
+                float unrealized_pnl
+                float realized_pnl
+                float total_commission
+                float peak_equity
+                float max_drawdown
+                float current_drawdown
+                float gross_exposure
+                float net_exposure
+                json positions
+                json weights
+                json mark_prices
+                int num_fills
+            }
+
+            cex_trades {
+                int id PK
+                datetime datetime
+                int strategy_id
+                text strategy_name
+                varchar venue
+                text symbol
+                varchar asset_type
+                varchar side
+                float base_amount
+                float quote_amount
+                float price
+                text commission_asset
+                float total_commission
+                float total_commission_quote
+                text order_id
+                varchar status
+                varchar order_side
+                varchar order_type
+            }
+
+            dex_trades {
+                text tx_digest PK
+                datetime datetime
+                varchar venue
+                bool a_to_b
+                text sender
+                text pool_address
+                text token_a
+                text token_b
+                float amount_a
+                float amount_b
+                varchar type
+            }
+
+            account_snapshots {
+                datetime datetime PK
+                varchar venue
+                json balances
+                float total_usd_value
+                int total_open_orders
+            }
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>10. Concurrency Model <span>Single event loop, everything async</span></h2>
+    <div class="mermaid">
+        graph TB
+            subgraph MainThread["Main Thread — asyncio.run()"]
+                subgraph IO["I/O Coroutines"]
+                    KR2["Kline Reader"]
+                    KW_["Kline Workers x4"]
+                    OBR2["OB Reader"]
+                    OBW_["OB Workers x4"]
+                    UDR["UserData Reader"]
+                end
+
+                subgraph Events["Event Processing"]
+                    EB3["EventBus.publish()\n(awaited = backpressure)"]
+                    PH["Portfolio Handlers\n_on_kline, _on_balance"]
+                    SH["Strategy Hooks\non_kline, on_ob, ..."]
+                end
+
+                subgraph Pipeline["Pipeline (sync calls)"]
+                    SW2["submit_weights()"]
+                    OV["optimizer.validate()"]
+                    EX2["engine.execute()"]
+                end
+
+                subgraph Optional["Optional"]
+                    RF["strategy.run_forever()\n(periodic rebalance)"]
+                end
+            end
+
+            subgraph ProcessPool["ProcessPoolExecutor (separate OS processes)"]
+                PPW1["Heavy Worker 1"]
+                PPW2["Heavy Worker 2"]
+                PPW3["Heavy Worker 3"]
+                PPW4["Heavy Worker 4"]
+            end
+
+            IO --> EB3
+            EB3 --> PH
+            EB3 --> SH
+            SH --> SW2
+            SW2 --> OV
+            OV --> EX2
+            SH -.->|"run_heavy(fn)"| ProcessPool
+
+            style MainThread fill:#0a0a1a,stroke:#4a9eff,color:#4a9eff
+            style ProcessPool fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b
+    </div>
+
+</div>
 </body>
 </html>

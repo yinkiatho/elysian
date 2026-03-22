@@ -35,5 +35,8 @@ class RiskConfig:
     min_order_notional: float = 10.0            # skip orders below this USD
     max_order_notional: float = 100_000.0       # cap single-order size
 
+    # ── Delta threshold ─────────────────────────────────────────────────────
+    min_weight_delta: float = 0.005             # skip rebalance legs < 0.5% weight change
+
     # ── Rate limiting ────────────────────────────────────────────────────────
     min_rebalance_interval_ms: int = 60_000     # 1 minute between rebalances

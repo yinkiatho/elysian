@@ -68,6 +68,8 @@ class SpotStrategy:
         max_heavy_workers: int = 4,
         optimizer: Optional["PortfolioOptimizer"] = None,
         execution_engine: Optional["ExecutionEngine"] = None,
+        args: Optional[Any] = None,
+        config_json: Optional[Dict] = None,
     ):
         self._exchanges = exchanges
         self._event_bus = event_bus
@@ -76,6 +78,8 @@ class SpotStrategy:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._optimizer = optimizer
         self._execution_engine = execution_engine
+        self.args = args
+        self.config_json = config_json or {}
         self.portfolio = Portfolio()
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -91,10 +95,15 @@ class SpotStrategy:
         self._event_bus.subscribe(EventType.REBALANCE_COMPLETE, self._dispatch_rebalance)
 
         await self.on_start()
-        logger.info("SpotStrategy started")
+        logger.info(
+            f"[Strategy] {self.__class__.__name__} started — "
+            f"subscribed to 5 event types, "
+            f"{len(self._exchanges)} exchanges, {len(self._feeds)} feeds"
+        )
 
     async def stop(self):
         """Unsubscribe from bus, shut down executor, call :meth:`on_stop`."""
+        logger.info(f"[Strategy] {self.__class__.__name__} stopping...")
         self._event_bus.unsubscribe(EventType.KLINE, self._dispatch_kline)
         self._event_bus.unsubscribe(EventType.ORDERBOOK_UPDATE, self._dispatch_ob)
         self._event_bus.unsubscribe(EventType.ORDER_UPDATE, self._dispatch_order)
@@ -103,7 +112,7 @@ class SpotStrategy:
 
         self._executor.shutdown(wait=False)
         await self.on_stop()
-        logger.info("SpotStrategy stopped")
+        logger.info(f"[Strategy] {self.__class__.__name__} stopped")
 
     # ── Internal dispatch (error isolation) ────────────────────────────────────
 
@@ -202,10 +211,15 @@ class SpotStrategy:
         """
         if self._optimizer is None or self._execution_engine is None:
             logger.warning(
-                "submit_weights called but optimizer/execution_engine not configured. "
+                "[Strategy] submit_weights called but optimizer/execution_engine not configured. "
                 "Use direct exchange access or configure the pipeline."
             )
             return None
+
+        logger.info(
+            f"[Strategy] submit_weights: {len(weights)} symbols, "
+            f"sum={sum(weights.values()):.4f}"
+        )
 
         target = TargetWeights(
             weights=weights,
@@ -214,14 +228,25 @@ class SpotStrategy:
         )
 
         # Stage 4: Risk validation
+        logger.info("[Strategy] Stage 4 -> Optimizer.validate()")
         validated = self._optimizer.validate(target)
 
         if validated.rejected:
-            logger.warning(f"Weights rejected by optimizer: {validated.rejection_reason}")
+            logger.warning(f"[Strategy] Weights REJECTED by optimizer: {validated.rejection_reason}")
             return None
 
+        logger.info(
+            f"[Strategy] Stage 4 passed: {len(validated.weights)} symbols after risk adjustment"
+        )
+
         # Stage 5: Execution
+        logger.info("[Strategy] Stage 5 -> ExecutionEngine.execute()")
         result = await self._execution_engine.execute(validated)
+
+        logger.info(
+            f"[Strategy] Rebalance result: {result.submitted} submitted, "
+            f"{result.failed} failed"
+        )
 
         # Publish rebalance-complete event for observability
         if self._event_bus:
