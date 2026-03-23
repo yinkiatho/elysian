@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(venv/Scripts/python.exe -c \"import py_compile; py_compile.compile\\(''elysian_core/config/config.yaml'', doraise=True\\); print\\(''OK''\\)\")",
+      "Bash(venv/Scripts/python.exe -c \"import yaml; data = yaml.safe_load\\(open\\(''elysian_core/config/config.yaml''\\)\\); print\\(''YAML valid''\\); print\\(''risk keys:'', list\\(data.get\\(''risk'', {}\\).keys\\(\\)\\)\\); print\\(''portfolio keys:'', list\\(data.get\\(''portfolio'', {}\\).keys\\(\\)\\)\\); print\\(''execution keys:'', list\\(data.get\\(''execution'', {}\\).keys\\(\\)\\)\\); print\\(''strategy keys:'', list\\(data.get\\(''strategy'', {}\\).keys\\(\\)\\)\\)\")"
+    ]
+  }
+}

@@ -1,8 +1,12 @@
 import datetime
+import logging
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 from elysian_core.core.enums import Side, OrderType, OrderStatus, RangeOrderType, Venue
+from elysian_core.core.order_fsm import validate_order_transition, is_terminal
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -38,6 +42,19 @@ class Order:
     def is_active(self) -> bool:
         return self.status.is_active()
 
+    @property
+    def is_terminal(self) -> bool:
+        """True if the order is in a terminal state (FILLED, CANCELLED, REJECTED)."""
+        return is_terminal(self.status)
+
+    def transition_to(self, new_status: OrderStatus) -> None:
+        """Validate and apply an order status transition.
+
+        Uses warn-mode: logs invalid transitions but always applies them
+        because the exchange is the source of truth.
+        """
+        validate_order_transition(self.status, new_status, order_id=self.id)
+        self.status = new_status
 
     def update_fill(self, filled_qty: float, fill_price: float):
         prev_filled = self.filled_quantity

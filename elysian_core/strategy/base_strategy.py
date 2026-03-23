@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from elysian_core.risk.optimizer import PortfolioOptimizer
 
 from elysian_core.connectors.base import SpotExchangeConnector, AbstractDataFeed
-from elysian_core.core.enums import Side, Venue
+from elysian_core.core.enums import Side, StrategyState, Venue
 from elysian_core.core.event_bus import EventBus
 from elysian_core.core.portfolio import Portfolio
 from elysian_core.core.events import (
@@ -45,6 +45,7 @@ from elysian_core.core.events import (
     RebalanceCompleteEvent,
 )
 from elysian_core.core.signals import RebalanceResult, TargetWeights
+from elysian_core.core.rebalance_fsm import RebalanceFSM
 import elysian_core.utils.logger as log
 
 logger = log.setup_custom_logger("root")
@@ -82,10 +83,31 @@ class SpotStrategy:
         self.config_json = config_json or {}
         self.portfolio = Portfolio()
 
+        # Lifecycle state
+        self._state = StrategyState.CREATED
+
+        # Rebalance FSM — initialized in start() if optimizer + engine are set
+        self._rebalance_fsm: Optional[RebalanceFSM] = None
+
     # ── Lifecycle ──────────────────────────────────────────────────────────────
+
+    @property
+    def state(self) -> StrategyState:
+        """Current lifecycle state."""
+        return self._state
+
+    @property
+    def rebalance_fsm(self) -> Optional[RebalanceFSM]:
+        """The rebalance cycle FSM, or None if not configured."""
+        return self._rebalance_fsm
 
     async def start(self):
         """Register all hooks with the event bus and call :meth:`on_start`."""
+        if self._state != StrategyState.CREATED:
+            logger.warning(f"[Strategy] start() called in state {self._state.name}, ignoring")
+            return
+
+        self._state = StrategyState.STARTING
         self._loop = asyncio.get_running_loop()
 
         self._event_bus.subscribe(EventType.KLINE, self._dispatch_kline)
@@ -94,7 +116,19 @@ class SpotStrategy:
         self._event_bus.subscribe(EventType.BALANCE_UPDATE, self._dispatch_balance)
         self._event_bus.subscribe(EventType.REBALANCE_COMPLETE, self._dispatch_rebalance)
 
+        # Initialize rebalance FSM if the pipeline is fully configured
+        if self._optimizer is not None and self._execution_engine is not None:
+            self._rebalance_fsm = RebalanceFSM(
+                strategy=self,
+                optimizer=self._optimizer,
+                execution_engine=self._execution_engine,
+                event_bus=self._event_bus,
+                name=f"{self.__class__.__name__}.RebalanceFSM",
+            )
+            logger.info(f"[Strategy] RebalanceFSM initialized for {self.__class__.__name__}")
+
         await self.on_start()
+        self._state = StrategyState.READY
         logger.info(
             f"[Strategy] {self.__class__.__name__} started — "
             f"subscribed to 5 event types, "
@@ -103,7 +137,16 @@ class SpotStrategy:
 
     async def stop(self):
         """Unsubscribe from bus, shut down executor, call :meth:`on_stop`."""
+        if self._state == StrategyState.STOPPED:
+            return
+
+        self._state = StrategyState.STOPPING
         logger.info(f"[Strategy] {self.__class__.__name__} stopping...")
+
+        # Stop rebalance FSM timer
+        if self._rebalance_fsm is not None:
+            self._rebalance_fsm.stop_timer()
+
         self._event_bus.unsubscribe(EventType.KLINE, self._dispatch_kline)
         self._event_bus.unsubscribe(EventType.ORDERBOOK_UPDATE, self._dispatch_ob)
         self._event_bus.unsubscribe(EventType.ORDER_UPDATE, self._dispatch_order)
@@ -112,11 +155,53 @@ class SpotStrategy:
 
         self._executor.shutdown(wait=False)
         await self.on_stop()
+        self._state = StrategyState.STOPPED
         logger.info(f"[Strategy] {self.__class__.__name__} stopped")
+
+    # ── Rebalance FSM controls ──────────────────────────────────────────────
+
+    async def suspend_rebalancing(self) -> None:
+        """Pause the rebalance FSM (e.g. drawdown breaker). No-op if no FSM."""
+        if self._rebalance_fsm is not None:
+            await self._rebalance_fsm.trigger("suspend")
+
+    async def resume_rebalancing(self) -> None:
+        """Resume the rebalance FSM after a suspension."""
+        if self._rebalance_fsm is not None:
+            await self._rebalance_fsm.trigger("resume")
+
+    async def request_rebalance(self) -> bool:
+        """Request a rebalance cycle from any ``on_*`` hook.
+
+        Safe to call at any time — silently ignored if the FSM is busy
+        (mid-cycle, cooldown, suspended, etc.).  Returns ``True`` if the
+        cycle was triggered, ``False`` if skipped or no FSM configured.
+
+        Use this from event hooks to trigger reactive rebalancing::
+
+            async def on_kline(self, event: KlineEvent):
+                if self._should_rebalance(event):
+                    await self.request_rebalance()
+
+        Can be combined with a timer: the timer fires periodic cycles,
+        and ``request_rebalance()`` fires additional cycles on events.
+        Whichever fires first wins; the other is silently skipped if
+        the FSM is already busy.
+        """
+        if self._rebalance_fsm is None:
+            logger.warning("[Strategy] request_rebalance called but no FSM configured")
+            return False
+        return await self._rebalance_fsm.request()
 
     # ── Internal dispatch (error isolation) ────────────────────────────────────
 
+    def _mark_running(self) -> None:
+        """Transition from READY to RUNNING on first event dispatch."""
+        if self._state == StrategyState.READY:
+            self._state = StrategyState.RUNNING
+
     async def _dispatch_kline(self, event: KlineEvent):
+        self._mark_running()
         try:
             await self.on_kline(event)
         except Exception as e:
@@ -167,7 +252,7 @@ class SpotStrategy:
         override this, it should block (e.g. ``while True: await asyncio.sleep(...)``).
         """
         pass
-
+    
     async def on_kline(self, event: KlineEvent):
         """Called on each closed kline candle."""
         pass
@@ -192,6 +277,33 @@ class SpotStrategy:
         """
         pass
 
+    def compute_weights(self) -> Optional[Dict[str, float]]:
+        """**YOUR STRATEGY LOGIC GOES HERE.**
+
+        Called by the RebalanceFSM on each tick (timer or signal-driven).
+        Return a dict mapping symbol -> target weight, e.g.::
+
+            {"ETHUSDT": 0.4, "BTCUSDT": 0.5}   # 10% implicit cash
+
+        Return ``{}`` or ``None`` to skip this rebalance cycle.
+
+        Can be sync or async — the FSM handles both::
+
+            # Sync (simple)
+            def compute_weights(self):
+                return {"ETHUSDT": 0.5, "BTCUSDT": 0.4}
+
+            # Async (if you need to await feeds, APIs, etc.)
+            async def compute_weights(self):
+                price = await self.get_current_price("ETHUSDT")
+                ...
+                return weights
+
+        Everything downstream (risk validation, execution, cooldown) is
+        handled automatically by the FSM. You only decide WHAT weights.
+        """
+        return {}
+
     # ── Weight submission pipeline ───────────────────────────────────────────
 
     async def submit_weights(
@@ -208,7 +320,17 @@ class SpotStrategy:
 
         Returns a :class:`RebalanceResult` on success, or ``None`` if the
         optimizer / executor are not configured or the signal was rejected.
+        
+        
+        CURRENTLY DEPRECATED USING REBALANCE_FSM
         """
+        if self._state not in (StrategyState.READY, StrategyState.RUNNING):
+            logger.warning(
+                f"[Strategy] submit_weights called in state {self._state.name} — "
+                f"must be READY or RUNNING"
+            )
+            return None
+
         if self._optimizer is None or self._execution_engine is None:
             logger.warning(
                 "[Strategy] submit_weights called but optimizer/execution_engine not configured. "
@@ -279,68 +401,7 @@ class SpotStrategy:
         """
         return await self._loop.run_in_executor(self._executor, fn, *args)
 
-    # ── Price helpers (reused from StrategyEngine) ─────────────────────────────
-
-    async def get_current_price(
-        self, pair: str, side: Optional[Side] = None
-    ) -> Optional[float]:
-        """Return the current price for *pair*.
-
-        Resolution order:
-          1. Direct feed lookup (bid/ask/mid depending on *side*)
-          2. Inverted pair (quote+base)
-          3. Synthetic construction via USDT legs (base/USDT / quote/USDT)
-        """
-        try:
-            feed = self._feeds.get(pair)
-            if feed and feed.data:
-                if side == Side.BUY:
-                    return feed.latest_ask_price
-                elif side == Side.SELL:
-                    return feed.latest_bid_price
-                else:
-                    return feed.latest_price
-
-            base, quote = self._split_pair(pair)
-
-            # Inverted pair
-            inverted = (quote or "") + (base or "")
-            inv_feed = self._feeds.get(inverted)
-            if inv_feed and inv_feed.data:
-                if side == Side.BUY:
-                    return 1.0 / inv_feed.latest_ask_price
-                elif side == Side.SELL:
-                    return 1.0 / inv_feed.latest_bid_price
-                else:
-                    return 1.0 / inv_feed.latest_price
-
-            # Stablecoin proxy
-            if quote and quote in _STABLECOINS and base and base not in _STABLECOINS:
-                alt_quote = next(
-                    (s for s in _STABLECOINS if s != quote and base + s in self._feeds),
-                    None,
-                )
-                if alt_quote:
-                    return await self.get_current_price(base + alt_quote, side=side)
-
-            # Synthetic via USDT legs
-            if base and quote:
-                feed_base = self._feeds.get(base + "USDT")
-                feed_quote = self._feeds.get(quote + "USDT")
-                if feed_base and feed_base.data and feed_quote and feed_quote.data:
-                    if side == Side.BUY:
-                        return feed_base.latest_ask_price / feed_quote.latest_bid_price
-                    elif side == Side.SELL:
-                        return feed_base.latest_bid_price / feed_quote.latest_ask_price
-                    else:
-                        return feed_base.latest_price / feed_quote.latest_price
-
-            logger.warning(f"[SpotStrategy] No price found for {pair}")
-            return None
-
-        except Exception as e:
-            logger.error(f"[SpotStrategy] get_current_price({pair}) error: {e}")
-            return None
+    
 
 
     def get_current_vol(self, symbol: str) -> Optional[float]:

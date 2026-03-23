@@ -8,7 +8,7 @@ mutating shared data.  The ``event_type`` field is set automatically and used by
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Optional
+from typing import Any, Optional
 
 from elysian_core.core.enums import Venue
 from elysian_core.core.market_data import Kline, OrderBook
@@ -22,6 +22,8 @@ class EventType(Enum):
     ORDER_UPDATE = auto()
     BALANCE_UPDATE = auto()
     REBALANCE_COMPLETE = auto()
+    LIFECYCLE = auto()
+    REBALANCE_CYCLE = auto()
 
 
 @dataclass(frozen=True)
@@ -69,3 +71,26 @@ class RebalanceCompleteEvent:
     validated_weights: ValidatedWeights
     timestamp: int
     event_type: EventType = field(default=EventType.REBALANCE_COMPLETE, init=False)
+
+
+@dataclass(frozen=True)
+class LifecycleEvent:
+    """Published when a strategy or runner changes lifecycle state."""
+
+    component: str          # e.g. "EqualWeightStrategy", "StrategyRunner"
+    old_state: Any          # StrategyState or RunnerState enum value
+    new_state: Any
+    timestamp: int
+    event_type: EventType = field(default=EventType.LIFECYCLE, init=False)
+
+
+@dataclass(frozen=True)
+class RebalanceCycleEvent:
+    """Published on each rebalance FSM state transition."""
+
+    old_state: Any          # RebalanceState enum value
+    new_state: Any
+    trigger: str            # the trigger name that caused the transition
+    timestamp: int
+    metadata: dict = field(default_factory=dict)
+    event_type: EventType = field(default=EventType.REBALANCE_CYCLE, init=False)

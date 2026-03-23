@@ -133,50 +133,50 @@
     <div class="mermaid">
         graph LR
             subgraph S1["Stage 1: Market Data"]
-                WS["WebSocket Streams\n(Kline @1s, OB @100ms)"]
-                UD["User Data Stream\n(fills, balances)"]
+                WS["WebSocket Streams\nKline @1s / OB @100ms"]
+                UD["User Data Stream\nfills + balances"]
             end
 
             subgraph S2["Stage 2: Feature Compute"]
-                KF["KlineFeed\n(OHLCV, rolling vol)"]
-                OBF["OrderBookFeed\n(L2 depth, VWAP)"]
-                PF["Portfolio\n(mark prices, weights,\nNAV, drawdown)"]
+                KF["KlineFeed\nOHLCV + rolling vol"]
+                OBF["OrderBookFeed\nL2 depth + VWAP"]
+                PF["Portfolio\nmark prices + weights\nNAV + drawdown"]
             end
 
             subgraph S3["Stage 3: Strategy / Alpha"]
-                SS["SpotStrategy\n.on_kline()\n.on_orderbook_update()\n.run_forever()"]
-                SW["submit_weights()\n{ETHUSDT: 0.4,\nBTCUSDT: 0.5}"]
+                SS["SpotStrategy\non_kline\non_orderbook_update\nrun_forever"]
+                SW["submit_weights\nETHUSDT=0.4\nBTCUSDT=0.5"]
             end
 
             subgraph S4["Stage 4: Risk"]
-                OP["PortfolioOptimizer\n.validate()"]
-                RC["RiskConfig\n(per-asset, exposure,\ncash floor, turnover)"]
+                OP["PortfolioOptimizer\nvalidate"]
+                RC["RiskConfig\nper-asset / exposure\ncash floor / turnover"]
             end
 
             subgraph S5["Stage 5: Execution"]
-                EE["ExecutionEngine\n.execute()"]
-                OI["OrderIntents\n(sells first, then buys)"]
+                EE["ExecutionEngine\nexecute"]
+                OI["OrderIntents\nsells first then buys"]
             end
 
             subgraph S6["Stage 6: Exchange"]
-                EX["SpotExchangeConnector\n.place_market_order()\n.place_limit_order()"]
+                EX["SpotExchangeConnector\nplace_market_order\nplace_limit_order"]
             end
 
             WS --> KF
             WS --> OBF
             UD --> PF
-            KF -->|KlineEvent| SS
-            OBF -->|OBUpdateEvent| SS
-            PF -.->|weights, NAV| SS
+            KF -->|"KlineEvent"| SS
+            OBF -->|"OBUpdateEvent"| SS
+            PF -.->|"weights + NAV"| SS
             SS --> SW
-            SW -->|TargetWeights| OP
+            SW -->|"TargetWeights"| OP
             RC -.-> OP
-            OP -->|ValidatedWeights| EE
+            OP -->|"ValidatedWeights"| EE
             EE --> OI
             OI --> EX
-            EX -.->|OrderUpdateEvent| SS
-            EX -.->|BalanceUpdateEvent| PF
-            EE -->|RebalanceCompleteEvent| SS
+            EX -.->|"OrderUpdateEvent"| SS
+            EX -.->|"BalanceUpdateEvent"| PF
+            EE -->|"RebalanceCompleteEvent"| SS
 
             style S1 fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b
             style S2 fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
@@ -196,30 +196,30 @@
     <div class="mermaid">
         graph TB
             subgraph Publishers["Event Publishers"]
-                KW["Kline Worker\n(4 async workers)"]
-                OBW["OB Worker\n(4 async workers)"]
-                UDM["UserData Manager\n(reader loop)"]
-                SEX["submit_weights()\n(post-execution)"]
+                KW["Kline Worker\n4 async workers"]
+                OBW["OB Worker\n4 async workers"]
+                UDM["UserData Manager\nreader loop"]
+                SEX["submit_weights\npost-execution"]
             end
 
-            EB["EventBus\nsubscribe() / publish()\nSequential dispatch\nBackpressure-aware"]
+            EB["EventBus\nsubscribe / publish\nSequential dispatch\nBackpressure-aware"]
 
             subgraph Subscribers["Event Subscribers"]
-                DK["strategy._dispatch_kline()"]
-                DOB["strategy._dispatch_ob()"]
-                DO["strategy._dispatch_order()"]
-                DB["strategy._dispatch_balance()"]
-                DR["strategy._dispatch_rebalance()"]
-                PK["portfolio._on_kline()"]
-                PB["portfolio._on_balance()"]
+                DK["strategy._dispatch_kline"]
+                DOB["strategy._dispatch_ob"]
+                DO["strategy._dispatch_order"]
+                DB["strategy._dispatch_balance"]
+                DR["strategy._dispatch_rebalance"]
+                PK["portfolio._on_kline"]
+                PB["portfolio._on_balance"]
             end
 
-            subgraph Hooks["Strategy Hooks (user overrides)"]
-                OK["on_kline()"]
-                OOB["on_orderbook_update()"]
-                OO["on_order_update()"]
-                OBU["on_balance_update()"]
-                ORC["on_rebalance_complete()"]
+            subgraph Hooks["Strategy Hooks - user overrides"]
+                OK["on_kline"]
+                OOB["on_orderbook_update"]
+                OO["on_order_update"]
+                OBU["on_balance_update"]
+                ORC["on_rebalance_complete"]
             end
 
             KW -->|"KlineEvent"| EB
@@ -255,29 +255,29 @@
     </p>
     <div class="mermaid">
         graph TD
-            A["strategy.submit_weights(weights)"] --> B["TargetWeights\n{weights, timestamp, metadata}"]
-            B --> C{"optimizer == None?"}
-            C -->|Yes| WARN["logger.warning()\nreturn None"]
-            C -->|No| D["optimizer.validate(target)"]
+            A["strategy.submit_weights#40;weights#41;"] --> B["TargetWeights\nweights + timestamp + metadata"]
+            B --> C{"optimizer is None?"}
+            C -->|"Yes"| WARN["logger.warning\nreturn None"]
+            C -->|"No"| D["optimizer.validate#40;target#41;"]
 
-            D --> D1["1. Rate Limit Check\nelapsed < min_rebalance_interval_ms?"]
-            D1 -->|Reject| REJ["ValidatedWeights(rejected=True)\nreturn None"]
-            D1 -->|Pass| D2["2. Symbol Filter\nremove blocked / non-allowed"]
-            D2 --> D3["3. Per-Asset Clip\nclamp to [min_w, max_w]"]
-            D3 --> D4["4. Exposure Scaling\ngross <= max_total_exposure"]
-            D4 --> D5["5. Cash Floor\nsum(long) <= 1 - min_cash"]
-            D5 --> D6["6. Turnover Cap\nsum(|delta_w|) <= max_turnover"]
-            D6 --> VW["ValidatedWeights\n{weights, clipped, original}"]
+            D --> D1["1. Rate Limit Check\nelapsed lt min_rebalance_interval_ms?"]
+            D1 -->|"Reject"| REJ["ValidatedWeights rejected=True\nreturn None"]
+            D1 -->|"Pass"| D2["2. Symbol Filter\nremove blocked and non-allowed"]
+            D2 --> D3["3. Per-Asset Clip\nclamp each weight to min..max range"]
+            D3 --> D4["4. Exposure Scaling\ngross lte max_total_exposure"]
+            D4 --> D5["5. Cash Floor\nsum of long lte 1 - min_cash"]
+            D5 --> D6["6. Turnover Cap\nsum of abs delta_w lte max_turnover"]
+            D6 --> VW["ValidatedWeights\nadjusted weights + clip amounts"]
 
-            VW --> E["execution_engine.execute(validated)"]
-            E --> E1["_get_mark_prices()\nSnapshot from feeds"]
-            E1 --> E2["compute_order_intents()\nFor each symbol:"]
+            VW --> E["execution_engine.execute#40;validated#41;"]
+            E --> E1["_get_mark_prices\nSnapshot from feeds"]
+            E1 --> E2["compute_order_intents\nFor each symbol"]
             E2 --> E2a["target_qty = w * NAV / price\ndelta = target - current\nweight_delta filter\nstep_size rounding"]
-            E2a --> E3["Partition:\nSELLS first → BUYS second"]
-            E3 --> E4["_submit_order() per intent\n(error isolated)"]
-            E4 --> RR["RebalanceResult\n{intents, submitted, failed, errors}"]
+            E2a --> E3["Partition:\nSELLS first then BUYS"]
+            E3 --> E4["_submit_order per intent\nerror isolated"]
+            E4 --> RR["RebalanceResult\nintents + submitted + failed + errors"]
 
-            RR --> PUB["event_bus.publish(\nRebalanceCompleteEvent)"]
+            RR --> PUB["event_bus.publish\nRebalanceCompleteEvent"]
             PUB --> RET["return RebalanceResult\nto strategy"]
 
             style A fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
@@ -294,55 +294,33 @@
         Kline events update mark prices and risk metrics; balance events sync cash.
     </p>
     <div class="mermaid">
-        stateDiagram-v2
-            [*] --> Empty: Portfolio()
+        graph TD
+            START(( )) -->|"Portfolio init"| Empty["Empty\ninitial_cash=0"]
+            Empty -->|"sync_from_exchange"| Synced
 
-            Empty --> Synced: sync_from_exchange()
-            note right of Synced
-                1. Cash: stablecoin balances -> _cash_dict
-                2. Positions: non-stable balances -> Position objects
-                3. Mark prices: seed from feeds
-                4. Open orders: snapshot from exchange
-                5. _refresh_derived() -> NAV, weights, drawdown
-            end note
+            Synced["Synced\n- Cash from stablecoins\n- Positions from balances\n- Mark prices from feeds\n- Open orders snapshot\n- Refresh NAV + weights"]
 
-            Synced --> EventDriven: start(event_bus, feeds)
-            note right of EventDriven
-                Subscribed to:
-                - KLINE -> _on_kline()
-                - BALANCE_UPDATE -> _on_balance()
-            end note
+            Synced -->|"start event_bus"| ED["Event-Driven\nSubscribed to KLINE + BALANCE_UPDATE"]
 
-            EventDriven --> EventDriven: KlineEvent
-            note right of EventDriven
-                _on_kline():
-                - Update mark_prices[symbol]
-                - _refresh_derived():
-                  - Recompute NAV
-                  - Recompute weight vector
-                  - Update peak equity
-                  - Track max drawdown
-            end note
+            ED -->|"KlineEvent"| KH["_on_kline handler\nUpdate mark price\nRecompute NAV\nRecompute weights\nTrack peak equity\nUpdate max drawdown"]
+            KH --> ED
 
-            EventDriven --> EventDriven: BalanceUpdateEvent
-            note left of EventDriven
-                _on_balance():
-                - _cash_dict[asset] += delta
-                - _cash = sum(values)
-            end note
+            ED -->|"BalanceUpdateEvent"| BH["_on_balance handler\ncash_dict += delta\ncash = sum of stablecoins"]
+            BH --> ED
 
-            EventDriven --> EventDriven: update_position()
-            note left of EventDriven
-                update_position():
-                - Same dir: VWAP avg entry
-                - Opp dir: realize PnL
-                - Adjust cash
-                - Record fill
-                - _refresh_derived()
-            end note
+            ED -->|"update_position call"| UH["update_position handler\nSame dir: VWAP avg entry\nOpp dir: realize PnL\nAdjust cash\nRecord fill\nRefresh derived"]
+            UH --> ED
 
-            EventDriven --> Stopped: stop()
-            Stopped --> [*]
+            ED -->|"stop"| Stopped["Stopped\nUnsubscribed from EventBus"]
+            Stopped --> END(( ))
+
+            style Empty fill:#1a1a2e,stroke:#888,color:#ccc
+            style Synced fill:#0a1a1a,stroke:#6bffff,color:#6bffff
+            style ED fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
+            style KH fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
+            style BH fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
+            style UH fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
+            style Stopped fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
@@ -360,8 +338,8 @@
             end
 
             subgraph KlineMgr["BinanceKlineClientManager"]
-                KQ["asyncio.Queue\n(maxsize=10,000)"]
-                KR["Reader Task\n(1 coroutine)"]
+                KQ["asyncio.Queue\nmaxsize 10000"]
+                KR["Reader Task\n1 coroutine"]
                 KW1["Worker 1"]
                 KW2["Worker 2"]
                 KW3["Worker 3"]
@@ -369,12 +347,12 @@
             end
 
             subgraph OBMgr["BinanceOrderBookClientManager"]
-                OBQ["asyncio.Queue\n(maxsize=10,000)"]
+                OBQ["asyncio.Queue\nmaxsize 10000"]
                 OBR["Reader Task"]
                 OBW1["Worker 1-4"]
             end
 
-            subgraph Feeds["Feed Objects (per symbol)"]
+            subgraph Feeds["Feed Objects - per symbol"]
                 F1["BinanceKlineFeed\nETHUSDT"]
                 F2["BinanceKlineFeed\nBTCUSDT"]
                 F3["BinanceOrderBookFeed\nETHUSDT"]
@@ -423,51 +401,51 @@
             participant OPT as PortfolioOptimizer
             participant EE as ExecutionEngine
 
-            U->>SR: run(strategy)
+            U->>SR: run strategy
 
-            rect rgb(20, 20, 40)
+            rect rgb(20,20,40)
                 Note over SR: Setup Phase
-                SR->>SR: _setup_config()
-                SR->>EB: new EventBus()
-                SR->>EX: new BinanceSpotExchange(event_bus)
-                SR->>KM: set_event_bus(event_bus)
-                SR->>OBM: set_event_bus(event_bus)
+                SR->>SR: _setup_config
+                SR->>EB: create EventBus
+                SR->>EX: create BinanceSpotExchange
+                SR->>KM: set_event_bus
+                SR->>OBM: set_event_bus
             end
 
-            rect rgb(20, 40, 20)
+            rect rgb(20,40,20)
                 Note over SR,S: Strategy Wiring
-                SR->>S: _event_bus = event_bus
-                SR->>S: _exchanges = {BINANCE: exchange}
-                SR->>S: args, config_json
-                S->>EB: subscribe(KLINE, ORDERBOOK_UPDATE, ...)
-                S->>S: on_start()
+                SR->>S: inject event_bus
+                SR->>S: inject exchanges
+                SR->>S: inject args + config_json
+                S->>EB: subscribe to all event types
+                S->>S: on_start
             end
 
-            rect rgb(40, 20, 20)
+            rect rgb(40,20,20)
                 Note over SR,EX: Exchange Init
-                SR->>EX: run()
-                EX->>EX: AsyncClient + exchange_info
-                EX->>EX: refresh_balances()
+                SR->>EX: run
+                EX->>EX: create AsyncClient + exchange_info
+                EX->>EX: refresh_balances
                 EX->>EX: start user_data_stream
             end
 
-            rect rgb(20, 20, 60)
-                Note over SR,EE: Pipeline Setup (_setup_pipeline)
-                SR->>P: sync_from_exchange(exchange, feeds)
-                P->>P: cash + positions + mark_prices + open_orders
-                SR->>P: start(event_bus, feeds)
-                P->>EB: subscribe(KLINE, BALANCE_UPDATE)
+            rect rgb(20,20,60)
+                Note over SR,EE: Pipeline Setup
+                SR->>P: sync_from_exchange
+                P->>P: sync cash + positions + mark_prices + orders
+                SR->>P: start with event_bus + feeds
+                P->>EB: subscribe KLINE + BALANCE_UPDATE
 
-                SR->>OPT: new PortfolioOptimizer(risk_config, portfolio)
-                SR->>S: _optimizer = optimizer
+                SR->>OPT: create PortfolioOptimizer with RiskConfig
+                SR->>S: inject optimizer
 
-                SR->>EE: new ExecutionEngine(exchanges, portfolio, feeds)
-                SR->>S: _execution_engine = engine
+                SR->>EE: create ExecutionEngine
+                SR->>S: inject execution_engine
             end
 
-            rect rgb(30, 30, 30)
+            rect rgb(30,30,30)
                 Note over SR: Main Loop
-                SR->>SR: asyncio.gather(data_feeds, strategy.run_forever())
+                SR->>SR: gather data_feeds + run_forever + snapshots
             end
     </div>
 
@@ -479,26 +457,26 @@
     </p>
     <div class="mermaid">
         graph TD
-            IN["Input: TargetWeights\n{ETHUSDT: 0.50, BTCUSDT: 0.40, SOLUSDT: 0.20}"]
+            IN["Input: TargetWeights\nETHUSDT=0.50  BTCUSDT=0.40  SOLUSDT=0.20"]
 
             R1["1. Rate Limit\nmin_rebalance_interval_ms: 60000"]
-            R1F{{"Elapsed < 60s?"}}
-            R1R["REJECTED\n'Rate limit: 45000ms < 60000ms'"]
+            R1F{{"Elapsed lt 60s?"}}
+            R1R["REJECTED\nRate limit: 45000ms lt 60000ms"]
 
-            R2["2. Symbol Filter\nallowed_symbols, blocked_symbols"]
+            R2["2. Symbol Filter\nallowed_symbols + blocked_symbols"]
             R3["3. Per-Asset Clip\nmax_weight_per_asset: 0.25"]
-            R3E["ETHUSDT: 0.50 -> 0.25 (clipped 0.25)\nBTCUSDT: 0.40 -> 0.25 (clipped 0.15)\nSOLUSDT: 0.20 -> 0.20"]
+            R3E["ETHUSDT: 0.50 clipped to 0.25\nBTCUSDT: 0.40 clipped to 0.25\nSOLUSDT: 0.20 unchanged"]
 
-            R4["4. Exposure Scaling\nmax_total_exposure: 1.0\ngross = 0.70 <= 1.0 (pass)"]
-            R5["5. Cash Floor\nmin_cash_weight: 0.05\nsum_long = 0.70 <= 0.95 (pass)"]
+            R4["4. Exposure Scaling\nmax_total_exposure: 1.0\ngross = 0.70 lte 1.0 #40;pass#41;"]
+            R5["5. Cash Floor\nmin_cash_weight: 0.05\nsum_long = 0.70 lte 0.95 #40;pass#41;"]
             R6["6. Turnover Cap\nmax_turnover_per_rebalance: 0.5"]
 
-            OUT["Output: ValidatedWeights\n{ETHUSDT: 0.25, BTCUSDT: 0.25, SOLUSDT: 0.20}\nclipped: {ETHUSDT: 0.25, BTCUSDT: 0.15}"]
+            OUT["Output: ValidatedWeights\nETHUSDT=0.25  BTCUSDT=0.25  SOLUSDT=0.20\nclipped: ETHUSDT=0.25  BTCUSDT=0.15"]
 
             IN --> R1
             R1 --> R1F
-            R1F -->|Yes| R1R
-            R1F -->|No| R2
+            R1F -->|"Yes"| R1R
+            R1F -->|"No"| R2
             R2 --> R3
             R3 --> R3E
             R3E --> R4
@@ -517,42 +495,42 @@
     <div class="mermaid">
         classDiagram
             class SpotStrategy {
-                -_exchanges: Dict~Venue, SpotExchangeConnector~
-                -_event_bus: EventBus
-                -_feeds: Dict~str, AbstractDataFeed~
-                -_optimizer: PortfolioOptimizer
-                -_execution_engine: ExecutionEngine
-                +portfolio: Portfolio
-                +args: Namespace
-                +config_json: dict
+                -Dict _exchanges
+                -EventBus _event_bus
+                -Dict _feeds
+                -PortfolioOptimizer _optimizer
+                -ExecutionEngine _execution_engine
+                +Portfolio portfolio
+                +Namespace args
+                +dict config_json
                 +start()
                 +stop()
                 +run_forever()
-                +submit_weights(weights, metadata) RebalanceResult
-                +on_kline(KlineEvent)
-                +on_orderbook_update(OrderBookUpdateEvent)
-                +on_order_update(OrderUpdateEvent)
-                +on_balance_update(BalanceUpdateEvent)
-                +on_rebalance_complete(RebalanceCompleteEvent)
+                +submit_weights(weights) RebalanceResult
+                +on_kline(event)
+                +on_orderbook_update(event)
+                +on_order_update(event)
+                +on_balance_update(event)
+                +on_rebalance_complete(event)
                 +get_exchange(venue) SpotExchangeConnector
-                +get_current_price(pair, side) float
-                +run_heavy(fn, args)
+                +get_current_price(pair) float
+                +run_heavy(fn) Any
             }
 
             class Portfolio {
-                -_positions: Dict~str, Position~
-                -_cash: float
-                -_cash_dict: Dict~str, float~
-                -_mark_prices: Dict~str, float~
-                -_weights: Dict~str, float~
-                -_nav: float
-                -_peak_equity: float
-                -_max_drawdown: float
-                -_fills: Deque~Fill~
-                +sync_from_exchange(exchange, venue, feeds)
-                +start(event_bus, feeds)
+                -Dict _positions
+                -float _cash
+                -Dict _cash_dict
+                -Dict _mark_prices
+                -Dict _weights
+                -float _nav
+                -float _peak_equity
+                -float _max_drawdown
+                -Deque _fills
+                +sync_from_exchange(exchange)
+                +start(event_bus)
                 +stop()
-                +update_position(symbol, qty_delta, price, ...)
+                +update_position(symbol)
                 +save_snapshot(venue)
                 +total_value(mark_prices) float
                 +current_weights(mark_prices) dict
@@ -560,60 +538,60 @@
             }
 
             class PortfolioOptimizer {
-                -_config: RiskConfig
-                -_portfolio: Portfolio
-                -_last_rebalance_ts: int
-                +validate(target: TargetWeights) ValidatedWeights
+                -RiskConfig _config
+                -Portfolio _portfolio
+                -int _last_rebalance_ts
+                +validate(target) ValidatedWeights
                 +current_weights(mark_prices) dict
             }
 
             class ExecutionEngine {
-                -_exchanges: Dict~Venue, SpotExchangeConnector~
-                -_portfolio: Portfolio
-                -_feeds: Dict~str, AbstractDataFeed~
-                -_risk_config: RiskConfig
-                +execute(validated: ValidatedWeights) RebalanceResult
-                +compute_order_intents(validated, prices) List~OrderIntent~
+                -Dict _exchanges
+                -Portfolio _portfolio
+                -Dict _feeds
+                -RiskConfig _risk_config
+                +execute(validated) RebalanceResult
+                +compute_order_intents(validated) List
             }
 
             class RiskConfig {
-                +max_weight_per_asset: float
-                +min_weight_per_asset: float
-                +max_total_exposure: float
-                +min_cash_weight: float
-                +max_turnover_per_rebalance: float
-                +min_weight_delta: float
-                +min_rebalance_interval_ms: int
-                +allowed_symbols: FrozenSet
-                +blocked_symbols: FrozenSet
+                +float max_weight_per_asset
+                +float min_weight_per_asset
+                +float max_total_exposure
+                +float min_cash_weight
+                +float max_turnover_per_rebalance
+                +float min_weight_delta
+                +int min_rebalance_interval_ms
+                +FrozenSet allowed_symbols
+                +FrozenSet blocked_symbols
             }
 
             class Position {
-                +symbol: str
-                +venue: Venue
-                +quantity: float
-                +avg_entry_price: float
-                +realized_pnl: float
-                +total_commission: float
+                +str symbol
+                +Venue venue
+                +float quantity
+                +float avg_entry_price
+                +float realized_pnl
+                +float total_commission
                 +unrealized_pnl(mark_price) float
                 +is_flat() bool
             }
 
             class EventBus {
-                -_subscribers: Dict~EventType, List~
-                +subscribe(event_type, callback)
-                +unsubscribe(event_type, callback)
+                -Dict _subscribers
+                +subscribe(event_type)
+                +unsubscribe(event_type)
                 +publish(event)
             }
 
             class SpotExchangeConnector {
                 <<abstract>>
-                -_balances: Dict~str, float~
-                -_open_orders: Dict
-                -_token_infos: Dict
-                +place_market_order(symbol, side, qty)
-                +place_limit_order(symbol, side, price, qty)
-                +cancel_order(symbol, order_id)
+                -Dict _balances
+                -Dict _open_orders
+                -Dict _token_infos
+                +place_market_order(symbol)
+                +place_limit_order(symbol)
+                +cancel_order(symbol)
                 +refresh_balances()
                 +get_balance(asset) float
             }
@@ -705,7 +683,7 @@
     <h2>10. Concurrency Model <span>Single event loop, everything async</span></h2>
     <div class="mermaid">
         graph TB
-            subgraph MainThread["Main Thread — asyncio.run()"]
+            subgraph MainThread["Main Thread - single asyncio event loop"]
                 subgraph IO["I/O Coroutines"]
                     KR2["Kline Reader"]
                     KW_["Kline Workers x4"]
@@ -715,23 +693,23 @@
                 end
 
                 subgraph Events["Event Processing"]
-                    EB3["EventBus.publish()\n(awaited = backpressure)"]
-                    PH["Portfolio Handlers\n_on_kline, _on_balance"]
-                    SH["Strategy Hooks\non_kline, on_ob, ..."]
+                    EB3["EventBus.publish\nawaited = backpressure"]
+                    PH["Portfolio Handlers\n_on_kline + _on_balance"]
+                    SH["Strategy Hooks\non_kline + on_ob + ..."]
                 end
 
-                subgraph Pipeline["Pipeline (sync calls)"]
-                    SW2["submit_weights()"]
-                    OV["optimizer.validate()"]
-                    EX2["engine.execute()"]
+                subgraph Pipeline["Pipeline - direct calls"]
+                    SW2["submit_weights"]
+                    OV["optimizer.validate"]
+                    EX2["engine.execute"]
                 end
 
                 subgraph Optional["Optional"]
-                    RF["strategy.run_forever()\n(periodic rebalance)"]
+                    RF["strategy.run_forever\nperiodic rebalance"]
                 end
             end
 
-            subgraph ProcessPool["ProcessPoolExecutor (separate OS processes)"]
+            subgraph ProcessPool["ProcessPoolExecutor - separate OS processes"]
                 PPW1["Heavy Worker 1"]
                 PPW2["Heavy Worker 2"]
                 PPW3["Heavy Worker 3"]
@@ -744,7 +722,7 @@
             SH --> SW2
             SW2 --> OV
             OV --> EX2
-            SH -.->|"run_heavy(fn)"| ProcessPool
+            SH -.->|"run_heavy"| ProcessPool
 
             style MainThread fill:#0a0a1a,stroke:#4a9eff,color:#4a9eff
             style ProcessPool fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b

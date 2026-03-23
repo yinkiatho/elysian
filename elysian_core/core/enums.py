@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import Enum, auto
 from typing import Dict
 
 # ── Order / Execution ─────────────────────────────────────────────────────────
@@ -157,3 +157,39 @@ class NetworkStatus(Enum):
     STOPPED = 0
     NOT_CONNECTED = 1
     CONNECTED = 2
+
+
+# ── State Machine States ─────────────────────────────────────────────────────
+
+class RebalanceState(Enum):
+    """States for the rebalance cycle FSM."""
+    IDLE = auto()
+    COMPUTING = auto()
+    VALIDATING = auto()
+    EXECUTING = auto()
+    COOLDOWN = auto()
+    SUSPENDED = auto()
+    ERROR = auto()
+
+
+class StrategyState(Enum):
+    """Lifecycle states for SpotStrategy."""
+    CREATED = auto()
+    STARTING = auto()
+    READY = auto()
+    RUNNING = auto()
+    STOPPING = auto()
+    STOPPED = auto()
+    FAILED = auto()
+
+
+class RunnerState(Enum):
+    """Lifecycle states for StrategyRunner."""
+    CREATED = auto()
+    CONFIGURING = auto()
+    CONNECTING = auto()
+    SYNCING = auto()
+    RUNNING = auto()
+    STOPPING = auto()
+    STOPPED = auto()
+    FAILED = auto()

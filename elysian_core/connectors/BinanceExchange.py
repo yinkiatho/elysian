@@ -249,12 +249,13 @@ class BinanceSpotExchange(SpotExchangeConnector):
         order.commission += float(msg.get("n", 0))
         order.commission_asset = msg.get("N") or order.commission_asset
 
-        # Always sync status from exchange (source of truth)
-        order.status = internal_status
+        # Validate and apply status from exchange (source of truth).
+        # transition_to logs a warning on invalid transitions but always applies.
+        order.transition_to(internal_status)
         logger.info(f"[{symbol}] Order updated: {order}")
 
         # ── Remove terminal orders from open-orders registry ─────────────────────
-        if not order.is_active:
+        if order.is_terminal:
             self._open_orders[symbol].pop(order_id, None)
             logger.info(f"[{symbol}] Order {order_id} removed from open orders (status={status})")
         

@@ -61,7 +61,7 @@ class ExecutionEngine:
 
     # ── Public ───────────────────────────────────────────────────────────────
 
-    async def execute(self, validated: ValidatedWeights) -> RebalanceResult:
+    async def execute(self, validated: ValidatedWeights, **ctx) -> RebalanceResult:
         """Execute a full rebalance cycle from validated weights to exchange orders."""
         logger.info(
             f"[ExecutionEngine] Starting rebalance: {len(validated.weights)} symbols"

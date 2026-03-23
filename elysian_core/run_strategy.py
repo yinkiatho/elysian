@@ -54,7 +54,8 @@ from pathlib import Path
 import json
 from concurrent.futures import ThreadPoolExecutor
 from elysian_core.core.event_bus import EventBus
-from elysian_core.core.enums import Venue
+from elysian_core.core.enums import OrderType, RunnerState, Venue
+from elysian_core.core.fsm import PeriodicTask
 from elysian_core.execution.engine import ExecutionEngine
 from elysian_core.risk.optimizer import PortfolioOptimizer
 from elysian_core.risk.risk_config import RiskConfig
@@ -109,6 +110,9 @@ class StrategyRunner:
         self.data_feed = {}
         self.vol_feed = None
         self.processor = None
+        self._snapshot_interval_s = 0
+        self._snapshot_task: PeriodicTask | None = None
+        self._state = RunnerState.CREATED
         
         
         # Binance Client Managers
@@ -525,16 +529,42 @@ class StrategyRunner:
     async def _setup_portfolio(self, strategy: SpotStrategy) -> None:
         """Initialize the strategy's portfolio with full exchange state sync.
 
-        Syncs cash, positions, mark prices, and open orders from
-        BinanceSpotExchange, then subscribes to EventBus so balance
+        Reads ``self.args.portfolio.*`` for configuration (max_history,
+        snapshot_interval_s).  Constructs a fresh Portfolio with these params,
+        then syncs cash, positions, mark prices, and open orders from
+        BinanceSpotExchange.  Finally subscribes to EventBus so balance
         deltas, kline prices, and weights stay in sync automatically.
 
         For multi-venue expansion: call ``sync_from_exchange()`` once per
         exchange — each venue's state accumulates into the portfolio.
         """
-        # Pass args/config_json into portfolio
-        strategy.portfolio.args = self.args
-        strategy.portfolio.config_json = self.config_json
+        # Read portfolio config from args
+        portfolio_section = getattr(self.args, "portfolio", None)
+        max_history = 10_000
+        self._snapshot_interval_s = 0
+
+        if portfolio_section is not None:
+            logger.info("[Runner] Reading portfolio config from args.portfolio")
+            mh = getattr(portfolio_section, "max_history", None)
+            if mh is not None:
+                max_history = int(mh)
+                logger.info(f"[Runner]   portfolio.max_history = {max_history}")
+
+            si = getattr(portfolio_section, "snapshot_interval_s", None)
+            if si is not None:
+                self._snapshot_interval_s = int(si)
+                logger.info(f"[Runner]   portfolio.snapshot_interval_s = {self._snapshot_interval_s}")
+        else:
+            logger.info("[Runner] No args.portfolio section — using Portfolio defaults")
+
+        # Construct portfolio with config-driven params
+        from elysian_core.core.portfolio import Portfolio
+        strategy.portfolio = Portfolio(
+            initial_cash=0.0,
+            max_history=max_history,
+            args=self.args,
+            config_json=self.config_json,
+        )
 
         all_feeds = self._collect_all_feeds()
 
@@ -547,22 +577,29 @@ class StrategyRunner:
         strategy.portfolio.start(self.event_bus, feeds=all_feeds)
 
         logger.info(
-            f"Portfolio initialized: cash={strategy.portfolio.cash:.2f}, "
+            f"[Runner] Portfolio initialized: cash={strategy.portfolio.cash:.2f}, "
             f"{len(strategy.portfolio.active_positions)} positions, "
-            f"{len(all_feeds)} feeds wired"
+            f"{len(all_feeds)} feeds wired, "
+            f"max_history={max_history}, snapshot_interval={self._snapshot_interval_s}s"
         )
 
     def _setup_risk(self, strategy: SpotStrategy) -> None:
-        """Build a RiskConfig from ``self.args`` and create the PortfolioOptimizer.
+        """Build a RiskConfig from ``self.args.risk`` and create the PortfolioOptimizer.
 
-        Override-friendly: reads ``self.args.risk.*`` fields when present,
-        falls back to RiskConfig defaults otherwise.
+        Reads every RiskConfig field from the YAML config.  Falls back to
+        RiskConfig defaults for any field not present in the config.
+
+        Type conversions handled:
+          - ``allowed_symbols``: YAML list/null → ``Optional[FrozenSet[str]]``
+          - ``blocked_symbols``: YAML list → ``FrozenSet[str]``
         """
         risk_kwargs = {}
         risk_section = getattr(self.args, "risk", None)
         if risk_section is not None:
             logger.info("[Runner] Reading risk config from args.risk")
-            _RISK_FIELDS = {
+
+            # Scalar fields — pass through directly
+            _SCALAR_FIELDS = {
                 "max_weight_per_asset", "min_weight_per_asset",
                 "max_total_exposure", "min_cash_weight",
                 "max_turnover_per_rebalance", "max_leverage",
@@ -570,11 +607,22 @@ class StrategyRunner:
                 "max_order_notional", "min_rebalance_interval_ms",
                 "min_weight_delta",
             }
-            for field_name in _RISK_FIELDS:
+            for field_name in _SCALAR_FIELDS:
                 val = getattr(risk_section, field_name, None)
                 if val is not None:
                     risk_kwargs[field_name] = val
                     logger.info(f"[Runner]   risk.{field_name} = {val}")
+
+            # Set fields — YAML lists/null → frozenset
+            allowed = getattr(risk_section, "allowed_symbols", None)
+            if allowed is not None and isinstance(allowed, list):
+                risk_kwargs["allowed_symbols"] = frozenset(allowed)
+                logger.info(f"[Runner]   risk.allowed_symbols = {risk_kwargs['allowed_symbols']}")
+
+            blocked = getattr(risk_section, "blocked_symbols", None)
+            if blocked is not None and isinstance(blocked, list) and blocked:
+                risk_kwargs["blocked_symbols"] = frozenset(blocked)
+                logger.info(f"[Runner]   risk.blocked_symbols = {risk_kwargs['blocked_symbols']}")
         else:
             logger.info("[Runner] No args.risk section — using RiskConfig defaults")
 
@@ -588,44 +636,122 @@ class StrategyRunner:
         strategy._optimizer = self.optimizer
         logger.info(f"[Runner] Risk optimizer configured: {risk_config}")
 
+
+
     def _setup_execution(self, strategy: SpotStrategy) -> None:
         """Create the ExecutionEngine and inject it into the strategy.
 
-        Shares the same RiskConfig as the optimizer so the weight-delta
-        threshold is consistent between risk and execution stages.
+        Reads ``self.args.execution.*`` for configuration (default_order_type,
+        default_venue).  Shares the same RiskConfig as the optimizer so the
+        weight-delta threshold is consistent between risk and execution stages.
+
+        Type conversions handled:
+          - ``default_order_type``: YAML string → :class:`OrderType` enum
+          - ``default_venue``: YAML string → :class:`Venue` enum
         """
         all_feeds = self._collect_all_feeds()
         risk_config = self.optimizer.config if hasattr(self, "optimizer") else RiskConfig()
 
+        # Read execution config from args
+        exec_section = getattr(self.args, "execution", None)
+        default_order_type = OrderType.MARKET
+        default_venue = Venue.BINANCE
+
+        if exec_section is not None:
+            logger.info("[Runner] Reading execution config from args.execution")
+
+            ot = getattr(exec_section, "default_order_type", None)
+            if ot is not None:
+                _ORDER_TYPE_MAP = {
+                    "MARKET": OrderType.MARKET,
+                    "LIMIT": OrderType.LIMIT,
+                }
+                default_order_type = _ORDER_TYPE_MAP.get(str(ot).upper(), OrderType.MARKET)
+                logger.info(f"[Runner]   execution.default_order_type = {default_order_type.value}")
+
+            dv = getattr(exec_section, "default_venue", None)
+            if dv is not None:
+                _VENUE_MAP = {v.value: v for v in Venue}
+                default_venue = _VENUE_MAP.get(str(dv), Venue.BINANCE)
+                logger.info(f"[Runner]   execution.default_venue = {default_venue.value}")
+        else:
+            logger.info("[Runner] No args.execution section — using ExecutionEngine defaults")
+
         self.execution_engine = ExecutionEngine(
-            exchanges={Venue.BINANCE: self.binance_exchange},
+            exchanges={default_venue: self.binance_exchange},
             portfolio=strategy.portfolio,
             feeds=all_feeds,
             risk_config=risk_config,
-            default_venue=Venue.BINANCE,
+            default_venue=default_venue,
+            default_order_type=default_order_type,
             args=self.args,
             config_json=self.config_json,
         )
         strategy._execution_engine = self.execution_engine
         logger.info(
             f"[Runner] Execution engine configured: "
-            f"venue={Venue.BINANCE.value}, "
-            f"order_type={self.execution_engine._default_order_type.value}, "
-            f"min_weight_delta={self.execution_engine._risk_config.min_weight_delta}"
+            f"venue={default_venue.value}, "
+            f"order_type={default_order_type.value}, "
+            f"min_weight_delta={risk_config.min_weight_delta}"
         )
 
+
     async def _setup_pipeline(self, strategy: SpotStrategy) -> None:
-        """Wire the full Stage 3-5 pipeline: Portfolio -> Risk -> Execution."""
+        """Wire the full Stage 3-5 pipeline: Portfolio -> Risk -> Execution.
+
+        Also applies ``args.strategy.max_heavy_workers`` if present (replaces
+        the ProcessPoolExecutor created during SpotStrategy.__init__).
+        """
         logger.info("[Runner] ── Setting up Stage 3-5 pipeline ──")
         await self._setup_portfolio(strategy)
         self._setup_risk(strategy)
         self._setup_execution(strategy)
+
+        # Apply strategy-level config (max_heavy_workers)
+        strat_section = getattr(self.args, "strategy", None)
+        if strat_section is not None:
+            mhw = getattr(strat_section, "max_heavy_workers", None)
+            if mhw is not None:
+                from concurrent.futures import ProcessPoolExecutor
+                strategy._executor.shutdown(wait=False)
+                strategy._executor = ProcessPoolExecutor(max_workers=int(mhw))
+                logger.info(f"[Runner]   strategy.max_heavy_workers = {int(mhw)}")
+
         logger.info(
             f"[Runner] Pipeline complete: {strategy.__class__.__name__}.portfolio "
             f"-> Optimizer -> ExecutionEngine"
         )
 
+    def _start_snapshot_task(self, strategy: SpotStrategy) -> None:
+        """Start a periodic portfolio snapshot saver using PeriodicTask.
+
+        Replaces the old ``while True`` snapshot loop with a clean
+        start/stop lifecycle.
+        """
+        interval = self._snapshot_interval_s
+        if interval <= 0:
+            return
+
+        def _save():
+            try:
+                strategy.portfolio.save_snapshot()
+                logger.info("[Runner] Portfolio snapshot saved")
+            except Exception as e:
+                logger.error(f"[Runner] Snapshot save failed: {e}", exc_info=True)
+
+        self._snapshot_task = PeriodicTask(
+            callback=_save,
+            interval_s=interval,
+            name="PortfolioSnapshot",
+        )
+        self._snapshot_task.start()
+        logger.info(f"[Runner] Portfolio snapshot task started (every {interval}s)")
+
     # ── Main entry point ──────────────────────────────────────────────────────
+    @property
+    def state(self) -> RunnerState:
+        """Current runner lifecycle state."""
+        return self._state
 
     async def run(self, strategy: SpotStrategy = None) -> None:
         """Run the complete strategy in a single event loop.
@@ -639,13 +765,16 @@ class StrategyRunner:
             logger.info("[Runner] Starting strategy runner...")
             logger.info("[Runner] ════════════════════════════════════════════")
 
-            # Setup phase
+            # ── CONFIGURING ──
+            self._state = RunnerState.CONFIGURING
             self._setup_config()
 
             # Create shared event bus BEFORE exchanges so it can be injected
             self.event_bus = EventBus()
             logger.info("[Runner] EventBus created")
 
+            # ── CONNECTING ──
+            self._state = RunnerState.CONNECTING
             self._setup_exchanges()
 
             # Inject event bus into client managers
@@ -673,7 +802,8 @@ class StrategyRunner:
                 await self.binance_exchange.run()
                 logger.info("[Runner] Binance exchange running")
 
-                # ── Stage 3-5 pipeline ──
+                # ── SYNCING ──
+                self._state = RunnerState.SYNCING
                 if strategy is not None:
                     await self._setup_pipeline(strategy)
 
@@ -687,11 +817,23 @@ class StrategyRunner:
                     logger.info(f"[Runner] Launching strategy.run_forever() alongside data feeds")
                     coros.append(strategy.run_forever())
 
+                    # Periodic portfolio snapshot via PeriodicTask (no while-True loop)
+                    if self._snapshot_interval_s > 0:
+                        self._start_snapshot_task(strategy)
+
+                # ── RUNNING ──
+                self._state = RunnerState.RUNNING
                 logger.info(f"[Runner] Entering main event loop ({len(coros)} coroutines)")
                 await asyncio.gather(*coros)
 
             finally:
+                # ── STOPPING ──
+                self._state = RunnerState.STOPPING
                 logger.info("[Runner] Shutting down exchange and strategy...")
+
+                if self._snapshot_task is not None:
+                    self._snapshot_task.stop()
+
                 await self.binance_exchange.cleanup()
                 if strategy is not None:
                     strategy.portfolio.stop()
@@ -700,12 +842,15 @@ class StrategyRunner:
         except asyncio.CancelledError:
             logger.warning("[Runner] Strategy cancelled by user")
         except Exception as e:
+            self._state = RunnerState.FAILED
             logger.error(f"[Runner] Fatal error: {e}", exc_info=True)
             raise
         finally:
             logger.info("Cleaning up...")
             await self._cleanup([])
-            logger.info("Strategy runner shutdown complete")
+            if self._state != RunnerState.FAILED:
+                self._state = RunnerState.STOPPED
+            logger.info(f"Strategy runner shutdown complete (state={self._state.name})")
     
 
     

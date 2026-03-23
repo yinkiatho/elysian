@@ -38,7 +38,7 @@ class PortfolioOptimizer:
     def config(self, new_config: RiskConfig):
         self._config = new_config
 
-    def validate(self, target: TargetWeights) -> ValidatedWeights:
+    def validate(self, target: TargetWeights, **ctx) -> ValidatedWeights:
         """Project *target* weights onto the risk-feasible set.
 
         Pipeline executed in order:
