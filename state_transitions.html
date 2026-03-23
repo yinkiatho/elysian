@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Elysian Trading System — State Transitions</title>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            flowchart: { curve: 'basis', padding: 20 },
+            stateDiagram: { padding: 20 },
+            themeVariables: {
+                primaryColor: '#1a1a2e',
+                primaryTextColor: '#e0e0e0',
+                primaryBorderColor: '#4a9eff',
+                lineColor: '#4a9eff',
+                secondaryColor: '#16213e',
+                tertiaryColor: '#0f3460',
+                fontSize: '14px'
+            }
+        });
+    </script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #0a0a1a;
+            color: #e0e0e0;
+            padding: 40px 20px;
+            line-height: 1.6;
+        }
+        h1 {
+            text-align: center;
+            font-size: 2.2rem;
+            font-weight: 300;
+            margin-bottom: 8px;
+            color: #fff;
+            letter-spacing: 2px;
+        }
+        h1 span { color: #4a9eff; font-weight: 600; }
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 50px;
+            font-size: 1rem;
+        }
+        h2 {
+            font-size: 1.5rem;
+            font-weight: 400;
+            margin: 50px 0 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #222;
+            color: #4a9eff;
+        }
+        h2 span { color: #888; font-size: 0.9rem; font-weight: 300; margin-left: 12px; }
+        h3 {
+            color: #ccc;
+            font-size: 1.15rem;
+            margin: 30px 0 10px;
+            font-weight: 500;
+        }
+        p.desc {
+            color: #aaa;
+            margin-bottom: 20px;
+            max-width: 960px;
+            font-size: 0.95rem;
+        }
+        .file-ref {
+            color: #888;
+            font-size: 0.82rem;
+            font-style: italic;
+            margin-top: -12px;
+            margin-bottom: 16px;
+        }
+        .mermaid {
+            background: #0f0f1f;
+            border: 1px solid #1a1a3e;
+            border-radius: 12px;
+            padding: 30px 20px;
+            margin: 20px 0 40px;
+            overflow-x: auto;
+        }
+        .mermaid svg { max-width: 100%; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0 30px;
+            font-size: 0.9rem;
+        }
+        th {
+            background: #1a1a2e;
+            color: #4a9eff;
+            text-align: left;
+            padding: 10px 14px;
+            border-bottom: 2px solid #222;
+        }
+        td {
+            padding: 8px 14px;
+            border-bottom: 1px solid #1a1a1a;
+            color: #ccc;
+        }
+        tr:hover td { background: #111122; }
+        code {
+            background: #1a1a2e;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.88em;
+            color: #7cb7ff;
+        }
+        .tag-terminal {
+            background: #2a0a0a;
+            color: #ff6b6b;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.82em;
+            font-weight: 600;
+        }
+        .tag-active {
+            background: #0a2a0a;
+            color: #6bff6b;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.82em;
+            font-weight: 600;
+        }
+        .tag-wildcard {
+            background: #2a2a0a;
+            color: #ffd93d;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.82em;
+            font-weight: 600;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .note-box {
+            background: #111128;
+            border-left: 3px solid #4a9eff;
+            padding: 14px 18px;
+            margin: 16px 0 24px;
+            border-radius: 0 8px 8px 0;
+            font-size: 0.92rem;
+            color: #bbb;
+        }
+        .note-box strong { color: #4a9eff; }
+        .divider {
+            border: none;
+            border-top: 1px solid #222;
+            margin: 60px 0 20px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <h1><span>ELYSIAN</span> State Transitions</h1>
+    <p class="subtitle">Every state machine, transition, trigger, callback, and terminal state in the system</p>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 1: BaseFSM Foundation -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>1. BaseFSM &mdash; Generic Async Finite-State Machine <span>Foundation for all FSMs</span></h2>
+    <p class="desc">
+        <code>BaseFSM</code> is the abstract base class for all state machines in Elysian.
+        It provides a dict-based transition table, wildcard transitions, a re-entrancy guard,
+        and optional EventBus integration. Subclasses define <code>_TRANSITIONS</code> as a mapping
+        from <code>(State, trigger_name)</code> &rarr; <code>(NextState, callback_method_name_or_None)</code>.
+    </p>
+    <p class="file-ref">core/fsm.py &mdash; class BaseFSM, class PeriodicTask, class InvalidTransition</p>
+
+    <h3>Core Mechanics</h3>
+    <table>
+        <tr><th>Feature</th><th>Mechanism</th><th>Details</th></tr>
+        <tr>
+            <td>Transition Table</td>
+            <td><code>_TRANSITIONS: Dict[(State, str), (State, Optional[str])]</code></td>
+            <td>Class-level dict mapping <code>(current_state, trigger_name)</code> to <code>(next_state, callback_name)</code>. Callback name is a string referencing a method on the subclass, or <code>None</code> to skip.</td>
+        </tr>
+        <tr>
+            <td>Wildcard Transitions</td>
+            <td><code>("*", trigger_name)</code></td>
+            <td>Use the string <code>"*"</code> as the state key to match <strong>any</strong> current state. Explicit (State, trigger) matches take priority over wildcard matches. Used by RebalanceFSM for the <code>"suspend"</code> trigger.</td>
+        </tr>
+        <tr>
+            <td>Re-entrancy Guard</td>
+            <td><code>_transitioning</code> flag + <code>_pending</code> deque</td>
+            <td>If a callback triggers another transition (e.g. <code>_on_enter_computing</code> triggers <code>"weights_ready"</code>), the nested trigger is queued in <code>_pending</code> rather than recursing. After the current transition completes, queued transitions are drained in FIFO order.</td>
+        </tr>
+        <tr>
+            <td>Terminal States</td>
+            <td><code>_terminal_states: Set[Enum]</code></td>
+            <td>States in this set reject all further transitions by raising <code>InvalidTransition</code>. Checked before table lookup.</td>
+        </tr>
+        <tr>
+            <td>EventBus Integration</td>
+            <td>Optional <code>_event_bus</code> parameter</td>
+            <td>When provided, subclass callbacks can publish events on state changes for external observability.</td>
+        </tr>
+        <tr>
+            <td>Context Passing</td>
+            <td><code>**ctx</code> keyword args</td>
+            <td>Arbitrary context passed through <code>trigger(event, **ctx)</code> is forwarded to the callback method. The FSM also injects <code>_fsm_old_state</code> into ctx so callbacks can see the pre-transition state.</td>
+        </tr>
+    </table>
+
+    <h3>Key Methods</h3>
+    <table>
+        <tr><th>Method</th><th>Signature</th><th>Purpose</th></tr>
+        <tr>
+            <td><code>trigger</code></td>
+            <td><code>async trigger(event: str, **ctx) -> Enum</code></td>
+            <td>Fire a named trigger. Resolves transition from <code>_TRANSITIONS</code>, updates <code>_state</code>, runs the callback (sync or async), drains pending queue. Returns new state. Raises <code>InvalidTransition</code> if no matching transition exists.</td>
+        </tr>
+        <tr>
+            <td><code>_do_transition</code></td>
+            <td><code>async _do_transition(event: str, **ctx) -> Enum</code></td>
+            <td>Internal: resolves transition key (explicit first, then wildcard), updates <code>_state</code>, calls callback via <code>getattr</code>. Logs transition at DEBUG level.</td>
+        </tr>
+        <tr>
+            <td><code>state</code></td>
+            <td><code>@property state -> Enum</code></td>
+            <td>Returns the current state enum value.</td>
+        </tr>
+        <tr>
+            <td><code>is_terminal</code></td>
+            <td><code>@property is_terminal -> bool</code></td>
+            <td>True if current state is in <code>_terminal_states</code>.</td>
+        </tr>
+    </table>
+
+    <div class="note-box">
+        <strong>Transition Resolution Order:</strong>
+        1. Check <code>is_terminal</code> &mdash; if True, raise <code>InvalidTransition</code>.<br>
+        2. Look up <code>(current_state, event)</code> in <code>_TRANSITIONS</code>.<br>
+        3. If not found, look up <code>("*", event)</code> (wildcard).<br>
+        4. If neither found, raise <code>InvalidTransition</code>.<br>
+        5. Update <code>_state</code> to <code>next_state</code>.<br>
+        6. Call callback (if not None) with <code>**ctx</code>.
+    </div>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 2: RebalanceFSM -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>2. RebalanceFSM &mdash; Rebalance Cycle State Machine <span>Drives Stages 3-5</span></h2>
+    <p class="desc">
+        The <code>RebalanceFSM</code> (subclass of <code>BaseFSM</code>) replaces <code>while True + asyncio.sleep()</code>
+        loops with an explicit state machine driving the <strong>compute &rarr; validate &rarr; execute &rarr; cooldown</strong>
+        pipeline. It can be driven by a periodic timer (<code>start_timer(interval_s)</code>) and/or on-demand
+        signals (<code>request()</code> / <code>strategy.request_rebalance()</code>).
+    </p>
+    <p class="file-ref">core/rebalance_fsm.py &mdash; class RebalanceFSM &bull; core/enums.py &mdash; class RebalanceState</p>
+
+    <h3>State Enum: <code>RebalanceState</code></h3>
+    <table>
+        <tr><th>State</th><th>Value</th><th>Description</th><th>Type</th></tr>
+        <tr><td><code>IDLE</code></td><td><code>auto()</code></td><td>Waiting for next timer tick or manual signal. Ready to start a new cycle.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>COMPUTING</code></td><td><code>auto()</code></td><td>Calling <code>strategy.compute_weights()</code>. Waiting for weight dict or None.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>VALIDATING</code></td><td><code>auto()</code></td><td>Running <code>optimizer.validate(TargetWeights)</code>. Checking risk constraints.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>EXECUTING</code></td><td><code>auto()</code></td><td>Running <code>execution_engine.execute(ValidatedWeights)</code>. Submitting orders.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>COOLDOWN</code></td><td><code>auto()</code></td><td>Waiting <code>cooldown_s</code> seconds before returning to IDLE. Prevents rapid-fire.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>SUSPENDED</code></td><td><code>auto()</code></td><td>Rebalancing paused. Timer cancelled, pending state cleared. Requires explicit <code>resume</code>.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>ERROR</code></td><td><code>auto()</code></td><td>Execution failed with exception. Auto-retries after cooldown period.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+    </table>
+
+    <h3>Full State Diagram</h3>
+    <div class="mermaid">
+        stateDiagram-v2
+            [*] --> IDLE
+
+            IDLE --> COMPUTING : timer_tick
+            IDLE --> COMPUTING : signal
+
+            COMPUTING --> VALIDATING : weights_ready
+            COMPUTING --> IDLE : no_signal
+
+            VALIDATING --> EXECUTING : accepted
+            VALIDATING --> COOLDOWN : rejected
+
+            EXECUTING --> COOLDOWN : complete
+            EXECUTING --> ERROR : failed
+
+            COOLDOWN --> IDLE : cooldown_done
+
+            ERROR --> IDLE : retry
+
+            IDLE --> SUSPENDED : suspend
+            COMPUTING --> SUSPENDED : suspend
+            VALIDATING --> SUSPENDED : suspend
+            EXECUTING --> SUSPENDED : suspend
+            COOLDOWN --> SUSPENDED : suspend
+            ERROR --> SUSPENDED : suspend
+
+            SUSPENDED --> IDLE : resume
+    </div>
+
+    <h3>Complete Transition Table</h3>
+    <table>
+        <tr><th>From State</th><th>Trigger</th><th>To State</th><th>Callback</th><th>Description</th></tr>
+        <tr>
+            <td><code>IDLE</code></td>
+            <td><code>timer_tick</code></td>
+            <td><code>COMPUTING</code></td>
+            <td><code>_on_enter_computing</code></td>
+            <td>Periodic timer fired via <code>_fire_tick()</code> &rarr; <code>_tick()</code>. Only fires if currently IDLE; otherwise the tick is skipped and rescheduled.</td>
+        </tr>
+        <tr>
+            <td><code>IDLE</code></td>
+            <td><code>signal</code></td>
+            <td><code>COMPUTING</code></td>
+            <td><code>_on_enter_computing</code></td>
+            <td>Manual request via <code>request()</code> or <code>strategy.request_rebalance()</code>. Returns <code>False</code> if FSM is not IDLE.</td>
+        </tr>
+        <tr>
+            <td><code>COMPUTING</code></td>
+            <td><code>weights_ready</code></td>
+            <td><code>VALIDATING</code></td>
+            <td><code>_on_enter_validating</code></td>
+            <td><code>compute_weights()</code> returned a non-empty dict. Weights stored in <code>_pending_weights</code>.</td>
+        </tr>
+        <tr>
+            <td><code>COMPUTING</code></td>
+            <td><code>no_signal</code></td>
+            <td><code>IDLE</code></td>
+            <td><em>None</em></td>
+            <td><code>compute_weights()</code> returned <code>{}</code>, <code>None</code>, or raised an exception. Cycle aborted cleanly.</td>
+        </tr>
+        <tr>
+            <td><code>VALIDATING</code></td>
+            <td><code>accepted</code></td>
+            <td><code>EXECUTING</code></td>
+            <td><code>_on_enter_executing</code></td>
+            <td><code>optimizer.validate()</code> returned <code>ValidatedWeights(rejected=False)</code>. Validated weights stored in <code>_pending_validated</code>.</td>
+        </tr>
+        <tr>
+            <td><code>VALIDATING</code></td>
+            <td><code>rejected</code></td>
+            <td><code>COOLDOWN</code></td>
+            <td><code>_on_enter_cooldown</code></td>
+            <td><code>optimizer.validate()</code> returned <code>rejected=True</code> (rate limit, constraint violation) or raised an exception.</td>
+        </tr>
+        <tr>
+            <td><code>EXECUTING</code></td>
+            <td><code>complete</code></td>
+            <td><code>COOLDOWN</code></td>
+            <td><code>_on_enter_cooldown</code></td>
+            <td><code>execution_engine.execute()</code> returned <code>RebalanceResult</code> successfully. <code>RebalanceCompleteEvent</code> published to EventBus.</td>
+        </tr>
+        <tr>
+            <td><code>EXECUTING</code></td>
+            <td><code>failed</code></td>
+            <td><code>ERROR</code></td>
+            <td><code>_on_enter_error</code></td>
+            <td><code>execution_engine.execute()</code> raised an exception. The error is passed via <code>error=e</code> kwarg.</td>
+        </tr>
+        <tr>
+            <td><code>COOLDOWN</code></td>
+            <td><code>cooldown_done</code></td>
+            <td><code>IDLE</code></td>
+            <td><em>None</em></td>
+            <td>Cooldown timer expired. Fired by <code>call_later(cooldown_s, _fire_cooldown_done)</code>. Timer rescheduled via <code>_schedule_tick()</code>.</td>
+        </tr>
+        <tr>
+            <td><code>ERROR</code></td>
+            <td><code>retry</code></td>
+            <td><code>IDLE</code></td>
+            <td><em>None</em></td>
+            <td>Auto-retry after cooldown period. Fired by <code>call_later(cooldown_s, _fire_retry)</code>. Timer rescheduled.</td>
+        </tr>
+        <tr>
+            <td><code>*</code> <span class="tag-wildcard">WILDCARD</span></td>
+            <td><code>suspend</code></td>
+            <td><code>SUSPENDED</code></td>
+            <td><code>_on_enter_suspended</code></td>
+            <td>Matches ANY non-terminal state. Cancels timer, clears <code>_pending_weights</code> and <code>_pending_validated</code>. Called via <code>strategy.suspend_rebalancing()</code>.</td>
+        </tr>
+        <tr>
+            <td><code>SUSPENDED</code></td>
+            <td><code>resume</code></td>
+            <td><code>IDLE</code></td>
+            <td><code>_on_resume</code></td>
+            <td>Resumes rebalancing. Reschedules timer if <code>_timer_interval</code> is set. Called via <code>strategy.resume_rebalancing()</code>.</td>
+        </tr>
+    </table>
+
+    <h3>Callback Details</h3>
+    <table>
+        <tr><th>Callback</th><th>What It Does</th><th>Triggers Next</th></tr>
+        <tr>
+            <td><code>_on_enter_computing(**ctx)</code></td>
+            <td>
+                1. Publishes <code>RebalanceCycleEvent</code> via <code>_publish_cycle_event("timer_tick")</code><br>
+                2. Calls <code>self._strategy.compute_weights(**ctx)</code> (handles both sync and async)<br>
+                3. On exception: triggers <code>"no_signal"</code><br>
+                4. On empty/None result: triggers <code>"no_signal"</code><br>
+                5. On success: stores weights in <code>_pending_weights</code>, triggers <code>"weights_ready"</code>
+            </td>
+            <td><code>weights_ready</code> or <code>no_signal</code></td>
+        </tr>
+        <tr>
+            <td><code>_on_enter_validating(**ctx)</code></td>
+            <td>
+                1. Publishes <code>RebalanceCycleEvent</code><br>
+                2. Wraps <code>_pending_weights</code> in <code>TargetWeights(weights, timestamp, metadata={})</code><br>
+                3. Calls <code>self._optimizer.validate(target, **ctx)</code><br>
+                4. On exception: triggers <code>"rejected"</code><br>
+                5. If <code>validated.rejected</code>: logs rejection reason, triggers <code>"rejected"</code><br>
+                6. On success: stores in <code>_pending_validated</code>, triggers <code>"accepted"</code>
+            </td>
+            <td><code>accepted</code> or <code>rejected</code></td>
+        </tr>
+        <tr>
+            <td><code>_on_enter_executing(**ctx)</code></td>
+            <td>
+                1. Publishes <code>RebalanceCycleEvent</code><br>
+                2. Calls <code>await self._execution_engine.execute(self._pending_validated, **ctx)</code><br>
+                3. On exception: triggers <code>"failed"</code> with <code>error=e</code><br>
+                4. On success: stores result in <code>_last_result</code><br>
+                5. Publishes <code>RebalanceCompleteEvent(result, validated_weights, timestamp)</code> to EventBus<br>
+                6. Triggers <code>"complete"</code>
+            </td>
+            <td><code>complete</code> or <code>failed</code></td>
+        </tr>
+        <tr>
+            <td><code>_on_enter_cooldown(**ctx)</code></td>
+            <td>
+                1. Publishes <code>RebalanceCycleEvent</code><br>
+                2. Clears <code>_pending_weights</code> and <code>_pending_validated</code><br>
+                3. Schedules <code>call_later(cooldown_s, _fire_cooldown_done)</code>
+            </td>
+            <td><code>cooldown_done</code> (after timer)</td>
+        </tr>
+        <tr>
+            <td><code>_on_enter_error(error=None, **ctx)</code></td>
+            <td>
+                1. Publishes <code>RebalanceCycleEvent</code><br>
+                2. Logs error at ERROR level<br>
+                3. Clears <code>_pending_weights</code> and <code>_pending_validated</code><br>
+                4. Schedules <code>call_later(cooldown_s, _fire_retry)</code> for auto-recovery
+            </td>
+            <td><code>retry</code> (after cooldown timer)</td>
+        </tr>
+        <tr>
+            <td><code>_on_enter_suspended(**ctx)</code></td>
+            <td>
+                1. Publishes <code>RebalanceCycleEvent</code><br>
+                2. Cancels <code>_timer_handle</code> (stops periodic ticks)<br>
+                3. Clears <code>_pending_weights</code> and <code>_pending_validated</code><br>
+                4. Logs WARNING: "SUSPENDED &mdash; rebalancing paused"
+            </td>
+            <td>Waits for explicit <code>resume</code></td>
+        </tr>
+        <tr>
+            <td><code>_on_resume(**ctx)</code></td>
+            <td>
+                1. Publishes <code>RebalanceCycleEvent</code><br>
+                2. Logs "Resumed &mdash; back to IDLE"<br>
+                3. If <code>_timer_interval</code> is set: calls <code>_schedule_tick()</code> to restart periodic timer
+            </td>
+            <td>Returns to IDLE, timer resumes</td>
+        </tr>
+    </table>
+
+    <h3>Timer Mechanism</h3>
+    <div class="note-box">
+        <strong>Timer Flow:</strong>
+        <code>start_timer(interval_s)</code> &rarr; <code>_schedule_tick()</code> &rarr; <code>call_later(interval, _fire_tick)</code> &rarr;
+        <code>_fire_tick()</code> checks if IDLE:
+        <ul style="margin-top:6px;">
+            <li>If IDLE: creates task <code>_tick()</code> which calls <code>trigger("timer_tick")</code></li>
+            <li>If NOT IDLE: logs "Skipping tick &mdash; still in {state}", calls <code>_schedule_tick()</code> again</li>
+        </ul>
+        After cooldown or error recovery, <code>_schedule_tick()</code> is called again to restart the cycle.
+        <br><br>
+        <strong>Manual requests:</strong>
+        <code>strategy.request_rebalance()</code> &rarr; <code>RebalanceFSM.request()</code> &rarr;
+        checks if state == IDLE, then calls <code>trigger("signal")</code>. Returns <code>False</code> if busy.
+    </div>
+
+    <h3>Public API</h3>
+    <table>
+        <tr><th>Method</th><th>Signature</th><th>Purpose</th></tr>
+        <tr><td><code>request</code></td><td><code>async request() -> bool</code></td><td>Request a manual rebalance cycle. Returns True if triggered (IDLE), False if busy.</td></tr>
+        <tr><td><code>start_timer</code></td><td><code>start_timer(interval_s: float)</code></td><td>Begin periodic rebalance ticks at the given interval.</td></tr>
+        <tr><td><code>stop_timer</code></td><td><code>stop_timer()</code></td><td>Cancel the periodic timer and signal <code>wait()</code> to return.</td></tr>
+        <tr><td><code>wait</code></td><td><code>async wait()</code></td><td>Block until <code>stop_timer()</code> is called. Used in <code>run_forever()</code>.</td></tr>
+        <tr><td><code>last_result</code></td><td><code>@property -> Optional[RebalanceResult]</code></td><td>The most recent rebalance result.</td></tr>
+    </table>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 3: OrderStatus FSM -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>3. OrderStatus FSM &mdash; Order Lifecycle Validation <span>Warn-mode, exchange-authoritative</span></h2>
+    <p class="desc">
+        The Order FSM validates <code>OrderStatus</code> transitions but operates in <strong>warn-mode</strong> &mdash;
+        illegal transitions are logged as warnings but still applied, because the exchange is the
+        source of truth. This is not a <code>BaseFSM</code> subclass; it uses a simple dict of valid transitions
+        and two standalone functions.
+    </p>
+    <p class="file-ref">core/order_fsm.py &mdash; validate_order_transition(), is_terminal() &bull; core/enums.py &mdash; class OrderStatus &bull; core/order.py &mdash; Order.transition_to()</p>
+
+    <h3>State Enum: <code>OrderStatus</code></h3>
+    <table>
+        <tr><th>State</th><th>Value</th><th>Description</th><th>Type</th></tr>
+        <tr><td><code>PENDING</code></td><td><code>"Pending"</code></td><td>Order created locally, not yet acknowledged by exchange.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>OPEN</code></td><td><code>"Open"</code></td><td>Order acknowledged by exchange and resting on the book (or pending execution for market orders).</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>PARTIALLY_FILLED</code></td><td><code>"PartiallyFilled"</code></td><td>Part of the order has been filled. Remaining quantity is still active.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>FILLED</code></td><td><code>"Filled"</code></td><td>Order completely filled. All quantity executed.</td><td><span class="tag-terminal">TERMINAL</span></td></tr>
+        <tr><td><code>CANCELLED</code></td><td><code>"Cancelled"</code></td><td>Order cancelled (by user, exchange, or expiration).</td><td><span class="tag-terminal">TERMINAL</span></td></tr>
+        <tr><td><code>REJECTED</code></td><td><code>"Rejected"</code></td><td>Order rejected by exchange (insufficient balance, invalid params, etc.).</td><td><span class="tag-terminal">TERMINAL</span></td></tr>
+    </table>
+
+    <h3>State Diagram</h3>
+    <div class="mermaid">
+        stateDiagram-v2
+            [*] --> PENDING
+
+            PENDING --> OPEN : exchange ACK
+            PENDING --> FILLED : instant fill (market order)
+            PENDING --> CANCELLED : cancelled before ACK
+            PENDING --> REJECTED : exchange rejection
+
+            OPEN --> PARTIALLY_FILLED : partial execution
+            OPEN --> FILLED : full execution
+            OPEN --> CANCELLED : user cancel / expiry
+
+            PARTIALLY_FILLED --> PARTIALLY_FILLED : additional partial fill
+            PARTIALLY_FILLED --> FILLED : remaining filled
+            PARTIALLY_FILLED --> CANCELLED : cancel remaining
+
+            FILLED --> [*]
+            CANCELLED --> [*]
+            REJECTED --> [*]
+    </div>
+
+    <h3>Valid Transition Table (<code>_VALID_TRANSITIONS</code>)</h3>
+    <table>
+        <tr><th>From State</th><th>Allowed To States</th><th>Notes</th></tr>
+        <tr>
+            <td><code>PENDING</code></td>
+            <td><code>OPEN</code>, <code>REJECTED</code>, <code>CANCELLED</code>, <code>FILLED</code></td>
+            <td>Market orders can fill instantly (PENDING &rarr; FILLED). Can be cancelled before exchange ACK.</td>
+        </tr>
+        <tr>
+            <td><code>OPEN</code></td>
+            <td><code>PARTIALLY_FILLED</code>, <code>FILLED</code>, <code>CANCELLED</code></td>
+            <td>Standard limit order lifecycle. Cannot return to PENDING.</td>
+        </tr>
+        <tr>
+            <td><code>PARTIALLY_FILLED</code></td>
+            <td><code>PARTIALLY_FILLED</code>, <code>FILLED</code>, <code>CANCELLED</code></td>
+            <td>Self-transition for additional partial fills. Can cancel remaining quantity.</td>
+        </tr>
+        <tr>
+            <td><code>FILLED</code></td>
+            <td><em>(none)</em></td>
+            <td><span class="tag-terminal">TERMINAL</span> &mdash; no further transitions allowed.</td>
+        </tr>
+        <tr>
+            <td><code>CANCELLED</code></td>
+            <td><em>(none)</em></td>
+            <td><span class="tag-terminal">TERMINAL</span> &mdash; no further transitions allowed.</td>
+        </tr>
+        <tr>
+            <td><code>REJECTED</code></td>
+            <td><em>(none)</em></td>
+            <td><span class="tag-terminal">TERMINAL</span> &mdash; no further transitions allowed.</td>
+        </tr>
+    </table>
+
+    <h3>Functions</h3>
+    <table>
+        <tr><th>Function</th><th>Signature</th><th>Purpose</th></tr>
+        <tr>
+            <td><code>validate_order_transition</code></td>
+            <td><code>validate_order_transition(current: OrderStatus, target: OrderStatus, order_id: str = "") -> bool</code></td>
+            <td>
+                Returns <code>True</code> if the transition is valid.<br>
+                Returns <code>True</code> for same-state transitions (harmless no-ops).<br>
+                Returns <code>False</code> and logs a WARNING for invalid transitions &mdash; the caller should still apply the change since the exchange is authoritative.
+            </td>
+        </tr>
+        <tr>
+            <td><code>is_terminal</code></td>
+            <td><code>is_terminal(status: OrderStatus) -> bool</code></td>
+            <td>Returns <code>True</code> if status is FILLED, CANCELLED, or REJECTED.</td>
+        </tr>
+    </table>
+
+    <h3>Integration with <code>Order</code> class</h3>
+    <div class="note-box">
+        <strong>Order.transition_to(new_status):</strong> Calls <code>validate_order_transition(self.status, new_status, self.id)</code>
+        before applying. Even if validation returns False, the status is updated because the exchange is the source of truth.<br><br>
+        <strong>Order.update_fill(filled_qty, fill_price):</strong> Updates <code>avg_fill_price</code> using weighted average,
+        updates <code>filled_qty</code>, and auto-transitions to <code>FILLED</code> if <code>filled_qty >= quantity</code>,
+        or <code>PARTIALLY_FILLED</code> otherwise.
+    </div>
+
+    <h3>Binance Status Mapping</h3>
+    <table>
+        <tr><th>Binance Status String</th><th>Elysian <code>OrderStatus</code></th></tr>
+        <tr><td><code>"NEW"</code></td><td><code>OrderStatus.OPEN</code></td></tr>
+        <tr><td><code>"PARTIALLY_FILLED"</code></td><td><code>OrderStatus.PARTIALLY_FILLED</code></td></tr>
+        <tr><td><code>"FILLED"</code></td><td><code>OrderStatus.FILLED</code></td></tr>
+        <tr><td><code>"CANCELED"</code></td><td><code>OrderStatus.CANCELLED</code></td></tr>
+        <tr><td><code>"PENDING_CANCEL"</code></td><td><code>OrderStatus.PENDING</code></td></tr>
+        <tr><td><code>"REJECTED"</code></td><td><code>OrderStatus.REJECTED</code></td></tr>
+        <tr><td><code>"EXPIRED"</code></td><td><code>OrderStatus.CANCELLED</code></td></tr>
+    </table>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 4: StrategyState -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>4. StrategyState &mdash; SpotStrategy Lifecycle <span>6-state linear progression</span></h2>
+    <p class="desc">
+        The <code>SpotStrategy</code> base class tracks its lifecycle via the <code>StrategyState</code> enum.
+        Transitions are managed implicitly (not via BaseFSM) through guard clauses in
+        <code>start()</code>, <code>stop()</code>, and <code>_mark_running()</code>. The state prevents
+        double-start, out-of-order operations, and misuse of the pipeline.
+    </p>
+    <p class="file-ref">core/enums.py &mdash; class StrategyState &bull; strategy/base_strategy.py &mdash; class SpotStrategy</p>
+
+    <h3>State Enum: <code>StrategyState</code></h3>
+    <table>
+        <tr><th>State</th><th>Description</th><th>Set By</th></tr>
+        <tr><td><code>CREATED</code></td><td>Strategy instance constructed. Not yet wired to EventBus or exchanges.</td><td><code>SpotStrategy.__init__()</code></td></tr>
+        <tr><td><code>STARTING</code></td><td>In the process of subscribing to EventBus and calling <code>on_start()</code>.</td><td><code>SpotStrategy.start()</code> entry</td></tr>
+        <tr><td><code>READY</code></td><td>All hooks subscribed, <code>on_start()</code> complete. Waiting for first event.</td><td><code>SpotStrategy.start()</code> exit</td></tr>
+        <tr><td><code>RUNNING</code></td><td>First event dispatched. Strategy is actively processing market data.</td><td><code>SpotStrategy._mark_running()</code></td></tr>
+        <tr><td><code>STOPPING</code></td><td>In the process of unsubscribing from EventBus and calling <code>on_stop()</code>.</td><td><code>SpotStrategy.stop()</code> entry</td></tr>
+        <tr><td><code>STOPPED</code></td><td>All hooks unsubscribed, executor shut down, <code>on_stop()</code> complete.</td><td><code>SpotStrategy.stop()</code> exit</td></tr>
+        <tr><td><code>FAILED</code></td><td>Reserved for fatal errors (not currently auto-set by base class).</td><td>Subclass or external</td></tr>
+    </table>
+
+    <h3>State Diagram</h3>
+    <div class="mermaid">
+        stateDiagram-v2
+            [*] --> CREATED
+
+            CREATED --> STARTING : start() called
+            STARTING --> READY : on_start() complete, hooks subscribed
+
+            READY --> RUNNING : first event dispatched (_mark_running)
+
+            RUNNING --> STOPPING : stop() called
+            READY --> STOPPING : stop() called (no events received)
+
+            STOPPING --> STOPPED : on_stop() complete, unsubscribed
+
+            CREATED --> FAILED : fatal error
+            STARTING --> FAILED : on_start() exception
+            READY --> FAILED : fatal error
+            RUNNING --> FAILED : fatal error
+
+            STOPPED --> [*]
+            FAILED --> [*]
+    </div>
+
+    <h3>Transition Details</h3>
+    <table>
+        <tr><th>Transition</th><th>Guard / Trigger</th><th>What Happens</th></tr>
+        <tr>
+            <td>CREATED &rarr; STARTING</td>
+            <td><code>start()</code> called; guard: <code>state != CREATED</code> &rarr; log warning and return</td>
+            <td>Sets <code>_state = STARTING</code>, gets event loop, subscribes to 5 EventType callbacks</td>
+        </tr>
+        <tr>
+            <td>STARTING &rarr; READY</td>
+            <td>End of <code>start()</code></td>
+            <td>Initializes <code>RebalanceFSM</code> if optimizer + engine both set. Calls <code>await on_start()</code>. Sets <code>_state = READY</code>.</td>
+        </tr>
+        <tr>
+            <td>READY &rarr; RUNNING</td>
+            <td><code>_mark_running()</code> on first event dispatch</td>
+            <td>Called from <code>_dispatch_kline()</code>. Transitions only if currently READY &mdash; single-shot.</td>
+        </tr>
+        <tr>
+            <td>RUNNING/READY &rarr; STOPPING</td>
+            <td><code>stop()</code> called; guard: <code>state == STOPPED</code> &rarr; return</td>
+            <td>Sets <code>_state = STOPPING</code>. Stops RebalanceFSM timer. Unsubscribes from all 5 EventTypes.</td>
+        </tr>
+        <tr>
+            <td>STOPPING &rarr; STOPPED</td>
+            <td>End of <code>stop()</code></td>
+            <td>Shuts down ProcessPoolExecutor. Calls <code>await on_stop()</code>. Sets <code>_state = STOPPED</code>.</td>
+        </tr>
+    </table>
+
+    <h3>State-Dependent Behavior</h3>
+    <table>
+        <tr><th>Operation</th><th>Required State</th><th>Behavior if Wrong State</th></tr>
+        <tr><td><code>start()</code></td><td>CREATED</td><td>Logs warning, returns immediately (no-op)</td></tr>
+        <tr><td><code>stop()</code></td><td>Any except STOPPED</td><td>Returns immediately if already STOPPED</td></tr>
+        <tr><td><code>submit_weights()</code></td><td>READY or RUNNING</td><td>Logs warning, returns <code>None</code></td></tr>
+        <tr><td><code>request_rebalance()</code></td><td>Any (delegates to FSM)</td><td>Returns <code>False</code> if no FSM configured</td></tr>
+    </table>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 5: RunnerState -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>5. RunnerState &mdash; StrategyRunner Lifecycle <span>8-state orchestration progression</span></h2>
+    <p class="desc">
+        The <code>StrategyRunner</code> tracks its lifecycle via <code>RunnerState</code>, progressing through
+        a strict initialization order. Each state corresponds to a phase in the <code>run()</code> method.
+        Transitions are imperative assignments (not FSM-driven), with error handling routing to FAILED.
+    </p>
+    <p class="file-ref">core/enums.py &mdash; class RunnerState &bull; run_strategy.py &mdash; class StrategyRunner</p>
+
+    <h3>State Enum: <code>RunnerState</code></h3>
+    <table>
+        <tr><th>State</th><th>Description</th><th>Phase in <code>run()</code></th></tr>
+        <tr><td><code>CREATED</code></td><td>Runner constructed, configs loaded, 8 client managers instantiated.</td><td><code>__init__()</code></td></tr>
+        <tr><td><code>CONFIGURING</code></td><td>Loading trading pairs from config.json, creating EventBus.</td><td><code>_setup_config()</code></td></tr>
+        <tr><td><code>CONNECTING</code></td><td>Creating exchange instances, injecting EventBus into client managers.</td><td><code>_setup_exchanges()</code></td></tr>
+        <tr><td><code>SYNCING</code></td><td>Full pipeline setup: Portfolio sync, Optimizer creation, ExecutionEngine wiring.</td><td><code>_setup_pipeline()</code></td></tr>
+        <tr><td><code>RUNNING</code></td><td>Main event loop active: data feeds + strategy.run_forever() via asyncio.gather.</td><td><code>asyncio.gather()</code></td></tr>
+        <tr><td><code>STOPPING</code></td><td>Shutting down: exchange cleanup, portfolio stop, strategy stop.</td><td><code>finally</code> block</td></tr>
+        <tr><td><code>STOPPED</code></td><td>All components shut down cleanly.</td><td>After <code>_cleanup()</code></td></tr>
+        <tr><td><code>FAILED</code></td><td>Unrecoverable error during any phase.</td><td><code>except Exception</code></td></tr>
+    </table>
+
+    <h3>State Diagram</h3>
+    <div class="mermaid">
+        stateDiagram-v2
+            [*] --> CREATED
+
+            CREATED --> CONFIGURING : run() called
+            CONFIGURING --> CONNECTING : _setup_config() done, EventBus created
+            CONNECTING --> SYNCING : exchanges created, strategy wired and started
+
+            note right of SYNCING
+                _setup_pipeline():
+                1. portfolio.sync_from_exchange()
+                2. portfolio.start(event_bus)
+                3. Create PortfolioOptimizer
+                4. Create ExecutionEngine
+                5. RebalanceFSM auto-created
+            end note
+
+            SYNCING --> RUNNING : pipeline wired, asyncio.gather() entered
+
+            RUNNING --> STOPPING : gather() returns or CancelledError
+            STOPPING --> STOPPED : cleanup complete
+
+            CREATED --> FAILED : exception
+            CONFIGURING --> FAILED : exception
+            CONNECTING --> FAILED : exception
+            SYNCING --> FAILED : exception
+            RUNNING --> FAILED : exception
+
+            STOPPED --> [*]
+            FAILED --> [*]
+    </div>
+
+    <h3>Transition Details</h3>
+    <table>
+        <tr><th>Transition</th><th>Trigger</th><th>Key Actions</th></tr>
+        <tr>
+            <td>CREATED &rarr; CONFIGURING</td>
+            <td><code>run(strategy)</code> entry</td>
+            <td><code>_setup_config()</code>: loads token pairs from config.json. Creates <code>EventBus()</code>.</td>
+        </tr>
+        <tr>
+            <td>CONFIGURING &rarr; CONNECTING</td>
+            <td>Config complete</td>
+            <td><code>_setup_exchanges()</code>: creates BinanceSpotExchange with API keys, kline/OB managers. Injects EventBus into managers. Wires strategy's <code>_event_bus</code>, <code>_exchanges</code>, <code>args</code>, <code>config_json</code>. Calls <code>strategy.start()</code>.</td>
+        </tr>
+        <tr>
+            <td>CONNECTING &rarr; SYNCING</td>
+            <td>Exchange <code>run()</code> complete</td>
+            <td><code>exchange.run()</code>: creates AsyncClient, calls <code>get_exchange_info()</code>, <code>refresh_balances()</code>, starts user data stream. Then <code>_setup_pipeline()</code> begins.</td>
+        </tr>
+        <tr>
+            <td>SYNCING &rarr; RUNNING</td>
+            <td>Pipeline wired</td>
+            <td><code>asyncio.gather()</code> with <code>_setup_binance_data_feeds()</code>, <code>strategy.run_forever()</code>, and optional snapshot task.</td>
+        </tr>
+        <tr>
+            <td>RUNNING &rarr; STOPPING</td>
+            <td><code>finally</code> block in <code>run()</code></td>
+            <td>Stops snapshot task, calls <code>exchange.cleanup()</code>, <code>portfolio.stop()</code>, <code>strategy.stop()</code>.</td>
+        </tr>
+        <tr>
+            <td>STOPPING &rarr; STOPPED</td>
+            <td>Cleanup complete</td>
+            <td><code>_cleanup([])</code>: stops all 8 client managers, cancels remaining tasks.</td>
+        </tr>
+        <tr>
+            <td>Any &rarr; FAILED</td>
+            <td>Unhandled exception</td>
+            <td>Logs fatal error with traceback. Re-raises exception. <code>_cleanup()</code> still runs in finally.</td>
+        </tr>
+    </table>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 6: Portfolio Lifecycle -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>6. Portfolio Lifecycle <span>Sync &rarr; event-driven &rarr; stopped</span></h2>
+    <p class="desc">
+        The Portfolio does not use a formal state enum but follows a clear lifecycle:
+        empty &rarr; synced from exchange &rarr; event-driven (auto-updating) &rarr; stopped.
+        It tracks positions, cash, risk metrics, and trade history.
+    </p>
+    <p class="file-ref">core/portfolio.py &mdash; class Portfolio &bull; core/position.py &mdash; class Position</p>
+
+    <h3>Lifecycle Flow</h3>
+    <div class="mermaid">
+        graph TD
+            A["Portfolio#40;initial_cash=0#41;\nEmpty state"] -->|"sync_from_exchange#40;exchange, venue, feeds#41;"| B
+
+            B["Synced\n1. _cash_dict from USDT/USDC/BUSD balances\n2. _cash = sum#40;_cash_dict#41;\n3. _positions from non-stable balances\n   entry_price from feed.latest_price\n4. _mark_prices from feeds\n5. _nav recomputed"]
+
+            B -->|"start#40;event_bus, feeds#41;\nsubscribe KLINE + BALANCE_UPDATE"| C
+
+            C["Event-Driven\nAuto-updating via EventBus"]
+
+            C -->|"KlineEvent received"| D["_on_kline#40;event#41;\n1. _mark_prices#91;symbol#93; = kline.close\n2. _nav = _cash + sum#40;pos.qty * mark_price#41;\n3. _weights#91;sym#93; = #40;pos.qty * price#41; / _nav\n4. if _nav gt _peak_equity:\n     _peak_equity = _nav\n5. dd = #40;_peak_equity - _nav#41; / _peak_equity\n   if dd gt _max_drawdown:\n     _max_drawdown = dd"]
+            D --> C
+
+            C -->|"BalanceUpdateEvent received"| E["_on_balance#40;event#41;\nif event.asset in STABLECOINS:\n  _cash_dict#91;asset#93; += event.delta\n  _cash = sum#40;_cash_dict.values#40;#41;#41;"]
+            E --> C
+
+            C -->|"update_position#40;symbol, qty_delta, price, ...#41;"| F
+
+            F["update_position\nif same direction as existing:\n  VWAP: new_avg = #40;old_qty*old_price + delta*price#41;\n                  / #40;old_qty + delta#41;\nif opposite direction:\n  closed_qty = min#40;abs#40;delta#41;, abs#40;pos.qty#41;#41;\n  pnl = closed_qty * #40;price - entry#41;\n  _total_realized_pnl += pnl\nRecord Fill to _fills deque\nRefresh _nav + _weights"]
+            F --> C
+
+            C -->|"stop#40;#41;"| G["Stopped\nunsubscribe KLINE + BALANCE_UPDATE\n_event_bus = None"]
+
+            style A fill:#1a1a2e,stroke:#888,color:#ccc
+            style B fill:#0a1a1a,stroke:#6bffff,color:#6bffff
+            style C fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
+            style D fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
+            style E fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
+            style F fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
+            style G fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b
+    </div>
+
+    <h3>Position State</h3>
+    <table>
+        <tr><th>Property</th><th>Type</th><th>Computed From</th></tr>
+        <tr><td><code>is_flat()</code></td><td><code>bool</code></td><td><code>quantity == 0</code></td></tr>
+        <tr><td><code>is_long()</code></td><td><code>bool</code></td><td><code>quantity > 0</code></td></tr>
+        <tr><td><code>is_short()</code></td><td><code>bool</code></td><td><code>quantity < 0</code></td></tr>
+        <tr><td><code>unrealized_pnl(mark_price)</code></td><td><code>float</code></td><td><code>quantity * (mark_price - avg_entry_price)</code></td></tr>
+        <tr><td><code>total_pnl(mark_price)</code></td><td><code>float</code></td><td><code>realized_pnl + unrealized_pnl</code></td></tr>
+        <tr><td><code>net_pnl(mark_price)</code></td><td><code>float</code></td><td><code>total_pnl - total_commission</code></td></tr>
+    </table>
+
+    <h3>Portfolio Risk Metrics</h3>
+    <table>
+        <tr><th>Metric</th><th>Field</th><th>Updated By</th></tr>
+        <tr><td>Net Asset Value</td><td><code>_nav</code></td><td><code>_on_kline()</code> &mdash; cash + sum(qty * mark_price)</td></tr>
+        <tr><td>Peak Equity</td><td><code>_peak_equity</code></td><td><code>_on_kline()</code> &mdash; max(_peak_equity, _nav)</td></tr>
+        <tr><td>Maximum Drawdown</td><td><code>_max_drawdown</code></td><td><code>_on_kline()</code> &mdash; max(_max_drawdown, (peak - nav) / peak)</td></tr>
+        <tr><td>Total Realized PnL</td><td><code>_total_realized_pnl</code></td><td><code>update_position()</code> on opposite-direction fills</td></tr>
+        <tr><td>Total Commission</td><td><code>_total_commission</code></td><td><code>update_position()</code> accumulates per-fill commission</td></tr>
+        <tr><td>Cash Weight</td><td>Computed</td><td><code>_cash / _nav</code></td></tr>
+        <tr><td>Gross Exposure</td><td>Computed</td><td><code>sum(abs(weight) for weight in _weights.values())</code></td></tr>
+    </table>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 7: Data Feed Lifecycle -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>7. Data Feed &amp; Client Manager Lifecycle <span>WebSocket multiplex architecture</span></h2>
+    <p class="desc">
+        Each <code>AbstractClientManager</code> manages a single multiplexed WebSocket connection for all
+        symbols of one data type (kline or orderbook) on one venue. The lifecycle involves
+        creating feeds, registering them, starting the WebSocket, then running reader + worker tasks.
+    </p>
+    <p class="file-ref">connectors/base.py &mdash; AbstractClientManager, AbstractDataFeed</p>
+
+    <h3>Client Manager Lifecycle</h3>
+    <div class="mermaid">
+        graph TD
+            A["ClientManager#40;#41;\nEmpty, no feeds"] -->|"register_feed#40;feed#41;\nfor each symbol"| B["Feeds Registered\n_active_feeds populated"]
+            B -->|"set_event_bus#40;bus#41;"| C["EventBus Injected"]
+            C -->|"start#40;#41;\nCreate WebSocket connection"| D["WebSocket Connected\nBuffering events"]
+            D -->|"run_multiplex_feeds#40;#41;\nSpawn reader + 4 workers"| E["Running\nReader: WS -> Queue\nWorkers: Queue -> Feed + EventBus"]
+            E -->|"stop#40;#41;"| F["Stopped\nTasks cancelled"]
+
+            style A fill:#1a1a2e,stroke:#888,color:#ccc
+            style E fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
+            style F fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b
+    </div>
+
+    <h3>Feed Internal State</h3>
+    <table>
+        <tr><th>State</th><th>Field</th><th>Description</th></tr>
+        <tr><td>Current Data</td><td><code>_data: OrderBook</code></td><td>Latest orderbook state (SortedDict bids/asks)</td></tr>
+        <tr><td>Volatility</td><td><code>_vol: float</code></td><td>60-second rolling annualized volatility</td></tr>
+        <tr><td>Price History</td><td><code>_historical: deque(maxlen=60)</code></td><td>Last 60 mid-price samples (1/sec via <code>update_current_stats()</code>)</td></tr>
+        <tr><td>OB History</td><td><code>_historical_ob: deque(maxlen=60)</code></td><td>Last 60 OrderBook snapshots</td></tr>
+    </table>
+
+    <h3>All 8 Client Managers in the System</h3>
+    <table>
+        <tr><th>Manager</th><th>Venue</th><th>Data Type</th><th>Feed Class</th><th>WS Interval</th></tr>
+        <tr><td><code>BinanceKlineClientManager</code></td><td>Binance Spot</td><td>Kline</td><td><code>BinanceKlineFeed</code></td><td>1s</td></tr>
+        <tr><td><code>BinanceOrderBookClientManager</code></td><td>Binance Spot</td><td>Order Book</td><td><code>BinanceOrderBookFeed</code></td><td>100ms</td></tr>
+        <tr><td><code>BinanceFuturesKlineClientManager</code></td><td>Binance Futures</td><td>Kline</td><td><code>BinanceFuturesKlineFeed</code></td><td>1m</td></tr>
+        <tr><td><code>BinanceFuturesOrderBookClientManager</code></td><td>Binance Futures</td><td>Order Book</td><td><code>BinanceFuturesOrderBookFeed</code></td><td>100ms</td></tr>
+        <tr><td><code>AsterKlineClientManager</code></td><td>Aster Spot</td><td>Kline</td><td><code>AsterKlineFeed</code></td><td>1s</td></tr>
+        <tr><td><code>AsterOrderBookClientManager</code></td><td>Aster Spot</td><td>Order Book</td><td><code>AsterOrderBookFeed</code></td><td>100ms</td></tr>
+        <tr><td><code>AsterPerpKlineClientManager</code></td><td>Aster Perp</td><td>Kline</td><td><code>AsterPerpKlineFeed</code></td><td>1s</td></tr>
+        <tr><td><code>AsterPerpOrderBookClientManager</code></td><td>Aster Perp</td><td>Order Book</td><td><code>AsterPerpOrderBookFeed</code></td><td>100ms</td></tr>
+    </table>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 8: Complete State Interaction Map -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>8. Complete State Interaction Map <span>How all state machines interact</span></h2>
+    <p class="desc">
+        This diagram shows how the four major state systems interact through the EventBus
+        and direct method calls. The StrategyRunner orchestrates initialization; the RebalanceFSM
+        drives the pipeline; the Portfolio and Order FSMs react to market events.
+    </p>
+    <div class="mermaid">
+        graph TB
+            subgraph Runner["StrategyRunner (RunnerState)"]
+                RS1["CREATED"]
+                RS2["CONFIGURING"]
+                RS3["CONNECTING"]
+                RS4["SYNCING"]
+                RS5["RUNNING"]
+                RS6["STOPPING"]
+                RS7["STOPPED"]
+                RS1 --> RS2 --> RS3 --> RS4 --> RS5 --> RS6 --> RS7
+            end
+
+            subgraph Strategy["SpotStrategy (StrategyState)"]
+                SS1["CREATED"]
+                SS2["STARTING"]
+                SS3["READY"]
+                SS4["RUNNING"]
+                SS5["STOPPING"]
+                SS6["STOPPED"]
+                SS1 --> SS2 --> SS3 --> SS4 --> SS5 --> SS6
+            end
+
+            subgraph Rebalance["RebalanceFSM (RebalanceState)"]
+                RB1["IDLE"]
+                RB2["COMPUTING"]
+                RB3["VALIDATING"]
+                RB4["EXECUTING"]
+                RB5["COOLDOWN"]
+                RB6["ERROR"]
+                RB7["SUSPENDED"]
+                RB1 --> RB2 --> RB3 --> RB4 --> RB5 --> RB1
+                RB4 --> RB6 --> RB1
+            end
+
+            subgraph Orders["Order FSM (OrderStatus)"]
+                OS1["PENDING"]
+                OS2["OPEN"]
+                OS3["PARTIALLY_FILLED"]
+                OS4["FILLED"]
+                OS5["CANCELLED"]
+                OS1 --> OS2 --> OS3 --> OS4
+            end
+
+            RS3 -->|"strategy.start#40;#41;"| SS1
+            RS4 -->|"creates RebalanceFSM"| RB1
+            SS4 -->|"request_rebalance#40;#41;\nor timer_tick"| RB1
+            RB4 -->|"engine.execute#40;#41;\nplace_market_order"| OS1
+            RB4 -->|"RebalanceCompleteEvent"| SS4
+            OS4 -->|"OrderUpdateEvent"| SS4
+
+            style Runner fill:#0a0a1a,stroke:#4a9eff,color:#4a9eff
+            style Strategy fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
+            style Rebalance fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
+            style Orders fill:#1a0a1a,stroke:#ff6bff,color:#ff6bff
+    </div>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 9: PeriodicTask -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>9. PeriodicTask <span>Utility for recurring background work</span></h2>
+    <p class="desc">
+        <code>PeriodicTask</code> is a lightweight utility that replaces bare <code>while True + asyncio.sleep()</code>
+        loops. It runs a callback (sync or async) at a fixed interval as a background asyncio task.
+        Used for portfolio snapshots and balance monitoring.
+    </p>
+    <p class="file-ref">core/fsm.py &mdash; class PeriodicTask</p>
+
+    <h3>Lifecycle</h3>
+    <div class="mermaid">
+        graph LR
+            A["PeriodicTask#40;callback, interval_s#41;"] -->|"start#40;#41;"| B["Running\nbackground asyncio.Task\nwhile True:\n  sleep#40;interval#41;\n  callback#40;#41;"]
+            B -->|"stop#40;#41;\ntask.cancel#40;#41;"| C["Stopped\n_task = None"]
+            B -->|"exception in callback"| D["Error logged\nloop continues"]
+            D --> B
+
+            style B fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
+            style C fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b
+    </div>
+
+    <table>
+        <tr><th>Method</th><th>Signature</th><th>Purpose</th></tr>
+        <tr><td><code>start</code></td><td><code>start() -> None</code></td><td>Creates background <code>asyncio.Task</code> running the loop. No-op if already running.</td></tr>
+        <tr><td><code>stop</code></td><td><code>stop() -> None</code></td><td>Cancels the background task. Sets <code>_task = None</code>.</td></tr>
+        <tr><td><code>running</code></td><td><code>@property -> bool</code></td><td><code>True</code> if task exists and is not done.</td></tr>
+    </table>
+
+    <h3>Usage Instances in the System</h3>
+    <table>
+        <tr><th>Instance</th><th>Callback</th><th>Interval</th><th>Created By</th></tr>
+        <tr><td>Portfolio Snapshot</td><td><code>portfolio.save_snapshot()</code></td><td><code>args.portfolio.snapshot_interval_s</code></td><td><code>StrategyRunner._start_snapshot_task()</code></td></tr>
+        <tr><td>Balance Monitor</td><td><code>exchange.refresh_balances()</code></td><td>Configurable</td><td><code>SpotExchangeConnector.monitor_balances()</code></td></tr>
+        <tr><td>Feed Stats</td><td><code>feed.update_current_stats()</code></td><td>1s</td><td><code>AbstractDataFeed</code> (internal)</td></tr>
+    </table>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 10: Summary Matrix -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>10. Summary Matrix <span>All state machines at a glance</span></h2>
+
+    <table>
+        <tr><th>FSM</th><th>Enum</th><th>States</th><th>Terminal States</th><th>Mechanism</th><th>File</th></tr>
+        <tr>
+            <td><strong>RebalanceFSM</strong></td>
+            <td><code>RebalanceState</code></td>
+            <td>7: IDLE, COMPUTING, VALIDATING, EXECUTING, COOLDOWN, SUSPENDED, ERROR</td>
+            <td>None (all states can transition)</td>
+            <td><code>BaseFSM</code> subclass with transition table + callbacks</td>
+            <td><code>core/rebalance_fsm.py</code></td>
+        </tr>
+        <tr>
+            <td><strong>Order FSM</strong></td>
+            <td><code>OrderStatus</code></td>
+            <td>6: PENDING, OPEN, PARTIALLY_FILLED, FILLED, CANCELLED, REJECTED</td>
+            <td>FILLED, CANCELLED, REJECTED</td>
+            <td>Dict-based validation (warn-mode), standalone functions</td>
+            <td><code>core/order_fsm.py</code></td>
+        </tr>
+        <tr>
+            <td><strong>Strategy Lifecycle</strong></td>
+            <td><code>StrategyState</code></td>
+            <td>7: CREATED, STARTING, READY, RUNNING, STOPPING, STOPPED, FAILED</td>
+            <td>STOPPED, FAILED</td>
+            <td>Imperative assignments with guard clauses</td>
+            <td><code>strategy/base_strategy.py</code></td>
+        </tr>
+        <tr>
+            <td><strong>Runner Lifecycle</strong></td>
+            <td><code>RunnerState</code></td>
+            <td>8: CREATED, CONFIGURING, CONNECTING, SYNCING, RUNNING, STOPPING, STOPPED, FAILED</td>
+            <td>STOPPED, FAILED</td>
+            <td>Imperative assignments in <code>run()</code></td>
+            <td><code>run_strategy.py</code></td>
+        </tr>
+    </table>
+
+</div>
+</body>
+</html>

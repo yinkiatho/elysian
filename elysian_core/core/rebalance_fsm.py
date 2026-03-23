@@ -1,10 +1,17 @@
 """
 Rebalance cycle state machine.
 
-Replaces ``while True`` + ``asyncio.sleep()`` loops in strategies with an
-explicit FSM that drives the **compute -> validate -> execute -> cooldown**
-pipeline.  Each tick transitions through the states; the strategy only needs
-to implement ``_compute_weights()`` and configure a timer interval.
+Drives the **compute -> validate -> execute -> cooldown** pipeline as a pure
+state machine.  The FSM does **not** own any timer or scheduling logic — the
+strategy decides *when* to trigger a cycle (timer-based, event-driven, or
+both) by calling :meth:`request`.
+
+Context flows through each stage via ``**ctx``.  Each callback enriches
+``ctx`` with its output so downstream stages have full pipeline context:
+
+- ``_on_enter_computing``  → adds ``ctx["target_weights"]``
+- ``_on_enter_validating`` → adds ``ctx["validated_weights"]``
+- ``_on_enter_executing``  → adds ``ctx["rebalance_result"]``
 
 Integrates with the EventBus to publish :class:`RebalanceCycleEvent` on
 every state transition for observability.
@@ -20,17 +27,21 @@ Usage (inside a SpotStrategy subclass)::
         cooldown_s=60.0,
     )
 
-    # In run_forever():
-    await asyncio.sleep(20)          # initial warmup
-    self._rebalance_fsm.start_timer(interval_s=60.0)
-    await self._rebalance_fsm.wait()  # block until stopped
+    # Event-driven — call from on_kline / on_orderbook:
+    await self._rebalance_fsm.request(**ctx)
+
+    # Timer-driven — use PeriodicTask or asyncio loop in run_forever():
+    async def run_forever(self):
+        while not self._stop_event.is_set():
+            await asyncio.sleep(60)
+            await self.request_rebalance()
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 import elysian_core.utils.logger as log
 
 from elysian_core.core.enums import RebalanceState
@@ -38,9 +49,11 @@ from elysian_core.core.fsm import BaseFSM
 from elysian_core.core.events import EventType, RebalanceCycleEvent, RebalanceCompleteEvent
 from elysian_core.core.signals import RebalanceResult, TargetWeights
 
-from elysian_core.core.event_bus import EventBus
-from elysian_core.execution.engine import ExecutionEngine
-from elysian_core.risk.optimizer import PortfolioOptimizer
+
+if TYPE_CHECKING:
+    from elysian_core.core.event_bus import EventBus
+    from elysian_core.execution.engine import ExecutionEngine
+    from elysian_core.risk.optimizer import PortfolioOptimizer
 
 logger = log.setup_custom_logger("root")
 
@@ -48,10 +61,13 @@ logger = log.setup_custom_logger("root")
 class RebalanceFSM(BaseFSM):
     """Drives the rebalance cycle: compute -> validate -> execute -> cooldown.
 
+    This is a **pure state machine** — it does not own any timer or scheduling.
+    The strategy controls *when* to trigger cycles by calling :meth:`request`.
+
     Parameters
     ----------
     strategy:
-        The strategy instance. Must implement ``_compute_weights() -> dict``.
+        The strategy instance. Must implement ``compute_weights(**ctx) -> dict``.
     optimizer:
         Stage 4 risk optimizer.
     execution_engine:
@@ -65,8 +81,7 @@ class RebalanceFSM(BaseFSM):
     """
 
     _TRANSITIONS = {
-        # Normal cycle
-        (RebalanceState.IDLE,       "timer_tick"):    (RebalanceState.COMPUTING,  "_on_enter_computing"),
+        # Normal cycle — only "signal" enters COMPUTING from IDLE
         (RebalanceState.IDLE,       "signal"):        (RebalanceState.COMPUTING,  "_on_enter_computing"),
         (RebalanceState.COMPUTING,  "weights_ready"): (RebalanceState.VALIDATING, "_on_enter_validating"),
         (RebalanceState.COMPUTING,  "no_signal"):     (RebalanceState.IDLE,       None),
@@ -87,7 +102,7 @@ class RebalanceFSM(BaseFSM):
         optimizer: "PortfolioOptimizer",
         execution_engine: "ExecutionEngine",
         event_bus: Optional["EventBus"] = None,
-        cooldown_s: float = 0.0,  # Default no cooldown
+        cooldown_s: float = 0.0,
         name: str = "RebalanceFSM",
     ):
         super().__init__(
@@ -100,20 +115,16 @@ class RebalanceFSM(BaseFSM):
         self._execution_engine = execution_engine
         self._cooldown_s = cooldown_s
 
-        # Internal bookkeeping
-        self._timer_handle: Optional[asyncio.TimerHandle] = None
-        self._timer_interval: Optional[float] = None
-        self._stopped = asyncio.Event()
+        # Most recent rebalance result for inspection
         self._last_result: Optional[RebalanceResult] = None
-
-        # Temporary storage passed between transition callbacks
-        self._pending_weights: Optional[Dict[str, float]] = None
-        self._pending_validated = None
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
-    async def request(self) -> bool:
+    async def request(self, **ctx) -> bool:
         """Request a rebalance cycle. Safe to call at any time.
+
+        Any keyword arguments are forwarded as context through the entire
+        pipeline (compute -> validate -> execute -> cooldown).
 
         Returns ``True`` if the cycle was triggered (FSM was IDLE).
         Returns ``False`` if the FSM is busy (mid-cycle, cooldown,
@@ -125,73 +136,27 @@ class RebalanceFSM(BaseFSM):
                 self._name, self._state.name,
             )
             return False
-        await self.trigger("signal")
+        await self.trigger("signal", **ctx)
         return True
-
-    # ── Timer management ──────────────────────────────────────────────────────
-
-    def start_timer(self, interval_s: float) -> None:
-        """Begin periodic rebalance ticks at *interval_s* intervals."""
-        self._timer_interval = interval_s
-        self._schedule_tick()
-        logger.info("[%s] Timer started (every %.1fs)", self._name, interval_s)
-
-    def stop_timer(self) -> None:
-        """Stop the periodic timer and signal ``wait()`` to return."""
-        if self._timer_handle is not None:
-            self._timer_handle.cancel()
-            self._timer_handle = None
-        self._timer_interval = None
-        self._stopped.set()
-        logger.info("[%s] Timer stopped", self._name)
-
-    async def wait(self) -> None:
-        """Block until :meth:`stop_timer` is called. Use in ``run_forever``."""
-        await self._stopped.wait()
-
-    def _schedule_tick(self) -> None:
-        """Schedule the next timer tick."""
-        if self._timer_interval is None:
-            return
-        loop = asyncio.get_event_loop()
-        self._timer_handle = loop.call_later(
-            self._timer_interval, self._fire_tick,
-        )
-
-    def _fire_tick(self) -> None:
-        """Callback from ``call_later`` — create a task to run the trigger."""
-        if self._state == RebalanceState.IDLE:
-            asyncio.ensure_future(self._tick())
-        else:
-            # Not idle (still executing a previous cycle) — skip this tick.
-            logger.debug(
-                "[%s] Skipping tick — still in %s", self._name, self._state.name,
-            )
-            self._schedule_tick()
-
-    async def _tick(self) -> None:
-        """Run one full rebalance cycle via trigger chain."""
-        try:
-            await self.trigger("timer_tick")
-        except Exception as e:
-            logger.error("[%s] Tick error: %s", self._name, e, exc_info=True)
 
     # ── Transition callbacks ──────────────────────────────────────────────────
 
     async def _on_enter_computing(self, **ctx) -> None:
         """Compute target weights by calling the strategy's compute_weights().
 
-        The strategy must implement ``compute_weights()`` (public method).
+        The strategy must implement ``compute_weights(**ctx)`` (public method).
         It can be sync or async:
 
         - **sync**: return a ``dict[str, float]`` of target weights
         - **async**: ``await`` feeds, exchanges, or heavy compute, then return weights
 
         Return an empty dict or ``None`` to skip this cycle (transitions to IDLE).
+
+        Enriches ctx with ``target_weights`` for downstream stages.
         """
-        await self._publish_cycle_event("timer_tick")   #### why is this necessary?
+        await self._publish_cycle_event("signal", **ctx)
         try:
-            result = self._strategy.compute_weights(**ctx)   # Pass the **ctx so that the function has context to compute weights from? 
+            result = self._strategy.compute_weights(**ctx)
             if asyncio.iscoroutine(result):
                 weights = await result
             else:
@@ -206,23 +171,27 @@ class RebalanceFSM(BaseFSM):
             await self.trigger("no_signal", **ctx)
             return
 
-        self._pending_weights = weights
+        ctx["target_weights"] = weights
         logger.info("[%s] Weights computed: %d symbols", self._name, len(weights))
         await self.trigger("weights_ready", **ctx)
 
     async def _on_enter_validating(self, **ctx) -> None:
-        """Run Stage 4 risk validation. Transitioned from on_enter_computing to validating the weights here"""
-        
-        await self._publish_cycle_event("weights_ready")
+        """Run Stage 4 risk validation.
 
+        Reads ``ctx["target_weights"]`` from the computing stage.
+        Enriches ctx with ``validated_weights`` for the executing stage.
+        """
+        await self._publish_cycle_event("weights_ready", **ctx)
+
+        weights = ctx.get("target_weights", {})
         target = TargetWeights(
-            weights=self._pending_weights,
+            weights=weights,
             timestamp=int(time.time() * 1000),
             metadata={},
         )
 
         try:
-            validated = self._optimizer.validate(target, **ctx)   ### New updated context to be reutrned as well? 
+            validated = self._optimizer.validate(target, **ctx)
         except Exception as e:
             logger.error("[%s] optimizer.validate error: %s", self._name, e, exc_info=True)
             await self.trigger("rejected", **ctx)
@@ -235,7 +204,7 @@ class RebalanceFSM(BaseFSM):
             await self.trigger("rejected", **ctx)
             return
 
-        self._pending_validated = validated
+        ctx["validated_weights"] = validated
         logger.info(
             "[%s] Stage 4 passed: %d symbols after risk adjustment",
             self._name, len(validated.weights),
@@ -243,66 +212,70 @@ class RebalanceFSM(BaseFSM):
         await self.trigger("accepted", **ctx)
 
     async def _on_enter_executing(self, **ctx) -> None:
-        """Run Stage 5 execution."""
-        await self._publish_cycle_event("accepted")
+        """Run Stage 5 execution.
 
+        Reads ``ctx["validated_weights"]`` from the validating stage.
+        Enriches ctx with ``rebalance_result``.
+        """
+        await self._publish_cycle_event("accepted", **ctx)
+
+        validated = ctx.get("validated_weights")
         try:
-            result = await self._execution_engine.execute(self._pending_validated, **ctx)  # Return out fresh context as well here 
+            result = await self._execution_engine.execute(validated, **ctx)
         except Exception as e:
             logger.error("[%s] execution_engine.execute error: %s", self._name, e, exc_info=True)
-            await self.trigger("failed", error=e)
+            await self.trigger("failed", error=e, **ctx)
             return
 
         self._last_result = result
+        ctx["rebalance_result"] = result
         logger.info(
             "[%s] Rebalance result: %d submitted, %d failed",
             self._name, result.submitted, result.failed,
         )
 
-        # Publish the existing RebalanceCompleteEvent for backward compat
+        # Publish RebalanceCompleteEvent for strategy hooks
         if self._event_bus:
             await self._event_bus.publish(RebalanceCompleteEvent(
                 result=result,
-                validated_weights=self._pending_validated,
+                validated_weights=validated,
                 timestamp=int(time.time() * 1000),
             ))
 
         await self.trigger("complete", **ctx)
 
     async def _on_enter_cooldown(self, **ctx) -> None:
-        """Schedule a timer to exit cooldown after the configured duration."""
-        await self._publish_cycle_event("cooldown")
+        """Wait for the configured cooldown duration then return to IDLE."""
+        await self._publish_cycle_event("cooldown", **ctx)
 
-        # Clean up temp state
-        self._pending_weights = None
-        self._pending_validated = None
-
-        loop = asyncio.get_event_loop()
-        loop.call_later(self._cooldown_s, self._fire_cooldown_done, **ctx)
-
-    def _fire_cooldown_done(self, **ctx) -> None:
-        """Exit cooldown and schedule the next tick."""
-        asyncio.ensure_future(self._end_cooldown(**ctx))
-
-    async def _end_cooldown(self, **ctx) -> None:
-        try:
+        if self._cooldown_s > 0:
+            loop = asyncio.get_event_loop()
+            loop.call_later(self._cooldown_s, self._fire_cooldown_done)
+        else:
+            # No cooldown — immediately transition back to IDLE
             await self.trigger("cooldown_done", **ctx)
+
+    def _fire_cooldown_done(self) -> None:
+        """Callback from ``call_later`` — create a task to exit cooldown."""
+        asyncio.ensure_future(self._end_cooldown())
+
+    async def _end_cooldown(self) -> None:
+        try:
+            await self.trigger("cooldown_done")
         except Exception as e:
             logger.error("[%s] cooldown_done error: %s", self._name, e, exc_info=True)
-        # Re-schedule the periodic tick now that we're back in IDLE
-        self._schedule_tick()
 
     async def _on_enter_error(self, error=None, **ctx) -> None:
         """Log the error. Auto-retry after cooldown period."""
-        await self._publish_cycle_event("failed")
+        await self._publish_cycle_event("failed", **ctx)
         logger.error("[%s] Entered ERROR state: %s", self._name, error)
 
-        self._pending_weights = None
-        self._pending_validated = None
-
         # Auto-retry after cooldown
-        loop = asyncio.get_event_loop()
-        loop.call_later(self._cooldown_s, self._fire_retry)
+        if self._cooldown_s > 0:
+            loop = asyncio.get_event_loop()
+            loop.call_later(self._cooldown_s, self._fire_retry)
+        else:
+            await self.trigger("retry")
 
     def _fire_retry(self) -> None:
         asyncio.ensure_future(self._do_retry())
@@ -312,24 +285,16 @@ class RebalanceFSM(BaseFSM):
             await self.trigger("retry")
         except Exception as e:
             logger.error("[%s] retry error: %s", self._name, e, exc_info=True)
-        self._schedule_tick()
 
     async def _on_enter_suspended(self, **ctx) -> None:
-        """Pause all rebalancing. Timer ticks stop."""
-        await self._publish_cycle_event("suspend")
-        if self._timer_handle is not None:
-            self._timer_handle.cancel()
-            self._timer_handle = None
-        self._pending_weights = None
-        self._pending_validated = None
+        """Pause all rebalancing."""
+        await self._publish_cycle_event("suspend", **ctx)
         logger.warning("[%s] SUSPENDED — rebalancing paused", self._name)
 
     async def _on_resume(self, **ctx) -> None:
         """Resume rebalancing from SUSPENDED."""
-        await self._publish_cycle_event("resume")
+        await self._publish_cycle_event("resume", **ctx)
         logger.info("[%s] Resumed — back to IDLE", self._name)
-        if self._timer_interval is not None:
-            self._schedule_tick()
 
     # ── Observability ─────────────────────────────────────────────────────────
 
@@ -338,14 +303,16 @@ class RebalanceFSM(BaseFSM):
         """The most recent rebalance result, or None."""
         return self._last_result
 
-    async def _publish_cycle_event(self, trigger_name: str) -> None:
-        """Publish a RebalanceCycleEvent to the EventBus."""
+    async def _publish_cycle_event(self, trigger_name: str, **ctx) -> None:
+        """Publish a RebalanceCycleEvent to the EventBus.
+
+        Uses ``ctx["_fsm_old_state"]`` (injected by BaseFSM) so that
+        old_state and new_state are accurate.
+        """
         if self._event_bus is None:
             return
-        # _state has already been updated by BaseFSM before the callback runs,
-        # so we reconstruct old_state from the transition table.
         await self._event_bus.publish(RebalanceCycleEvent(
-            old_state=self._state,  # technically the new state; good enough for observability
+            old_state=ctx.get("_fsm_old_state", self._state),
             new_state=self._state,
             trigger=trigger_name,
             timestamp=int(time.time() * 1000),

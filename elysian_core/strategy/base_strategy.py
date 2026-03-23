@@ -89,6 +89,10 @@ class SpotStrategy:
         # Rebalance FSM — initialized in start() if optimizer + engine are set
         self._rebalance_fsm: Optional[RebalanceFSM] = None
 
+        # Stop signal — set by stop() so run_forever() can unblock
+        self._stop_event = asyncio.Event()
+
+
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
     @property
@@ -143,9 +147,8 @@ class SpotStrategy:
         self._state = StrategyState.STOPPING
         logger.info(f"[Strategy] {self.__class__.__name__} stopping...")
 
-        # Stop rebalance FSM timer
-        if self._rebalance_fsm is not None:
-            self._rebalance_fsm.stop_timer()
+        # Signal run_forever() to unblock
+        self._stop_event.set()
 
         self._event_bus.unsubscribe(EventType.KLINE, self._dispatch_kline)
         self._event_bus.unsubscribe(EventType.ORDERBOOK_UPDATE, self._dispatch_ob)
@@ -170,28 +173,29 @@ class SpotStrategy:
         if self._rebalance_fsm is not None:
             await self._rebalance_fsm.trigger("resume")
 
-    async def request_rebalance(self) -> bool:
+    async def request_rebalance(self, **ctx) -> bool:
         """Request a rebalance cycle from any ``on_*`` hook.
 
         Safe to call at any time — silently ignored if the FSM is busy
         (mid-cycle, cooldown, suspended, etc.).  Returns ``True`` if the
         cycle was triggered, ``False`` if skipped or no FSM configured.
 
+        Any keyword arguments are forwarded as context through the entire
+        FSM pipeline (compute -> validate -> execute -> cooldown).
+
         Use this from event hooks to trigger reactive rebalancing::
 
             async def on_kline(self, event: KlineEvent):
                 if self._should_rebalance(event):
-                    await self.request_rebalance()
+                    await self.request_rebalance(trigger_event=event)
 
-        Can be combined with a timer: the timer fires periodic cycles,
-        and ``request_rebalance()`` fires additional cycles on events.
-        Whichever fires first wins; the other is silently skipped if
-        the FSM is already busy.
+        The strategy controls timing — either via a loop in
+        ``run_forever()`` or reactively from ``on_*`` hooks.
         """
         if self._rebalance_fsm is None:
             logger.warning("[Strategy] request_rebalance called but no FSM configured")
             return False
-        return await self._rebalance_fsm.request()
+        return await self._rebalance_fsm.request(**ctx)
 
     # ── Internal dispatch (error isolation) ────────────────────────────────────
 
@@ -248,10 +252,21 @@ class SpotStrategy:
         rebalancing, timer-based signals).  The runner will ``asyncio.gather``
         this alongside the feed tasks so both run concurrently.
 
-        Default implementation does nothing (returns immediately).  If you
-        override this, it should block (e.g. ``while True: await asyncio.sleep(...)``).
+        Default implementation blocks until ``stop()`` is called.
+
+        **Timer-driven** (periodic rebalance)::
+
+            async def run_forever(self):
+                while not self._stop_event.is_set():
+                    await asyncio.sleep(60)
+                    await self.request_rebalance()
+
+        **Event-only** (purely reactive from ``on_*`` hooks)::
+
+            async def run_forever(self):
+                await self._stop_event.wait()
         """
-        pass
+        await self._stop_event.wait()
     
     async def on_kline(self, event: KlineEvent):
         """Called on each closed kline candle."""
@@ -277,10 +292,11 @@ class SpotStrategy:
         """
         pass
 
-    def compute_weights(self) -> Optional[Dict[str, float]]:
+    def compute_weights(self, **ctx) -> Optional[Dict[str, float]]:
         """**YOUR STRATEGY LOGIC GOES HERE.**
 
-        Called by the RebalanceFSM on each tick (timer or signal-driven).
+        Called by the RebalanceFSM on each cycle (triggered by ``request_rebalance()``).
+        Receives the full pipeline context via ``**ctx``.
         Return a dict mapping symbol -> target weight, e.g.::
 
             {"ETHUSDT": 0.4, "BTCUSDT": 0.5}   # 10% implicit cash
@@ -290,11 +306,11 @@ class SpotStrategy:
         Can be sync or async — the FSM handles both::
 
             # Sync (simple)
-            def compute_weights(self):
+            def compute_weights(self, **ctx):
                 return {"ETHUSDT": 0.5, "BTCUSDT": 0.4}
 
             # Async (if you need to await feeds, APIs, etc.)
-            async def compute_weights(self):
+            async def compute_weights(self, **ctx):
                 price = await self.get_current_price("ETHUSDT")
                 ...
                 return weights
@@ -400,9 +416,7 @@ class SpotStrategy:
         Returns the function's result.
         """
         return await self._loop.run_in_executor(self._executor, fn, *args)
-
     
-
 
     def get_current_vol(self, symbol: str) -> Optional[float]:
         """Return annualised rolling volatility in bps for a feed, or None."""

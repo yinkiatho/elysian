@@ -1,12 +1,12 @@
 import datetime
-import logging
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 from elysian_core.core.enums import Side, OrderType, OrderStatus, RangeOrderType, Venue
 from elysian_core.core.order_fsm import validate_order_transition, is_terminal
+import elysian_core.utils.logger as log
 
-logger = logging.getLogger(__name__)
+logger = log.setup_custom_logger("root")
 
 
 @dataclass

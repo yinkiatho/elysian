@@ -62,44 +62,28 @@ class EqualWeightStrategy(SpotStrategy):
         
         if event.symbol not in self._symbols:
             self._symbols.add(event.symbol)
-            await self.request_rebalance()   # fires FSM if idle
+            await self.request_rebalance()   # fires FSM and triggers "signal"
         #
 
     async def run_forever(self):
-        """Start the rebalance FSM timer after an initial warmup period.
+        """Periodic rebalance loop — strategy controls the timing.
 
         The FSM drives the compute -> validate -> execute -> cooldown cycle.
-        No ``while True`` loop needed.
-
-        **Timer mode** (this example)::
-
-            self._rebalance_fsm.start_timer(interval_s=60)
-            await self._rebalance_fsm.wait()
-
-        **Event-only mode** (no timer, purely reactive)::
-
-            # Don't call start_timer(). Instead, call
-            # await self.request_rebalance() from on_kline / on_orderbook.
-            await self._rebalance_fsm.wait()
-
-        **Both** (timer + events)::
-
-            self._rebalance_fsm.start_timer(interval_s=60)
-            # AND call request_rebalance() from hooks.
-            # Timer and events don't conflict — first one wins.
-            await self._rebalance_fsm.wait()
+        This strategy triggers it on a fixed interval.
         """
-
         logger.info("Initiating Example Weight Strategy")
 
-        if self._rebalance_fsm is not None:
-            self._rebalance_fsm._cooldown_s = self._rebalance_interval
-            self._rebalance_fsm.start_timer(interval_s=self._rebalance_interval)
-            await self._rebalance_fsm.wait()  # blocks until stop_timer() is called
-        else:
+        if self._rebalance_fsm is None:
             logger.warning(
                 "[EqualWeight] No RebalanceFSM — optimizer/execution_engine not configured"
             )
+            return
+
+        self._rebalance_fsm._cooldown_s = self._rebalance_interval
+
+        while not self._stop_event.is_set():
+            await asyncio.sleep(self._rebalance_interval)
+            await self.request_rebalance()
 
 
     async def on_rebalance_complete(self, event: RebalanceCompleteEvent):
@@ -113,6 +97,8 @@ class EqualWeightStrategy(SpotStrategy):
 
         Override this method to implement custom alpha logic.  Return a dict
         mapping symbol -> target weight (floats summing to <= 1.0).
+        
+        Called at FSM on_enter_computing 
         """
         if not self._symbols:
             return {}

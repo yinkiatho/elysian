@@ -386,7 +386,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
         """Refresh open orders for a specific symbol."""
         try:
             open_orders = await self._client.get_open_orders(symbol=symbol)
-            logger.info(f"[{symbol}] Open orders: {open_orders}")
+            #logger.info(f"[{symbol}] Open orders: {open_orders}")
             return open_orders
         except Exception as e:
             logger.error(f"[{symbol}] get_open_orders error: {e}")

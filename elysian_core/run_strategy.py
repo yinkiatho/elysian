@@ -52,12 +52,13 @@ from elysian_core.utils.logger import setup_custom_logger
 from elysian_core.utils.utils import load_config, replace_placeholders, config_to_args
 from pathlib import Path
 import json
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from elysian_core.core.event_bus import EventBus
 from elysian_core.core.enums import OrderType, RunnerState, Venue
 from elysian_core.core.fsm import PeriodicTask
 from elysian_core.execution.engine import ExecutionEngine
 from elysian_core.risk.optimizer import PortfolioOptimizer
+from elysian_core.core.portfolio import Portfolio
 from elysian_core.risk.risk_config import RiskConfig
 from elysian_core.strategy.base_strategy import SpotStrategy
 
@@ -557,8 +558,7 @@ class StrategyRunner:
         else:
             logger.info("[Runner] No args.portfolio section — using Portfolio defaults")
 
-        # Construct portfolio with config-driven params
-        from elysian_core.core.portfolio import Portfolio
+        
         strategy.portfolio = Portfolio(
             initial_cash=0.0,
             max_history=max_history,
@@ -712,7 +712,6 @@ class StrategyRunner:
         if strat_section is not None:
             mhw = getattr(strat_section, "max_heavy_workers", None)
             if mhw is not None:
-                from concurrent.futures import ProcessPoolExecutor
                 strategy._executor.shutdown(wait=False)
                 strategy._executor = ProcessPoolExecutor(max_workers=int(mhw))
                 logger.info(f"[Runner]   strategy.max_heavy_workers = {int(mhw)}")
@@ -761,9 +760,9 @@ class StrategyRunner:
         ``strategy.run_heavy()``.
         """
         try:
-            logger.info("[Runner] ════════════════════════════════════════════")
-            logger.info("[Runner] Starting strategy runner...")
-            logger.info("[Runner] ════════════════════════════════════════════")
+            logger.info("[Runner] ════════════════════════════════════════════════════════════════════════════════════════")
+            logger.info("[Runner] Starting strategy runner................................")
+            logger.info("[Runner] ════════════════════════════════════════════════════════════════════════════════════════")
 
             # ── CONFIGURING ──
             self._state = RunnerState.CONFIGURING

@@ -15,12 +15,12 @@ Usage::
 
 from __future__ import annotations
 
-import logging
 from typing import Dict, FrozenSet, Set
 
 from elysian_core.core.enums import OrderStatus
+import elysian_core.utils.logger as log
 
-logger = logging.getLogger(__name__)
+logger = log.setup_custom_logger("root")
 
 # Valid transitions: from_status -> set of allowed to_statuses
 _VALID_TRANSITIONS: Dict[OrderStatus, FrozenSet[OrderStatus]] = {

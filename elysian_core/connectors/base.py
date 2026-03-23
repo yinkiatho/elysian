@@ -545,7 +545,7 @@ class SpotExchangeConnector(ABC):
                 output_str += f"║  Total Open Orders : {counter}\n"
                 output_str += "╚══════════════════════════════════════════════════╝"
                 
-                print(output_str)
+                #print(output_str)
                 await asyncio.sleep(poll_interval)
             except Exception as e:
                 logger.error(f"Snapshot monitoring error: {e}")

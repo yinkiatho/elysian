@@ -25,7 +25,6 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections import deque
 from enum import Enum
 from typing import Any, Deque, Dict, Optional, Set, Tuple, TYPE_CHECKING
@@ -33,8 +32,9 @@ from typing import Any, Deque, Dict, Optional, Set, Tuple, TYPE_CHECKING
 if TYPE_CHECKING:
     from elysian_core.core.event_bus import EventBus
 
-logger = logging.getLogger(__name__)
+import elysian_core.utils.logger as log
 
+logger = log.setup_custom_logger("root")
 
 class InvalidTransition(Exception):
     """Raised when a trigger is not valid for the current state."""
@@ -156,6 +156,9 @@ class BaseFSM:
         old_state = self._state
         self._state = next_state
 
+        # Inject old_state into ctx so callbacks can access the pre-transition state
+        ctx["_fsm_old_state"] = old_state
+
         logger.debug(
             "[%s] %s --%s--> %s",
             self._name, old_state.name, event, next_state.name,
@@ -168,7 +171,7 @@ class BaseFSM:
                     "[%s] Callback '%s' not found — skipping",
                     self._name, callback_name,
                 )
-            elif asyncio.iscoroutinefunction(callback):   ### Deprecated Functions check if alternatives 
+            elif asyncio.iscoroutinefunction(callback):
                 await callback(**ctx)
             else:
                 callback(**ctx)
