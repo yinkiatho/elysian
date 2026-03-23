@@ -365,7 +365,7 @@ class SpotExchangeConnector(ABC):
         self._api_secret = api_secret
         self._symbols = symbols
         self._file_path = file_path
-        self.args = args
+        self.cfg = args
 
         # Per-symbol feeds
         self.kline_manager = kline_manager
@@ -585,7 +585,7 @@ class FuturesExchangeConnector(ABC):
         self._api_secret = api_secret
         self._symbols = symbols
         self._file_path = file_path
-        self.args = args
+        self.cfg = args
 
         # Per-symbol feeds
         self.kline_manager = kline_manager

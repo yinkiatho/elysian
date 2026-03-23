@@ -46,8 +46,7 @@ class ExecutionEngine:
         default_venue: Venue = Venue.BINANCE,
         default_order_type: OrderType = OrderType.MARKET,
         symbol_venue_map: Optional[Dict[str, Venue]] = None,
-        args: Optional[Any] = None,
-        config_json: Optional[Dict] = None,
+        cfg: Optional[Any] = None,
     ):
         self._exchanges = exchanges
         self._portfolio = portfolio
@@ -56,8 +55,7 @@ class ExecutionEngine:
         self._default_venue = default_venue
         self._default_order_type = default_order_type
         self._symbol_venue_map = symbol_venue_map or {}
-        self.args = args
-        self.config_json = config_json or {}
+        self.cfg = cfg
 
     # ── Public ───────────────────────────────────────────────────────────────
 

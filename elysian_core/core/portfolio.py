@@ -55,11 +55,8 @@ class Portfolio:
     _STABLECOINS = frozenset({"USDT", "USDC", "BUSD"})
 
     def __init__(self, initial_cash: float = 0.0, max_history: int = 10_000,
-                 args: Optional[Any] = None, config_json: Optional[Dict] = None):
-        
-        
-        self.args = args
-        self.config_json = config_json or {}
+                 cfg: Optional[Any] = None):
+        self.cfg = cfg
         self._positions: Dict[str, Position] = {}
         self._cash: float = initial_cash
         
@@ -535,7 +532,7 @@ class Portfolio:
 
         try:
             PortfolioSnapshot.create(
-                strategy_id=self.args.strategy_id,
+                strategy_id=self.cfg.meta.strategy_id if self.cfg else 0,
                 venue=venue or Venue.BINANCE,
                 nav=self._nav,
                 cash=self._cash,

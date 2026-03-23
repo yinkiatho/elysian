@@ -21,11 +21,10 @@ logger = log.setup_custom_logger("root")
 class PortfolioOptimizer:
 
     def __init__(self, risk_config: RiskConfig, portfolio: Portfolio,
-                 args: Optional[Any] = None, config_json: Optional[Dict] = None):
+                 cfg: Optional[Any] = None):
         self._config = risk_config
         self._portfolio = portfolio
-        self.args = args
-        self.config_json = config_json or {}
+        self.cfg = cfg
         self._last_rebalance_ts: int = 0
 
     # ── Public ───────────────────────────────────────────────────────────────

@@ -533,7 +533,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
         ts = datetime.datetime.now(self._utc8)
         try:
             CexTrade.create(
-                id=ts.strftime("%Y-%m-%d_%H-%M-%S") + "_" + self.args.version_name,
+                id=ts.strftime("%Y-%m-%d_%H-%M-%S") + "_" + self.cfg.meta.version_name,
                 datetime=ts,
                 strategy_id=self.strategy_id,
                 strategy_name=self.strategy_name,
@@ -597,7 +597,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
         ts = datetime.datetime.now(self._utc8)
         try:
             CexTrade.create(
-                id=ts.strftime("%Y-%m-%d_%H-%M-%S") + "_" + self.args.version_name,
+                id=ts.strftime("%Y-%m-%d_%H-%M-%S") + "_" + self.cfg.meta.version_name,
                 datetime=ts,
                 venue=Venue.BINANCE,
                 asset_type=AssetType.SPOT,

@@ -36,7 +36,7 @@ class EventDrivenStrategy(SpotStrategy):
     def __init__(self, *args, rebalance_interval_s: float = 0.0, **kwargs):
         super().__init__(*args, **kwargs)
         self._rebalance_interval = rebalance_interval_s
-        self._symbols: set = set(self.config_json.get('Spot Trading Pairs', {}).get('Binance Pairs', []))  ## Currently assuming only working with one CEX Wallet
+        self._symbols: set = set(self.cfg.symbols.symbols_for("binance", "spot")) if self.cfg else set()
         
 
     async def on_start(self):

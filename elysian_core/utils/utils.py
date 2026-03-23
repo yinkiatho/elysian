@@ -1,9 +1,7 @@
-import argparse
 import yaml
-import re
 import pandas as pd
 from typing import Iterator
-from argparse import Namespace  
+from argparse import Namespace
 
 ##########################################################################################################################
 ################################################# Config Arguments #######################################################
@@ -14,10 +12,14 @@ def load_config(path: str) -> dict:
     """Load YAML config into a dictionary."""
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
-    
+
 
 def replace_placeholders(cfg: dict, placeholders: dict) -> dict:
-    """Recursively replace placeholders in cfg using placeholders dict."""
+    """Recursively replace ``{placeholder}`` tokens in a config dict.
+
+    Used by :func:`load_app_config` to inject runtime values (run ID,
+    timestamp, etc.) into YAML strings before building the config.
+    """
     def _replace(value):
         if isinstance(value, str):
             for k, v in placeholders.items():
@@ -32,21 +34,20 @@ def replace_placeholders(cfg: dict, placeholders: dict) -> dict:
     return _replace(cfg)
 
 
-def config_to_args(cfg: dict, placeholders: dict = None) -> argparse.Namespace:
+def config_to_args(cfg: dict, placeholders: dict = None) -> Namespace:
     """Convert dict to argparse.Namespace with optional placeholder replacement."""
     if placeholders:
         cfg = replace_placeholders(cfg, placeholders)
 
     def _dict_to_namespace(d):
         if isinstance(d, dict):
-            return argparse.Namespace(**{k: _dict_to_namespace(v) for k, v in d.items()})
+            return Namespace(**{k: _dict_to_namespace(v) for k, v in d.items()})
         elif isinstance(d, list):
             return [_dict_to_namespace(v) for v in d]
         else:
             return d
 
     return _dict_to_namespace(cfg)
-
 
 ##########################################################################################################################
 ################################################# DataFrame Iterator #####################################################
@@ -110,3 +111,5 @@ class DataFrameIterator:
 
         return batch
     
+
+

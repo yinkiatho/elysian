@@ -61,9 +61,10 @@ class BarbClientBase:
         return set_json(self.redis, CacheKeys.SUI_BALANCE, key, balances)
     
 class RedisConfig:
-    def __init__(self, host: str = "localhost", port: int = 6379):
-        self.host = host
-        self.port = port
+    def __init__(self, host: str = None, port: int = None):
+        import os
+        self.host = host or os.getenv("REDIS_HOST", "localhost")
+        self.port = port or int(os.getenv("REDIS_PORT", "6379"))
     
     def local(self) -> Redis:
         return Redis(host=self.host, port=self.port, decode_responses=True)

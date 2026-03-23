@@ -93,16 +93,3 @@ strategy:
   max_heavy_workers: 4                # ProcessPoolExecutor workers for run_heavy()
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Database
-# ═══════════════════════════════════════════════════════════════════════════════
-database:
-  postgres:
-    Host: "localhost"
-    Port: 5432
-    Name: "test_database"
-
-
-  redis:
-    Host: "localhost"
-    Port: 6379

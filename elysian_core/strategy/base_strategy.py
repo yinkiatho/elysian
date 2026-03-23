@@ -31,6 +31,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from elysian_core.execution.engine import ExecutionEngine
     from elysian_core.risk.optimizer import PortfolioOptimizer
+    from elysian_core.config.app_config import AppConfig
 
 from elysian_core.connectors.base import SpotExchangeConnector, AbstractDataFeed
 from elysian_core.core.enums import Side, StrategyState, Venue
@@ -69,8 +70,7 @@ class SpotStrategy:
         max_heavy_workers: int = 4,
         optimizer: Optional["PortfolioOptimizer"] = None,
         execution_engine: Optional["ExecutionEngine"] = None,
-        args: Optional[Any] = None,
-        config_json: Optional[Dict] = None,
+        cfg: Optional["AppConfig"] = None,
     ):
         self._exchanges = exchanges
         self._event_bus = event_bus
@@ -79,8 +79,7 @@ class SpotStrategy:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._optimizer = optimizer
         self._execution_engine = execution_engine
-        self.args = args
-        self.config_json = config_json or {}
+        self.cfg = cfg
         self.portfolio = Portfolio()
 
         # Lifecycle state

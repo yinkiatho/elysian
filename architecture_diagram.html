@@ -554,57 +554,57 @@
             participant EE as ExecutionEngine
             participant RFSM as RebalanceFSM
 
-            U->>SR: run(strategy)
+            U->>SR: run strategy
 
             rect rgb(20,20,40)
                 Note over SR: CONFIGURING
-                SR->>SR: _setup_config() — load tokens from config.json
+                SR->>SR: _setup_config
                 SR->>EB: create EventBus
             end
 
             rect rgb(40,20,20)
                 Note over SR,EX: CONNECTING
-                SR->>EX: create BinanceSpotExchange(kline_mgr, ob_mgr, event_bus)
-                SR->>KM: set_event_bus(event_bus)
-                SR->>OBM: set_event_bus(event_bus)
+                SR->>EX: create BinanceSpotExchange
+                SR->>KM: set_event_bus
+                SR->>OBM: set_event_bus
             end
 
             rect rgb(20,40,20)
                 Note over SR,S: Strategy Wiring
-                SR->>S: inject event_bus, exchanges, args, config_json
+                SR->>S: inject event_bus + exchanges + args
                 S->>EB: subscribe to 5 EventTypes
-                S->>S: on_start()
-                Note over S: state: CREATED -> STARTING -> READY
+                S->>S: on_start
+                Note over S: CREATED then STARTING then READY
             end
 
             rect rgb(40,30,10)
                 Note over SR,EX: Exchange Init
-                SR->>EX: run()
-                EX->>EX: create AsyncClient + exchange_info
-                EX->>EX: refresh_balances()
+                SR->>EX: run
+                EX->>EX: create AsyncClient
+                EX->>EX: refresh_balances
                 EX->>EX: start user_data_stream
             end
 
             rect rgb(20,20,60)
-                Note over SR,RFSM: SYNCING — Pipeline Setup
-                SR->>P: sync_from_exchange(exchange, venue, feeds)
+                Note over SR,RFSM: SYNCING Pipeline Setup
+                SR->>P: sync_from_exchange
                 P->>P: sync cash + positions + mark_prices
-                SR->>P: start(event_bus, feeds)
+                SR->>P: start with event_bus + feeds
                 P->>EB: subscribe KLINE + BALANCE_UPDATE
 
-                SR->>OPT: create PortfolioOptimizer(RiskConfig, portfolio)
+                SR->>OPT: create PortfolioOptimizer
                 SR->>S: inject optimizer
 
-                SR->>EE: create ExecutionEngine(exchanges, portfolio, feeds)
+                SR->>EE: create ExecutionEngine
                 SR->>S: inject execution_engine
 
-                Note over S,RFSM: RebalanceFSM auto-created in strategy.start()
-                S->>RFSM: RebalanceFSM(strategy, optimizer, engine, event_bus)
+                Note over S,RFSM: RebalanceFSM auto-created
+                S->>RFSM: create RebalanceFSM
             end
 
             rect rgb(30,30,30)
-                Note over SR: RUNNING — Main Loop
-                SR->>SR: asyncio.gather(data_feeds, strategy.run_forever(), snapshots)
+                Note over SR: RUNNING Main Loop
+                SR->>SR: asyncio.gather feeds + run_forever
             end
     </div>
 
