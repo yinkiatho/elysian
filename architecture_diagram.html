@@ -616,7 +616,7 @@
             participant OBM as OBClientManager
             participant S as SpotStrategy
             participant P as Portfolio
-            participant OPT as PortfolioOptimizer
+            participant POpt as PortfolioOptimizer
             participant EE as ExecutionEngine
             participant RFSM as RebalanceFSM
 
@@ -637,7 +637,7 @@
 
             rect rgb(235,255,235)
                 Note over SR,S: Strategy Wiring
-                SR->>S: inject event_bus + exchanges + args
+                SR->>S: "inject event_bus + exchanges + args"
                 S->>EB: subscribe to 5 EventTypes
                 S->>S: on_start
                 Note over S: CREATED then STARTING then READY
@@ -654,11 +654,11 @@
             rect rgb(235,235,255)
                 Note over SR,RFSM: SYNCING Pipeline Setup
                 SR->>P: sync_from_exchange
-                P->>P: sync cash + positions + mark_prices
-                SR->>P: start with event_bus + feeds
-                P->>EB: subscribe KLINE + BALANCE_UPDATE
+                P->>P: "sync cash + positions + mark_prices"
+                SR->>P: "start with event_bus + feeds"
+                P->>EB: "subscribe KLINE + BALANCE_UPDATE"
 
-                SR->>OPT: create PortfolioOptimizer
+                SR->>POpt: create PortfolioOptimizer
                 SR->>S: inject optimizer
 
                 SR->>EE: create ExecutionEngine
@@ -670,7 +670,7 @@
 
             rect rgb(245,245,245)
                 Note over SR: RUNNING Main Loop
-                SR->>SR: asyncio.gather feeds + run_forever
+                SR->>SR: "asyncio.gather feeds + run_forever"
             end
     </div>
 
