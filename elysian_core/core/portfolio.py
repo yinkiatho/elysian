@@ -22,6 +22,8 @@ import elysian_core.utils.logger as log
 from elysian_core.core.events import EventType
 from elysian_core.db.models import PortfolioSnapshot
 
+from elysian_core.config.app_config import AppConfig
+
 logger = log.setup_custom_logger("root")
 
 
@@ -54,18 +56,18 @@ class Portfolio:
     
     _STABLECOINS = frozenset({"USDT", "USDC", "BUSD"})
 
-    def __init__(self, initial_cash: float = 0.0, max_history: int = 10_000,
-                 cfg: Optional[Any] = None):
+    def __init__(self, exchange, max_history: int = 10_000, 
+                        venue: Venue = Venue.BINANCE,cfg: AppConfig = None):
         self.cfg = cfg
         self._positions: Dict[str, Position] = {}
-        self._cash: float = initial_cash
+        self._cash: float = 0.0  # To Update as we sync from exchange
         
         
         # ── Per-asset cash breakdown (for multi-stablecoin / multi-venue) ──
         self._cash_dict: Dict[str, float] = {}  # { "USDT": 1000.0, "USDC": 500.0, ... }
 
         # ── Risk metrics ─────────────────────────────────────────────────
-        self._peak_equity: float = initial_cash
+        self._peak_equity: float = 0.0 # To Update as we sync from exchange
         self._max_drawdown: float = 0.0
         self._total_realized_pnl: float = 0.0
         self._total_commission: float = 0.0
@@ -76,17 +78,21 @@ class Portfolio:
         # ── Live state (updated on events) ───────────────────────────────
         self._mark_prices: Dict[str, float] = {}
         self._weights: Dict[str, float] = {}
-        self._nav: float = initial_cash
+        self._nav: float = 0.0  # To Update as we sync from exchange
 
         # ── EventBus wiring ──────────────────────────────────────────────
         self._event_bus = None
         self._feeds: Dict = {}
+        
+        # Exchange and Venue setting, only one exchange and venue per portfolio
+        self.exchange = exchange
+        self.venue = venue
 
     # ══════════════════════════════════════════════════════════════════════════
     #  Lifecycle — EventBus wiring
     # ══════════════════════════════════════════════════════════════════════════
 
-    def sync_from_exchange(self, exchange, venue: Venue = None, feeds: Optional[Dict] = None):
+    def sync_from_exchange(self, feeds: Optional[Dict] = None):
         """Full portfolio sync from a live exchange connector.
 
         Call once at startup *after* ``exchange.run()`` so that
@@ -103,12 +109,12 @@ class Portfolio:
 
         For multi-venue expansion: call once per exchange.
         """
-        venue = venue or Venue.BINANCE
-        feeds = feeds or self._feeds
+        venue = self.venue
+        self._feeds = feeds or self._feeds
 
         # ── 1. Cash: stablecoin balances ──────────────────────────────────
         for stable in self._STABLECOINS:
-            bal = exchange.get_balance(stable)
+            bal = self.exchange.get_balance(stable)
             if bal > 0:
                 self._cash_dict[stable] = bal
 
@@ -118,13 +124,13 @@ class Portfolio:
         #    Build a lookup from base asset → trading pair symbol using
         #    the exchange's token_infos (e.g. "ETH" → "ETHUSDT").
         base_to_symbol = {}
-        for sym, info in exchange._token_infos.items():
+        for sym, info in self.exchange._token_infos.items():
             base = info.get("base_asset")
             if base:
                 base_to_symbol[base] = sym
 
         synced_positions = 0
-        for asset, qty in exchange._balances.items():
+        for asset, qty in self.exchange._balances.items():
             if asset in self._STABLECOINS or qty <= 0:
                 continue
 
@@ -166,12 +172,12 @@ class Portfolio:
 
         # ── 4. Open orders: snapshot from exchange ────────────────────────
         self._open_orders: Dict[str, dict] = {}
-        for sym, orders in exchange._open_orders.items():
+        for sym, orders in self.exchange._open_orders.items():
             if orders:
                 self._open_orders[sym] = dict(orders)
 
         # ── Refresh derived state ─────────────────────────────────────────
-        self._refresh_derived()
+        self._refresh_derived()  # Updates
         self._peak_equity = max(self._peak_equity, self._nav)
 
         total_open = sum(len(o) for o in self._open_orders.values())
@@ -226,7 +232,7 @@ class Portfolio:
     async def _on_kline(self, event):
         """Update mark price from kline close, refresh weights and risk."""
         kline = event.kline
-        if kline.close is not None and kline.close > 0:
+        if kline.close is not None and kline.close > 0 and event.venue == self.venue:
             self._mark_prices[event.symbol] = kline.close
             self._refresh_derived()
 
@@ -237,7 +243,7 @@ class Portfolio:
         Uses ``event.delta`` (the publisher currently sends ``new_balance=0.0``).
         Maintains both per-asset ``_cash_dict`` and aggregate ``_cash``.
         """
-        if event.asset in self._STABLECOINS:
+        if event.asset in self._STABLECOINS and event.venue == self.venue:
             old_cash = self._cash
             self._cash_dict[event.asset] = self._cash_dict.get(event.asset, 0.0) + event.delta
             self._cash = sum(self._cash_dict.values())
@@ -248,7 +254,12 @@ class Portfolio:
 
 
     def _refresh_derived(self):
-        """Recompute nav, weights, and risk metrics from current mark prices."""
+        """Recomputes from current mark prices:"
+           1.weights, 
+           2. Nav
+           3. peak_equity
+           4. max_drawdown 
+        """
         self._nav = self._compute_total_value(self._mark_prices)
         if self._nav > 0:
             self._weights = {

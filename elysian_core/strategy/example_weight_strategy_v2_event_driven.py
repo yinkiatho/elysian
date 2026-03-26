@@ -33,44 +33,52 @@ class EventDrivenStrategy(SpotStrategy):
     - Work at the minute level and track short term momentum rolling statistics
     """
 
-    def __init__(self, *args, rebalance_interval_s: float = 0.0, **kwargs):
+    def __init__(self, *args, rebalance_interval_s: float = 0.0,
+                 symbols: set = None, **kwargs):
         super().__init__(*args, **kwargs)
         self._rebalance_interval = rebalance_interval_s
-        self._symbols: set = set(self.cfg.symbols.symbols_for("binance", "spot")) if self.cfg else set()
-        
+        # Symbols can be passed explicitly or loaded from cfg in on_start
+        self._symbols: set = set(symbols) if symbols else set()
 
     async def on_start(self):
         '''
-        Strategy specific on start logic to be triggered aside from the common event subscribing and fsm initialization
+        Strategy specific on start logic to be triggered aside from the common event subscribing and fsm initialization.
+        cfg is guaranteed to be set by StrategyRunner.setup_strategy() before start() is called.
         '''
+        # Load symbols from cfg if not explicitly provided at construction
+        if not self._symbols and self.cfg:
+            self._symbols = set(self.cfg.symbols.symbols_for("binance", "spot"))
+
         logger.info(
-            f"[EventDriven Momentum Weight Strategy] Started — rebalance every {self._rebalance_interval}s"
+            f"[EventDriven Momentum Weight Strategy] Started — "
+            f"rebalance every {self._rebalance_interval}s, "
+            f"symbols={self._symbols}"
         )
-        
+
         self._price_series = {symbol: deque([], maxlen=60*240) for symbol in self._symbols}
         self._returns_series = {symbol: deque([], maxlen=60*240) for symbol in self._symbols}
         self._rolling_returns_series = {symbol: deque([], maxlen=60*240) for symbol in self._symbols}
         self._last_marked_time = None
-        
+
         self._symbol_availability_status = {symbol: False for symbol in self._symbols}
         
     async def on_kline(self, event: KlineEvent):
         '''
-        on_kline hook, we update the price_series and _return_series first, check for status and then fire trigger
+        on_kline hook, we update the price_series and _return_series first, check for status and then fire trigger,
+        
+        For now we will receive kline events from ALL VENUES AND ASSET_TYPES take note here. 
         '''
         if event.symbol not in self._symbols:
-            self._symbols.add(event.symbol)
-            self._price_series[event.symbol] = deque([], maxlen=60*240)
-            self._returns_series[event.symbol] = deque([], maxlen=60*240)
-            
-        # Update new klines and returns 
-        last_price = self._price_series[event.symbol][-1]
+            return
+
+        # Update new klines and returns
+        last_price = self._price_series[event.symbol][-1] if self._price_series[event.symbol] else None
         self._price_series[event.symbol].append(event.kline.close)
-        if len(self._returns_series[event.symbol]):
-            self._returns_series[event.symbol].append((event.kline.close - last_price)/last_price)
-            
-            if len(self._returns_series) >= 30:
-                self._rolling_returns_series[event.symbol].append(statistics.mean(self._returns_series[-30:]))
+        if last_price is not None and last_price > 0:
+            self._returns_series[event.symbol].append((event.kline.close - last_price) / last_price)
+
+            if len(self._returns_series[event.symbol]) >= 30:
+                self._rolling_returns_series[event.symbol].append(statistics.mean(list(self._returns_series[event.symbol])[-30:]))
                 self._symbol_availability_status[event.symbol] = True
                  
         # Check for full availability and past rebalance interval and trigger

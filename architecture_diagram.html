@@ -8,16 +8,16 @@
         import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
         mermaid.initialize({
             startOnLoad: true,
-            theme: 'dark',
+            theme: 'default',
             flowchart: { curve: 'basis', padding: 20 },
             sequence: { mirrorActors: false },
             themeVariables: {
-                primaryColor: '#1a1a2e',
-                primaryTextColor: '#e0e0e0',
-                primaryBorderColor: '#4a9eff',
-                lineColor: '#4a9eff',
-                secondaryColor: '#16213e',
-                tertiaryColor: '#0f3460',
+                primaryColor: '#dbeafe',
+                primaryTextColor: '#1e3a5f',
+                primaryBorderColor: '#2563eb',
+                lineColor: '#2563eb',
+                secondaryColor: '#eff6ff',
+                tertiaryColor: '#bfdbfe',
                 fontSize: '14px'
             }
         });
@@ -26,8 +26,8 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-            background: #0a0a1a;
-            color: #e0e0e0;
+            background: #f8f9fa;
+            color: #1a1a2e;
             padding: 40px 20px;
             line-height: 1.6;
         }
@@ -36,13 +36,13 @@
             font-size: 2.2rem;
             font-weight: 300;
             margin-bottom: 8px;
-            color: #fff;
+            color: #1a1a2e;
             letter-spacing: 2px;
         }
-        h1 span { color: #4a9eff; font-weight: 600; }
+        h1 span { color: #2563eb; font-weight: 600; }
         .subtitle {
             text-align: center;
-            color: #888;
+            color: #6b7280;
             margin-bottom: 50px;
             font-size: 1rem;
         }
@@ -51,19 +51,20 @@
             font-weight: 400;
             margin: 50px 0 10px;
             padding-bottom: 8px;
-            border-bottom: 1px solid #222;
-            color: #4a9eff;
+            border-bottom: 1px solid #dee2e6;
+            color: #2563eb;
         }
-        h2 span { color: #888; font-size: 0.9rem; font-weight: 300; margin-left: 12px; }
+        h2 span { color: #6b7280; font-size: 0.9rem; font-weight: 300; margin-left: 12px; }
+        h3 { color: #374151; font-size: 1.1rem; margin: 24px 0 10px; font-weight: 500; }
         p.desc {
-            color: #aaa;
+            color: #4b5563;
             margin-bottom: 20px;
             max-width: 900px;
             font-size: 0.95rem;
         }
         .mermaid {
-            background: #0f0f1f;
-            border: 1px solid #1a1a3e;
+            background: #ffffff;
+            border: 1px solid #dee2e6;
             border-radius: 12px;
             padding: 30px 20px;
             margin: 20px 0 40px;
@@ -76,7 +77,7 @@
             flex-wrap: wrap;
             margin: 10px 0 20px;
             font-size: 0.85rem;
-            color: #999;
+            color: #6b7280;
         }
         .legend-item {
             display: flex;
@@ -87,7 +88,7 @@
             width: 14px;
             height: 14px;
             border-radius: 3px;
-            border: 1px solid #333;
+            border: 1px solid #dee2e6;
         }
         table {
             width: 100%;
@@ -96,28 +97,29 @@
             font-size: 0.9rem;
         }
         th {
-            background: #1a1a2e;
-            color: #4a9eff;
+            background: #e8f0fe;
+            color: #1d4ed8;
             text-align: left;
             padding: 10px 14px;
-            border-bottom: 2px solid #222;
+            border-bottom: 2px solid #c7d7fd;
         }
         td {
             padding: 8px 14px;
-            border-bottom: 1px solid #1a1a1a;
-            color: #ccc;
+            border-bottom: 1px solid #e5e7eb;
+            color: #374151;
         }
-        tr:hover td { background: #111122; }
+        tr:nth-child(odd) td { background: #f9fafb; }
+        tr:hover td { background: #f0f4ff; }
         code {
-            background: #1a1a2e;
+            background: #e8f0fe;
             padding: 2px 6px;
             border-radius: 4px;
             font-size: 0.88em;
-            color: #7cb7ff;
+            color: #1d4ed8;
         }
         .container { max-width: 1400px; margin: 0 auto; }
         .file-ref {
-            color: #888;
+            color: #6b7280;
             font-size: 0.82rem;
             font-style: italic;
             margin-top: -12px;
@@ -188,12 +190,12 @@
             EX -.->|"BalanceUpdateEvent"| PF
             RFSM -->|"RebalanceCompleteEvent"| SS
 
-            style S1 fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b
-            style S2 fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
-            style S3 fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
-            style S4 fill:#0a0a1a,stroke:#6b6bff,color:#6b6bff
-            style S5 fill:#1a0a1a,stroke:#ff6bff,color:#ff6bff
-            style S6 fill:#0a1a1a,stroke:#6bffff,color:#6bffff
+            style S1 fill:#fef2f2,stroke:#ef4444,color:#991b1b
+            style S2 fill:#fefce8,stroke:#ca8a04,color:#713f12
+            style S3 fill:#f0fdf4,stroke:#16a34a,color:#166534
+            style S4 fill:#eff6ff,stroke:#2563eb,color:#1e40af
+            style S5 fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
+            style S6 fill:#ecfeff,stroke:#0891b2,color:#155e75
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
@@ -253,13 +255,13 @@
             DB -->|"try/except"| OBU
             DR -->|"try/except"| ORC
 
-            style EB fill:#1a1a3e,stroke:#4a9eff,stroke-width:3px,color:#fff
-            style Publishers fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b
-            style Subscribers fill:#0a1a1a,stroke:#6bffff,color:#6bffff
-            style Hooks fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
+            style EB fill:#dbeafe,stroke:#2563eb,stroke-width:3px,color:#1e3a5f
+            style Publishers fill:#fef2f2,stroke:#ef4444,color:#991b1b
+            style Subscribers fill:#ecfeff,stroke:#0891b2,color:#155e75
+            style Hooks fill:#f0fdf4,stroke:#16a34a,color:#166534
     </div>
 
-    <h3 style="color:#ccc; font-size:1.1rem; margin:20px 0 10px;">Event Types Reference</h3>
+    <h3>Event Types Reference</h3>
     <table>
         <tr><th>EventType</th><th>Dataclass</th><th>Key Fields</th><th>Published By</th></tr>
         <tr><td><code>KLINE</code></td><td><code>KlineEvent</code></td><td>symbol, venue, kline (Kline), timestamp</td><td>KlineClientManager workers</td></tr>
@@ -310,13 +312,13 @@
             ERR -.->|"suspend"| SUSP
             SUSP -->|"resume\n_on_resume\nReschedules timer"| IDLE
 
-            style IDLE fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
-            style COMP fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
-            style VAL fill:#0a0a1a,stroke:#6b6bff,color:#6b6bff
-            style EXEC fill:#1a0a1a,stroke:#ff6bff,color:#ff6bff
-            style COOL fill:#0a1a1a,stroke:#6bffff,color:#6bffff
-            style ERR fill:#1a0a0a,stroke:#ff4444,color:#ff4444
-            style SUSP fill:#1a1a1a,stroke:#888,color:#888
+            style IDLE fill:#f0fdf4,stroke:#16a34a,color:#166534
+            style COMP fill:#fefce8,stroke:#ca8a04,color:#713f12
+            style VAL fill:#eff6ff,stroke:#2563eb,color:#1e40af
+            style EXEC fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
+            style COOL fill:#ecfeff,stroke:#0891b2,color:#155e75
+            style ERR fill:#fef2f2,stroke:#dc2626,color:#991b1b
+            style SUSP fill:#f3f4f6,stroke:#9ca3af,color:#4b5563
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
@@ -357,13 +359,13 @@
             R5 --> R6
             R6 --> OUT
 
-            style IN fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
-            style OUT fill:#0a0a1a,stroke:#6b6bff,color:#6b6bff
-            style R1R fill:#1a0a0a,stroke:#ff4444,color:#ff4444
-            style R3E fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
+            style IN fill:#f0fdf4,stroke:#16a34a,color:#166534
+            style OUT fill:#eff6ff,stroke:#2563eb,color:#1e40af
+            style R1R fill:#fef2f2,stroke:#dc2626,color:#991b1b
+            style R3E fill:#fefce8,stroke:#ca8a04,color:#713f12
     </div>
 
-    <h3 style="color:#ccc; font-size:1.1rem; margin:20px 0 10px;">RiskConfig Defaults</h3>
+    <h3>RiskConfig Defaults</h3>
     <table>
         <tr><th>Parameter</th><th>Default</th><th>Purpose</th></tr>
         <tr><td><code>max_weight_per_asset</code></td><td>0.25</td><td>No single asset exceeds 25% of portfolio</td></tr>
@@ -416,8 +418,8 @@
             PART --> SUB
             SUB --> RR
 
-            style V fill:#0a0a1a,stroke:#6b6bff,color:#6b6bff
-            style RR fill:#1a0a1a,stroke:#ff6bff,color:#ff6bff
+            style V fill:#eff6ff,stroke:#2563eb,color:#1e40af
+            style RR fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
@@ -449,13 +451,13 @@
             ED -->|"stop#40;#41;"| Stopped["Stopped\nUnsubscribed from EventBus"]
             Stopped --> END(( ))
 
-            style Empty fill:#1a1a2e,stroke:#888,color:#ccc
-            style Synced fill:#0a1a1a,stroke:#6bffff,color:#6bffff
-            style ED fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
-            style KH fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
-            style BH fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
-            style UH fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
-            style Stopped fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b
+            style Empty fill:#f3f4f6,stroke:#9ca3af,color:#4b5563
+            style Synced fill:#ecfeff,stroke:#0891b2,color:#155e75
+            style ED fill:#f0fdf4,stroke:#16a34a,color:#166534
+            style KH fill:#fefce8,stroke:#ca8a04,color:#713f12
+            style BH fill:#fefce8,stroke:#ca8a04,color:#713f12
+            style UH fill:#fefce8,stroke:#ca8a04,color:#713f12
+            style Stopped fill:#fef2f2,stroke:#ef4444,color:#991b1b
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
@@ -524,15 +526,79 @@
 
             BUD -->|"executionReport\nbalanceUpdate"| EB2
 
-            style Exchange fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b
-            style Managers fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
-            style Internal fill:#0a1a1a,stroke:#6bffff,color:#6bffff
-            style Feeds fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
-            style EB2 fill:#1a1a3e,stroke:#4a9eff,stroke-width:3px,color:#fff
+            style Exchange fill:#fef2f2,stroke:#ef4444,color:#991b1b
+            style Managers fill:#fefce8,stroke:#ca8a04,color:#713f12
+            style Internal fill:#ecfeff,stroke:#0891b2,color:#155e75
+            style Feeds fill:#f0fdf4,stroke:#16a34a,color:#166534
+            style EB2 fill:#dbeafe,stroke:#2563eb,stroke-width:3px,color:#1e3a5f
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>8. StrategyRunner Startup Sequence <span>Initialization order</span></h2>
+    <h2>8. Multi-Strategy: WeightAggregator + ShadowBook <span>Capital allocation and per-strategy attribution</span></h2>
+    <p class="desc">
+        When multiple strategies share one portfolio, a <code>WeightAggregator</code> merges their weight
+        vectors — each scaled by its capital allocation fraction — into a single combined vector for the
+        optimizer. Each strategy owns a <code>ShadowBook</code> (virtual position ledger) so strategies
+        can read their own isolated positions, cash, weights, and PnL without touching the aggregate Portfolio.
+        After each execution, <code>reconcile_shadow_books()</code> resets shadow positions to match the actual fills.
+    </p>
+    <p class="file-ref">core/weight_aggregator.py &mdash; WeightAggregator &bull; core/shadow_book.py &mdash; ShadowBook, reconcile_shadow_books</p>
+    <div class="mermaid">
+        graph TD
+            subgraph Strategies["Strategies (each with own ShadowBook)"]
+                SA["Strategy A\nalloc=0.60\nETHUSDT=0.5, BTCUSDT=0.5"]
+                SB["Strategy B\nalloc=0.40\nSOLUSDT=1.0"]
+                SBOA["ShadowBook A\npositions, cash, weights\nNAV, realized PnL"]
+                SBOB["ShadowBook B\npositions, cash, weights\nNAV, realized PnL"]
+            end
+
+            WA["WeightAggregator\nregister_strategy#40;id, alloc, symbols, shadow_book#41;\nupdate_weights#40;id, weights#41;\nget_merged_weights#40;#41; → merged\nattribute_fills#40;mark_prices, nav#41;"]
+
+            MERGED["Merged Weights\nETHUSDT = 0.5 * 0.6 = 0.30\nBTCUSDT = 0.5 * 0.6 = 0.30\nSOLUSDT = 1.0 * 0.4 = 0.40"]
+
+            OPT2["PortfolioOptimizer\nvalidate#40;merged#41;"]
+            EE2["ExecutionEngine\nexecute#40;validated#41;"]
+            RECONCILE["reconcile_shadow_books#40;#41;\nFor each strategy:\n  target_pos = weight * alloc * nav / price\n  apply_fill#40;delta#41; to ShadowBook"]
+
+            SA -->|"update_weights"| WA
+            SB -->|"update_weights"| WA
+            SA --- SBOA
+            SB --- SBOB
+            WA -->|"get_merged_weights"| MERGED
+            MERGED --> OPT2
+            OPT2 --> EE2
+            EE2 -->|"mark_prices + portfolio_total_value"| RECONCILE
+            RECONCILE --> SBOA
+            RECONCILE --> SBOB
+
+            style Strategies fill:#f0fdf4,stroke:#16a34a,color:#166534
+            style WA fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
+            style MERGED fill:#fefce8,stroke:#ca8a04,color:#713f12
+            style OPT2 fill:#eff6ff,stroke:#2563eb,color:#1e40af
+            style EE2 fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
+            style RECONCILE fill:#ecfeff,stroke:#0891b2,color:#155e75
+    </div>
+
+    <h3>WeightAggregator: Merging Formula</h3>
+    <table>
+        <tr><th>Strategy</th><th>Allocation</th><th>Raw Weights</th><th>Contribution to Merged</th></tr>
+        <tr><td>Strategy A (id=1)</td><td>0.60</td><td>ETHUSDT=0.50, BTCUSDT=0.50</td><td>ETHUSDT+=0.30, BTCUSDT+=0.30</td></tr>
+        <tr><td>Strategy B (id=2)</td><td>0.40</td><td>SOLUSDT=1.00</td><td>SOLUSDT+=0.40</td></tr>
+        <tr><td colspan="3"><strong>Merged (sum of contributions)</strong></td><td>ETHUSDT=0.30, BTCUSDT=0.30, SOLUSDT=0.40</td></tr>
+    </table>
+
+    <h3>ShadowBook vs Portfolio</h3>
+    <table>
+        <tr><th>Property</th><th>Portfolio (aggregate)</th><th>ShadowBook (per-strategy)</th></tr>
+        <tr><td>Scope</td><td>All strategies combined</td><td>One strategy's virtual slice</td></tr>
+        <tr><td>Positions</td><td>Real exchange positions</td><td>Attributed virtual positions</td></tr>
+        <tr><td>Cash</td><td>Total stablecoin balance</td><td>Strategy's allocated cash fraction</td></tr>
+        <tr><td>Updated by</td><td>Exchange fills + EventBus</td><td><code>reconcile_shadow_books()</code> after each rebalance</td></tr>
+        <tr><td>Strategy reads</td><td>Only StrategyRunner reads this</td><td>Strategy reads its own shadow_book</td></tr>
+    </table>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>9. StrategyRunner Startup Sequence <span>Initialization order</span></h2>
     <p class="desc">
         The StrategyRunner orchestrates all component initialization in a strict dependency order.
         It progresses through RunnerState: CREATED &rarr; CONFIGURING &rarr; CONNECTING &rarr; SYNCING &rarr; RUNNING &rarr; STOPPING &rarr; STOPPED.
@@ -556,20 +622,20 @@
 
             U->>SR: run strategy
 
-            rect rgb(20,20,40)
+            rect rgb(220,235,255)
                 Note over SR: CONFIGURING
                 SR->>SR: _setup_config
                 SR->>EB: create EventBus
             end
 
-            rect rgb(40,20,20)
+            rect rgb(255,235,235)
                 Note over SR,EX: CONNECTING
                 SR->>EX: create BinanceSpotExchange
                 SR->>KM: set_event_bus
                 SR->>OBM: set_event_bus
             end
 
-            rect rgb(20,40,20)
+            rect rgb(235,255,235)
                 Note over SR,S: Strategy Wiring
                 SR->>S: inject event_bus + exchanges + args
                 S->>EB: subscribe to 5 EventTypes
@@ -577,7 +643,7 @@
                 Note over S: CREATED then STARTING then READY
             end
 
-            rect rgb(40,30,10)
+            rect rgb(255,248,220)
                 Note over SR,EX: Exchange Init
                 SR->>EX: run
                 EX->>EX: create AsyncClient
@@ -585,7 +651,7 @@
                 EX->>EX: start user_data_stream
             end
 
-            rect rgb(20,20,60)
+            rect rgb(235,235,255)
                 Note over SR,RFSM: SYNCING Pipeline Setup
                 SR->>P: sync_from_exchange
                 P->>P: sync cash + positions + mark_prices
@@ -602,14 +668,14 @@
                 S->>RFSM: create RebalanceFSM
             end
 
-            rect rgb(30,30,30)
+            rect rgb(245,245,245)
                 Note over SR: RUNNING Main Loop
                 SR->>SR: asyncio.gather feeds + run_forever
             end
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>9. Data Contracts <span>Frozen dataclasses between pipeline stages</span></h2>
+    <h2>10. Data Contracts <span>Frozen dataclasses between pipeline stages</span></h2>
     <p class="desc">
         All inter-stage contracts are frozen (immutable) dataclasses. This prevents strategies
         from accidentally mutating shared data and provides a clear audit trail.
@@ -698,7 +764,7 @@
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>10. Class Hierarchy <span>Core abstractions and implementations</span></h2>
+    <h2>11. Class Hierarchy <span>Core abstractions and implementations</span></h2>
     <p class="file-ref">Full inheritance tree across all modules</p>
     <div class="mermaid">
         classDiagram
@@ -1035,8 +1101,8 @@
             EX2 --> CD
             SH -.->|"run_heavy#40;fn#41;"| ProcessPool
 
-            style MainThread fill:#0a0a1a,stroke:#4a9eff,color:#4a9eff
-            style ProcessPool fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b
+            style MainThread fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
+            style ProcessPool fill:#fef2f2,stroke:#ef4444,color:#991b1b
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════════════ -->

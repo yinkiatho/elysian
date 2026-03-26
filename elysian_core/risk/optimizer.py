@@ -25,7 +25,7 @@ class PortfolioOptimizer:
         self._config = risk_config
         self._portfolio = portfolio
         self.cfg = cfg
-        self._last_rebalance_ts: int = 0
+        self._last_rebalance_ts: Dict[int, int] = {}  # per-strategy rate limiting
 
     # ── Public ───────────────────────────────────────────────────────────────
 
@@ -57,12 +57,15 @@ class PortfolioOptimizer:
             f"sum={sum(target.weights.values()):.4f} ({target.weights})"
         )
 
-        # 1. Rate limit
-        if self._last_rebalance_ts > 0:
-            elapsed = now_ms - self._last_rebalance_ts
+        # 1. Rate limit (per-strategy via ctx["strategy_id"])
+        strategy_id = ctx.get("strategy_id", 0)
+        last_ts = self._last_rebalance_ts.get(strategy_id, 0)
+        if last_ts > 0:
+            elapsed = now_ms - last_ts
             if elapsed < cfg.min_rebalance_interval_ms:
                 logger.warning(
-                    f"[Optimizer] REJECTED — rate limit: {elapsed}ms < {cfg.min_rebalance_interval_ms}ms"
+                    f"[Optimizer] REJECTED — rate limit for strategy {strategy_id}: "
+                    f"{elapsed}ms < {cfg.min_rebalance_interval_ms}ms"
                 )
                 return ValidatedWeights(
                     original=target,
@@ -100,7 +103,7 @@ class PortfolioOptimizer:
         #    uses raw weight delta as proxy)
         weights = self._cap_turnover(weights, target.weights)
 
-        self._last_rebalance_ts = now_ms
+        self._last_rebalance_ts[strategy_id] = now_ms
 
         logger.info(
             f"[Optimizer] Validated: {len(weights)} symbols, "

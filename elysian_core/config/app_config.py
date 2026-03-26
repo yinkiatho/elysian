@@ -151,6 +151,37 @@ class MetaConfig:
     futures_venues: List[str] = field(default_factory=list)
 
 
+# ── Per-strategy config ────────────────────────────────────────────────────
+
+@dataclass
+class StrategyConfig:
+    """Typed config for a single strategy instance.
+
+    Parsed from the ``strategies`` list in config.yaml::
+
+        strategies:
+          - id: 1
+            name: "momentum_spot_binance"
+            class: "EventDrivenStrategy"
+            asset_type: "Spot"
+            venue: "Binance"
+            venues: ["Binance"]
+            allocation: 0.6
+            symbols: ["ETHUSDT", "BTCUSDT"]
+            params:
+              rebalance_interval_s: 60
+    """
+    id: int = 0
+    name: str = ""
+    class_name: str = ""
+    asset_type: str = "Spot"
+    venue: str = "Binance"
+    venues: List[str] = field(default_factory=lambda: ["Binance"])
+    allocation: float = 1.0
+    symbols: List[str] = field(default_factory=list)
+    params: Dict[str, Any] = field(default_factory=dict)
+
+
 # ── Top-level composite ─────────────────────────────────────────────────────
 
 @dataclass
@@ -162,6 +193,7 @@ class AppConfig:
     strategy: DictConfig = field(default_factory=DictConfig)
     secrets: SecretsConfig = field(default_factory=SecretsConfig)
     symbols: SymbolsConfig = field(default_factory=SymbolsConfig)
+    strategies: List[StrategyConfig] = field(default_factory=list)
 
     # Any extra YAML top-level sections not captured above
     extra: DictConfig = field(default_factory=DictConfig)
@@ -269,11 +301,26 @@ def load_app_config(
     execution = DictConfig(y.get("execution", {}))
     strategy_cfg = DictConfig(y.get("strategy", {}))
 
+    # Typed: strategies list (multi-strategy config)
+    strategies_list: List[StrategyConfig] = []
+    for s in y.get("strategies", []) or []:
+        strategies_list.append(StrategyConfig(
+            id=s.get("id", 0),
+            name=s.get("name", ""),
+            class_name=s.get("class", ""),
+            asset_type=s.get("asset_type", "Spot"),
+            venue=s.get("venue", "Binance"),
+            venues=s.get("venues", [s.get("venue", "Binance")]),
+            allocation=float(s.get("allocation", 1.0)),
+            symbols=s.get("symbols", []),
+            params=s.get("params", {}),
+        ))
+
     # Collect any YAML sections not explicitly handled above
     _KNOWN_KEYS = {
         "version_name", "strategy_id", "strategy_name",
         "spot", "futures", "pools",
-        "risk", "portfolio", "execution", "strategy",
+        "risk", "portfolio", "execution", "strategy", "strategies",
     }
     extra = DictConfig({k: v for k, v in y.items() if k not in _KNOWN_KEYS})
 
@@ -307,5 +354,6 @@ def load_app_config(
         strategy=strategy_cfg,
         secrets=secrets,
         symbols=symbols,
+        strategies=strategies_list,
         extra=extra,
     )

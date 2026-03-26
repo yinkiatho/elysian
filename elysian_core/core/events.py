@@ -70,6 +70,7 @@ class RebalanceCompleteEvent:
     result: RebalanceResult
     validated_weights: ValidatedWeights
     timestamp: int
+    strategy_id: int = 0
     event_type: EventType = field(default=EventType.REBALANCE_COMPLETE, init=False)
 
 

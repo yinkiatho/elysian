@@ -52,6 +52,7 @@ from elysian_core.core.signals import RebalanceResult, TargetWeights
 
 if TYPE_CHECKING:
     from elysian_core.core.event_bus import EventBus
+    from elysian_core.core.weight_aggregator import WeightAggregator
     from elysian_core.execution.engine import ExecutionEngine
     from elysian_core.risk.optimizer import PortfolioOptimizer
 
@@ -104,6 +105,7 @@ class RebalanceFSM(BaseFSM):
         event_bus: Optional["EventBus"] = None,
         cooldown_s: float = 0.0,
         name: str = "RebalanceFSM",
+        aggregator: Optional["WeightAggregator"] = None,
     ):
         super().__init__(
             initial_state=RebalanceState.IDLE,
@@ -114,6 +116,7 @@ class RebalanceFSM(BaseFSM):
         self._optimizer = optimizer
         self._execution_engine = execution_engine
         self._cooldown_s = cooldown_s
+        self._aggregator = aggregator
 
         # Most recent rebalance result for inspection
         self._last_result: Optional[RebalanceResult] = None
@@ -171,8 +174,24 @@ class RebalanceFSM(BaseFSM):
             await self.trigger("no_signal", **ctx)
             return
 
-        ctx["target_weights"] = weights
-        logger.info("[%s] Weights computed: %d symbols", self._name, len(weights))
+        # Tag context with strategy_id for downstream stages
+        ctx["strategy_id"] = self._strategy.strategy_id
+
+        if self._aggregator is not None:
+            # Multi-strategy mode: store this strategy's weights, merge all
+            await self._aggregator.update_weights(self._strategy.strategy_id, weights)
+            merged = await self._aggregator.get_merged_weights()
+            ctx["target_weights"] = merged
+            ctx["strategy_weights"] = weights  # keep original for audit
+            logger.info(
+                "[%s] Weights computed: %d symbols (merged: %d symbols from aggregator)",
+                self._name, len(weights), len(merged),
+            )
+        else:
+            # Single-strategy mode (no aggregator)
+            ctx["target_weights"] = weights
+            logger.info("[%s] Weights computed: %d symbols", self._name, len(weights))
+
         await self.trigger("weights_ready", **ctx)
 
     async def _on_enter_validating(self, **ctx) -> None:
@@ -234,12 +253,40 @@ class RebalanceFSM(BaseFSM):
             self._name, result.submitted, result.failed,
         )
 
+        # ── Fill attribution to shadow books ────────────────────────────
+        mark_prices = ctx.get("_mark_prices", {})
+        portfolio_total_value = ctx.get("_portfolio_total_value", 0.0)
+
+        if self._aggregator is not None and portfolio_total_value > 0:
+            # Multi-strategy: reconcile ALL shadow books via aggregator
+            await self._aggregator.attribute_fills(mark_prices, portfolio_total_value)
+            if result.failed > 0:
+                logger.warning(
+                    "[%s] %d orders failed — shadow books may drift from Portfolio. "
+                    "Reconciliation recommended.",
+                    self._name, result.failed,
+                )
+        else:
+            # Single-strategy: reconcile this strategy's shadow book directly
+            book = getattr(self._strategy, '_shadow_book', None)
+            if book is not None and portfolio_total_value > 0:
+                from elysian_core.core.shadow_book import reconcile_shadow_books
+                weights = ctx.get("target_weights", {})
+                reconcile_shadow_books(
+                    shadow_books={self._strategy.strategy_id: book},
+                    strategy_weights={self._strategy.strategy_id: weights},
+                    allocations={self._strategy.strategy_id: 1.0},
+                    mark_prices=mark_prices,
+                    portfolio_total_value=portfolio_total_value,
+                )
+
         # Publish RebalanceCompleteEvent for strategy hooks
         if self._event_bus:
             await self._event_bus.publish(RebalanceCompleteEvent(
                 result=result,
                 validated_weights=validated,
                 timestamp=int(time.time() * 1000),
+                strategy_id=self._strategy.strategy_id,
             ))
 
         await self.trigger("complete", **ctx)

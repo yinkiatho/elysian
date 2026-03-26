@@ -15,11 +15,12 @@ Pipeline per rebalance cycle:
 
 """
 
+import asyncio
 import time
 from typing import Any, Dict, List, Optional
 
 from elysian_core.connectors.base import AbstractDataFeed, SpotExchangeConnector
-from elysian_core.core.enums import OrderType, Side, Venue
+from elysian_core.core.enums import OrderType, Side, Venue, AssetType
 from elysian_core.core.portfolio import Portfolio
 from elysian_core.core.signals import OrderIntent, RebalanceResult, ValidatedWeights
 from elysian_core.risk.risk_config import RiskConfig
@@ -36,6 +37,9 @@ def _round_step(value: float, step: float) -> float:
 
 
 class ExecutionEngine:
+    '''
+    Currently designed for one execution engine per venue
+    '''
 
     def __init__(
         self,
@@ -47,6 +51,9 @@ class ExecutionEngine:
         default_order_type: OrderType = OrderType.MARKET,
         symbol_venue_map: Optional[Dict[str, Venue]] = None,
         cfg: Optional[Any] = None,
+        asset_type: AssetType = None,
+        venue: Venue = None
+        
     ):
         self._exchanges = exchanges
         self._portfolio = portfolio
@@ -56,65 +63,75 @@ class ExecutionEngine:
         self._default_order_type = default_order_type
         self._symbol_venue_map = symbol_venue_map or {}
         self.cfg = cfg
+        self.asset_type = asset_type
+        self.venue = venue
+        # Lock to prevent concurrent execute() calls from multiple strategy FSMs
+        self._execute_lock = asyncio.Lock()
 
     # ── Public ───────────────────────────────────────────────────────────────
 
     async def execute(self, validated: ValidatedWeights, **ctx) -> RebalanceResult:
         """Execute a full rebalance cycle from validated weights to exchange orders."""
-        logger.info(
-            f"[ExecutionEngine] Starting rebalance: {len(validated.weights)} symbols"
-        )
-        mark_prices = self._get_mark_prices()
-        logger.info(f"[ExecutionEngine] Mark prices snapshot: {len(mark_prices)} symbols")
-        intents = self.compute_order_intents(validated, mark_prices)
-
-        if not intents:
-            logger.info("[ExecutionEngine] No order intents generated — portfolio already aligned")
-            now_ms = int(time.time() * 1000)
-            return RebalanceResult(
-                intents=(), submitted=0, failed=0, timestamp=now_ms,
-            )
-
-        # Partition: sells first (free capital), then buys
-        sells = [i for i in intents if i.side == Side.SELL]
-        buys = [i for i in intents if i.side == Side.BUY]
-        logger.info(
-            f"[ExecutionEngine] Order plan: {len(sells)} sells, {len(buys)} buys "
-            f"(sells execute first)"
-        )
-
-        submitted = 0
-        failed = 0
-        errors: List[str] = []
-
-        for intent in sells + buys:
-            ok = await self._submit_order(intent)
-            if ok:
-                submitted += 1
-            else:
-                failed += 1
-                errors.append(f"{intent.side.value} {intent.symbol} qty={intent.quantity:.6f}")
-
-        now_ms = int(time.time() * 1000)
-        result = RebalanceResult(
-            intents=tuple(intents),
-            submitted=submitted,
-            failed=failed,
-            timestamp=now_ms,
-            errors=tuple(errors),
-        )
-
-        if failed > 0:
-            logger.warning(
-                f"[ExecutionEngine] Rebalance complete with errors: "
-                f"{submitted} submitted, {failed} FAILED — {errors}"
-            )
-        else:
+        async with self._execute_lock:
             logger.info(
-                f"[ExecutionEngine] Rebalance complete: "
-                f"{submitted}/{len(intents)} orders submitted successfully"
+                f"[ExecutionEngine] Starting rebalance: {len(validated.weights)} symbols"
             )
-        return result
+            mark_prices = self._get_mark_prices()
+            logger.info(f"[ExecutionEngine] Mark prices snapshot: {len(mark_prices)} symbols")
+
+            # Expose mark prices and portfolio value for downstream fill attribution
+            ctx["_mark_prices"] = mark_prices
+            ctx["_portfolio_total_value"] = self._portfolio.total_value(mark_prices)
+
+            intents = self.compute_order_intents(validated, mark_prices)
+
+            if not intents:
+                logger.info("[ExecutionEngine] No order intents generated — portfolio already aligned")
+                now_ms = int(time.time() * 1000)
+                return RebalanceResult(
+                    intents=(), submitted=0, failed=0, timestamp=now_ms,
+                )
+
+            # Partition: sells first (free capital), then buys
+            sells = [i for i in intents if i.side == Side.SELL]
+            buys = [i for i in intents if i.side == Side.BUY]
+            logger.info(
+                f"[ExecutionEngine] Order plan: {len(sells)} sells, {len(buys)} buys "
+                f"(sells execute first)"
+            )
+
+            submitted = 0
+            failed = 0
+            errors: List[str] = []
+
+            for intent in sells + buys:
+                ok = await self._submit_order(intent)
+                if ok:
+                    submitted += 1
+                else:
+                    failed += 1
+                    errors.append(f"{intent.side.value} {intent.symbol} qty={intent.quantity:.6f}")
+
+            now_ms = int(time.time() * 1000)
+            result = RebalanceResult(
+                intents=tuple(intents),
+                submitted=submitted,
+                failed=failed,
+                timestamp=now_ms,
+                errors=tuple(errors),
+            )
+
+            if failed > 0:
+                logger.warning(
+                    f"[ExecutionEngine] Rebalance complete with errors: "
+                    f"{submitted} submitted, {failed} FAILED — {errors}"
+                )
+            else:
+                logger.info(
+                    f"[ExecutionEngine] Rebalance complete: "
+                    f"{submitted}/{len(intents)} orders submitted successfully"
+                )
+            return result
 
     def compute_order_intents(
         self, validated: ValidatedWeights, mark_prices: Dict[str, float]

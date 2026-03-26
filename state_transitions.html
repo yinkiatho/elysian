@@ -8,16 +8,16 @@
         import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
         mermaid.initialize({
             startOnLoad: true,
-            theme: 'dark',
+            theme: 'default',
             flowchart: { curve: 'basis', padding: 20 },
             stateDiagram: { padding: 20 },
             themeVariables: {
-                primaryColor: '#1a1a2e',
-                primaryTextColor: '#e0e0e0',
-                primaryBorderColor: '#4a9eff',
-                lineColor: '#4a9eff',
-                secondaryColor: '#16213e',
-                tertiaryColor: '#0f3460',
+                primaryColor: '#dbeafe',
+                primaryTextColor: '#1e3a5f',
+                primaryBorderColor: '#2563eb',
+                lineColor: '#2563eb',
+                secondaryColor: '#eff6ff',
+                tertiaryColor: '#bfdbfe',
                 fontSize: '14px'
             }
         });
@@ -26,8 +26,8 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-            background: #0a0a1a;
-            color: #e0e0e0;
+            background: #f8f9fa;
+            color: #1a1a2e;
             padding: 40px 20px;
             line-height: 1.6;
         }
@@ -36,13 +36,13 @@
             font-size: 2.2rem;
             font-weight: 300;
             margin-bottom: 8px;
-            color: #fff;
+            color: #1a1a2e;
             letter-spacing: 2px;
         }
-        h1 span { color: #4a9eff; font-weight: 600; }
+        h1 span { color: #2563eb; font-weight: 600; }
         .subtitle {
             text-align: center;
-            color: #888;
+            color: #6b7280;
             margin-bottom: 50px;
             font-size: 1rem;
         }
@@ -51,32 +51,32 @@
             font-weight: 400;
             margin: 50px 0 10px;
             padding-bottom: 8px;
-            border-bottom: 1px solid #222;
-            color: #4a9eff;
+            border-bottom: 1px solid #dee2e6;
+            color: #2563eb;
         }
-        h2 span { color: #888; font-size: 0.9rem; font-weight: 300; margin-left: 12px; }
+        h2 span { color: #6b7280; font-size: 0.9rem; font-weight: 300; margin-left: 12px; }
         h3 {
-            color: #ccc;
+            color: #374151;
             font-size: 1.15rem;
             margin: 30px 0 10px;
             font-weight: 500;
         }
         p.desc {
-            color: #aaa;
+            color: #4b5563;
             margin-bottom: 20px;
             max-width: 960px;
             font-size: 0.95rem;
         }
         .file-ref {
-            color: #888;
+            color: #6b7280;
             font-size: 0.82rem;
             font-style: italic;
             margin-top: -12px;
             margin-bottom: 16px;
         }
         .mermaid {
-            background: #0f0f1f;
-            border: 1px solid #1a1a3e;
+            background: #ffffff;
+            border: 1px solid #dee2e6;
             border-radius: 12px;
             padding: 30px 20px;
             margin: 20px 0 40px;
@@ -90,44 +90,45 @@
             font-size: 0.9rem;
         }
         th {
-            background: #1a1a2e;
-            color: #4a9eff;
+            background: #e8f0fe;
+            color: #1d4ed8;
             text-align: left;
             padding: 10px 14px;
-            border-bottom: 2px solid #222;
+            border-bottom: 2px solid #c7d7fd;
         }
         td {
             padding: 8px 14px;
-            border-bottom: 1px solid #1a1a1a;
-            color: #ccc;
+            border-bottom: 1px solid #e5e7eb;
+            color: #374151;
         }
-        tr:hover td { background: #111122; }
+        tr:nth-child(odd) td { background: #f9fafb; }
+        tr:hover td { background: #f0f4ff; }
         code {
-            background: #1a1a2e;
+            background: #e8f0fe;
             padding: 2px 6px;
             border-radius: 4px;
             font-size: 0.88em;
-            color: #7cb7ff;
+            color: #1d4ed8;
         }
         .tag-terminal {
-            background: #2a0a0a;
-            color: #ff6b6b;
+            background: #fef2f2;
+            color: #dc2626;
             padding: 2px 8px;
             border-radius: 4px;
             font-size: 0.82em;
             font-weight: 600;
         }
         .tag-active {
-            background: #0a2a0a;
-            color: #6bff6b;
+            background: #f0fdf4;
+            color: #16a34a;
             padding: 2px 8px;
             border-radius: 4px;
             font-size: 0.82em;
             font-weight: 600;
         }
         .tag-wildcard {
-            background: #2a2a0a;
-            color: #ffd93d;
+            background: #fefce8;
+            color: #ca8a04;
             padding: 2px 8px;
             border-radius: 4px;
             font-size: 0.82em;
@@ -135,18 +136,18 @@
         }
         .container { max-width: 1400px; margin: 0 auto; }
         .note-box {
-            background: #111128;
-            border-left: 3px solid #4a9eff;
+            background: #eff6ff;
+            border-left: 3px solid #2563eb;
             padding: 14px 18px;
             margin: 16px 0 24px;
             border-radius: 0 8px 8px 0;
             font-size: 0.92rem;
-            color: #bbb;
+            color: #374151;
         }
-        .note-box strong { color: #4a9eff; }
+        .note-box strong { color: #2563eb; }
         .divider {
             border: none;
-            border-top: 1px solid #222;
+            border-top: 1px solid #dee2e6;
             margin: 60px 0 20px;
         }
     </style>
@@ -270,8 +271,7 @@
         stateDiagram-v2
             [*] --> IDLE
 
-            IDLE --> COMPUTING : timer_tick
-            IDLE --> COMPUTING : signal
+            IDLE --> COMPUTING : signal (via request())
 
             COMPUTING --> VALIDATING : weights_ready
             COMPUTING --> IDLE : no_signal
@@ -286,12 +286,12 @@
 
             ERROR --> IDLE : retry
 
-            IDLE --> SUSPENDED : suspend
-            COMPUTING --> SUSPENDED : suspend
-            VALIDATING --> SUSPENDED : suspend
-            EXECUTING --> SUSPENDED : suspend
-            COOLDOWN --> SUSPENDED : suspend
-            ERROR --> SUSPENDED : suspend
+            IDLE --> SUSPENDED : suspend [wildcard]
+            COMPUTING --> SUSPENDED : suspend [wildcard]
+            VALIDATING --> SUSPENDED : suspend [wildcard]
+            EXECUTING --> SUSPENDED : suspend [wildcard]
+            COOLDOWN --> SUSPENDED : suspend [wildcard]
+            ERROR --> SUSPENDED : suspend [wildcard]
 
             SUSPENDED --> IDLE : resume
     </div>
@@ -301,17 +301,10 @@
         <tr><th>From State</th><th>Trigger</th><th>To State</th><th>Callback</th><th>Description</th></tr>
         <tr>
             <td><code>IDLE</code></td>
-            <td><code>timer_tick</code></td>
-            <td><code>COMPUTING</code></td>
-            <td><code>_on_enter_computing</code></td>
-            <td>Periodic timer fired via <code>_fire_tick()</code> &rarr; <code>_tick()</code>. Only fires if currently IDLE; otherwise the tick is skipped and rescheduled.</td>
-        </tr>
-        <tr>
-            <td><code>IDLE</code></td>
             <td><code>signal</code></td>
             <td><code>COMPUTING</code></td>
             <td><code>_on_enter_computing</code></td>
-            <td>Manual request via <code>request()</code> or <code>strategy.request_rebalance()</code>. Returns <code>False</code> if FSM is not IDLE.</td>
+            <td>Request via <code>RebalanceFSM.request()</code> or <code>strategy.request_rebalance()</code>. Only triggers if FSM is IDLE — returns <code>False</code> silently if busy. Strategies drive timing via <code>run_forever()</code> loops or event hooks.</td>
         </tr>
         <tr>
             <td><code>COMPUTING</code></td>
@@ -360,28 +353,28 @@
             <td><code>cooldown_done</code></td>
             <td><code>IDLE</code></td>
             <td><em>None</em></td>
-            <td>Cooldown timer expired. Fired by <code>call_later(cooldown_s, _fire_cooldown_done)</code>. Timer rescheduled via <code>_schedule_tick()</code>.</td>
+            <td>Cooldown timer expired. Fired by <code>call_later(cooldown_s, _fire_cooldown_done)</code> &rarr; <code>_end_cooldown()</code>. If <code>cooldown_s == 0</code>, transitions immediately.</td>
         </tr>
         <tr>
             <td><code>ERROR</code></td>
             <td><code>retry</code></td>
             <td><code>IDLE</code></td>
             <td><em>None</em></td>
-            <td>Auto-retry after cooldown period. Fired by <code>call_later(cooldown_s, _fire_retry)</code>. Timer rescheduled.</td>
+            <td>Auto-retry after cooldown period. Fired by <code>call_later(cooldown_s, _fire_retry)</code> &rarr; <code>_do_retry()</code>. If <code>cooldown_s == 0</code>, retries immediately.</td>
         </tr>
         <tr>
             <td><code>*</code> <span class="tag-wildcard">WILDCARD</span></td>
             <td><code>suspend</code></td>
             <td><code>SUSPENDED</code></td>
             <td><code>_on_enter_suspended</code></td>
-            <td>Matches ANY non-terminal state. Cancels timer, clears <code>_pending_weights</code> and <code>_pending_validated</code>. Called via <code>strategy.suspend_rebalancing()</code>.</td>
+            <td>Matches ANY non-terminal state. Logs WARNING and pauses rebalancing. Called via <code>strategy.suspend_rebalancing()</code>.</td>
         </tr>
         <tr>
             <td><code>SUSPENDED</code></td>
             <td><code>resume</code></td>
             <td><code>IDLE</code></td>
             <td><code>_on_resume</code></td>
-            <td>Resumes rebalancing. Reschedules timer if <code>_timer_interval</code> is set. Called via <code>strategy.resume_rebalancing()</code>.</td>
+            <td>Resumes rebalancing, logs INFO. Called via <code>strategy.resume_rebalancing()</code>.</td>
         </tr>
     </table>
 
@@ -391,11 +384,12 @@
         <tr>
             <td><code>_on_enter_computing(**ctx)</code></td>
             <td>
-                1. Publishes <code>RebalanceCycleEvent</code> via <code>_publish_cycle_event("timer_tick")</code><br>
+                1. Publishes <code>RebalanceCycleEvent</code> via <code>_publish_cycle_event("signal")</code><br>
                 2. Calls <code>self._strategy.compute_weights(**ctx)</code> (handles both sync and async)<br>
                 3. On exception: triggers <code>"no_signal"</code><br>
                 4. On empty/None result: triggers <code>"no_signal"</code><br>
-                5. On success: stores weights in <code>_pending_weights</code>, triggers <code>"weights_ready"</code>
+                5. If <code>aggregator</code> set: stores weights, merges all strategies via <code>aggregator.get_merged_weights()</code>, tags <code>ctx["target_weights"]</code> with merged<br>
+                6. Otherwise: tags <code>ctx["target_weights"]</code> with raw weights, triggers <code>"weights_ready"</code>
             </td>
             <td><code>weights_ready</code> or <code>no_signal</code></td>
         </tr>
@@ -415,78 +409,73 @@
             <td><code>_on_enter_executing(**ctx)</code></td>
             <td>
                 1. Publishes <code>RebalanceCycleEvent</code><br>
-                2. Calls <code>await self._execution_engine.execute(self._pending_validated, **ctx)</code><br>
-                3. On exception: triggers <code>"failed"</code> with <code>error=e</code><br>
-                4. On success: stores result in <code>_last_result</code><br>
-                5. Publishes <code>RebalanceCompleteEvent(result, validated_weights, timestamp)</code> to EventBus<br>
-                6. Triggers <code>"complete"</code>
+                2. Reads <code>ctx["validated_weights"]</code> from validating stage<br>
+                3. Calls <code>await self._execution_engine.execute(validated, **ctx)</code><br>
+                4. On exception: triggers <code>"failed"</code> with <code>error=e</code><br>
+                5. On success: stores result in <code>_last_result</code>; runs shadow book reconciliation<br>
+                6. Publishes <code>RebalanceCompleteEvent(result, validated_weights, timestamp)</code> to EventBus<br>
+                7. Triggers <code>"complete"</code>
             </td>
             <td><code>complete</code> or <code>failed</code></td>
         </tr>
         <tr>
             <td><code>_on_enter_cooldown(**ctx)</code></td>
             <td>
-                1. Publishes <code>RebalanceCycleEvent</code><br>
-                2. Clears <code>_pending_weights</code> and <code>_pending_validated</code><br>
-                3. Schedules <code>call_later(cooldown_s, _fire_cooldown_done)</code>
+                1. Publishes <code>RebalanceCycleEvent("cooldown")</code><br>
+                2. If <code>cooldown_s &gt; 0</code>: schedules <code>call_later(cooldown_s, _fire_cooldown_done)</code><br>
+                3. If <code>cooldown_s == 0</code>: immediately triggers <code>"cooldown_done"</code>
             </td>
-            <td><code>cooldown_done</code> (after timer)</td>
+            <td><code>cooldown_done</code> (after timer or immediately)</td>
         </tr>
         <tr>
             <td><code>_on_enter_error(error=None, **ctx)</code></td>
             <td>
-                1. Publishes <code>RebalanceCycleEvent</code><br>
+                1. Publishes <code>RebalanceCycleEvent("failed")</code><br>
                 2. Logs error at ERROR level<br>
-                3. Clears <code>_pending_weights</code> and <code>_pending_validated</code><br>
-                4. Schedules <code>call_later(cooldown_s, _fire_retry)</code> for auto-recovery
+                3. If <code>cooldown_s &gt; 0</code>: schedules <code>call_later(cooldown_s, _fire_retry)</code> for auto-recovery<br>
+                4. If <code>cooldown_s == 0</code>: immediately triggers <code>"retry"</code>
             </td>
-            <td><code>retry</code> (after cooldown timer)</td>
+            <td><code>retry</code> (after cooldown timer or immediately)</td>
         </tr>
         <tr>
             <td><code>_on_enter_suspended(**ctx)</code></td>
             <td>
-                1. Publishes <code>RebalanceCycleEvent</code><br>
-                2. Cancels <code>_timer_handle</code> (stops periodic ticks)<br>
-                3. Clears <code>_pending_weights</code> and <code>_pending_validated</code><br>
-                4. Logs WARNING: "SUSPENDED &mdash; rebalancing paused"
+                1. Publishes <code>RebalanceCycleEvent("suspend")</code><br>
+                2. Logs WARNING: "SUSPENDED &mdash; rebalancing paused"
             </td>
             <td>Waits for explicit <code>resume</code></td>
         </tr>
         <tr>
             <td><code>_on_resume(**ctx)</code></td>
             <td>
-                1. Publishes <code>RebalanceCycleEvent</code><br>
-                2. Logs "Resumed &mdash; back to IDLE"<br>
-                3. If <code>_timer_interval</code> is set: calls <code>_schedule_tick()</code> to restart periodic timer
+                1. Publishes <code>RebalanceCycleEvent("resume")</code><br>
+                2. Logs INFO: "Resumed &mdash; back to IDLE"
             </td>
-            <td>Returns to IDLE, timer resumes</td>
+            <td>Returns to IDLE</td>
         </tr>
     </table>
 
-    <h3>Timer Mechanism</h3>
+    <h3>Timing Strategy</h3>
     <div class="note-box">
-        <strong>Timer Flow:</strong>
-        <code>start_timer(interval_s)</code> &rarr; <code>_schedule_tick()</code> &rarr; <code>call_later(interval, _fire_tick)</code> &rarr;
-        <code>_fire_tick()</code> checks if IDLE:
+        <strong>The FSM has no built-in timer.</strong> The strategy controls when to trigger rebalance cycles:
         <ul style="margin-top:6px;">
-            <li>If IDLE: creates task <code>_tick()</code> which calls <code>trigger("timer_tick")</code></li>
-            <li>If NOT IDLE: logs "Skipping tick &mdash; still in {state}", calls <code>_schedule_tick()</code> again</li>
+            <li><strong>Timer-driven:</strong> Override <code>run_forever()</code> with <code>asyncio.sleep(interval)</code> + <code>await self.request_rebalance()</code></li>
+            <li><strong>Event-driven:</strong> Call <code>await self.request_rebalance()</code> from <code>on_kline()</code> or <code>on_orderbook_update()</code> when a signal condition is met</li>
+            <li><strong>Hybrid:</strong> Combine both — periodic background loop + reactive event hooks</li>
         </ul>
-        After cooldown or error recovery, <code>_schedule_tick()</code> is called again to restart the cycle.
-        <br><br>
-        <strong>Manual requests:</strong>
-        <code>strategy.request_rebalance()</code> &rarr; <code>RebalanceFSM.request()</code> &rarr;
-        checks if state == IDLE, then calls <code>trigger("signal")</code>. Returns <code>False</code> if busy.
+        <br>
+        <strong>Request flow:</strong>
+        <code>strategy.request_rebalance(**ctx)</code> &rarr; <code>RebalanceFSM.request(**ctx)</code> &rarr;
+        checks if state == IDLE, then calls <code>trigger("signal", **ctx)</code>. Returns <code>False</code> silently if busy.
     </div>
 
     <h3>Public API</h3>
     <table>
         <tr><th>Method</th><th>Signature</th><th>Purpose</th></tr>
-        <tr><td><code>request</code></td><td><code>async request() -> bool</code></td><td>Request a manual rebalance cycle. Returns True if triggered (IDLE), False if busy.</td></tr>
-        <tr><td><code>start_timer</code></td><td><code>start_timer(interval_s: float)</code></td><td>Begin periodic rebalance ticks at the given interval.</td></tr>
-        <tr><td><code>stop_timer</code></td><td><code>stop_timer()</code></td><td>Cancel the periodic timer and signal <code>wait()</code> to return.</td></tr>
-        <tr><td><code>wait</code></td><td><code>async wait()</code></td><td>Block until <code>stop_timer()</code> is called. Used in <code>run_forever()</code>.</td></tr>
-        <tr><td><code>last_result</code></td><td><code>@property -> Optional[RebalanceResult]</code></td><td>The most recent rebalance result.</td></tr>
+        <tr><td><code>request</code></td><td><code>async request(**ctx) -> bool</code></td><td>Request a rebalance cycle. Returns True if triggered (IDLE), False if busy (mid-cycle, cooldown, suspended, error).</td></tr>
+        <tr><td><code>last_result</code></td><td><code>@property -> Optional[RebalanceResult]</code></td><td>The most recent rebalance result, or None if no cycle has completed.</td></tr>
+        <tr><td><code>suspend_rebalancing</code></td><td><code>async strategy.suspend_rebalancing()</code></td><td>Triggers the wildcard "suspend" transition from any state.</td></tr>
+        <tr><td><code>resume_rebalancing</code></td><td><code>async strategy.resume_rebalancing()</code></td><td>Triggers "resume" from SUSPENDED state.</td></tr>
     </table>
 
     <hr class="divider">
@@ -837,13 +826,13 @@
 
             C -->|"stop#40;#41;"| G["Stopped\nunsubscribe KLINE + BALANCE_UPDATE\n_event_bus = None"]
 
-            style A fill:#1a1a2e,stroke:#888,color:#ccc
-            style B fill:#0a1a1a,stroke:#6bffff,color:#6bffff
-            style C fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
-            style D fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
-            style E fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
-            style F fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
-            style G fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b
+            style A fill:#f3f4f6,stroke:#9ca3af,color:#4b5563
+            style B fill:#ecfeff,stroke:#0891b2,color:#155e75
+            style C fill:#f0fdf4,stroke:#16a34a,color:#166534
+            style D fill:#fefce8,stroke:#ca8a04,color:#713f12
+            style E fill:#fefce8,stroke:#ca8a04,color:#713f12
+            style F fill:#fefce8,stroke:#ca8a04,color:#713f12
+            style G fill:#fef2f2,stroke:#ef4444,color:#991b1b
     </div>
 
     <h3>Position State</h3>
@@ -891,9 +880,9 @@
             D -->|"run_multiplex_feeds#40;#41;\nSpawn reader + 4 workers"| E["Running\nReader: WS -> Queue\nWorkers: Queue -> Feed + EventBus"]
             E -->|"stop#40;#41;"| F["Stopped\nTasks cancelled"]
 
-            style A fill:#1a1a2e,stroke:#888,color:#ccc
-            style E fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
-            style F fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b
+            style A fill:#f3f4f6,stroke:#9ca3af,color:#4b5563
+            style E fill:#f0fdf4,stroke:#16a34a,color:#166534
+            style F fill:#fef2f2,stroke:#ef4444,color:#991b1b
     </div>
 
     <h3>Feed Internal State</h3>
@@ -980,10 +969,10 @@
             RB4 -->|"RebalanceCompleteEvent"| SS4
             OS4 -->|"OrderUpdateEvent"| SS4
 
-            style Runner fill:#0a0a1a,stroke:#4a9eff,color:#4a9eff
-            style Strategy fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
-            style Rebalance fill:#1a1a0a,stroke:#ffd93d,color:#ffd93d
-            style Orders fill:#1a0a1a,stroke:#ff6bff,color:#ff6bff
+            style Runner fill:#eff6ff,stroke:#2563eb,color:#1e40af
+            style Strategy fill:#f0fdf4,stroke:#16a34a,color:#166534
+            style Rebalance fill:#fefce8,stroke:#ca8a04,color:#713f12
+            style Orders fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
     </div>
 
     <hr class="divider">
@@ -1007,8 +996,8 @@
             B -->|"exception in callback"| D["Error logged\nloop continues"]
             D --> B
 
-            style B fill:#0a1a0a,stroke:#6bff6b,color:#6bff6b
-            style C fill:#1a0a0a,stroke:#ff6b6b,color:#ff6b6b
+            style B fill:#f0fdf4,stroke:#16a34a,color:#166534
+            style C fill:#fef2f2,stroke:#ef4444,color:#991b1b
     </div>
 
     <table>

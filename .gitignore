@@ -211,3 +211,10 @@ __pycache__/
 
 
 .python-version
+
+
+# Claude Code and ruflow
+.claude
+.claude-flow
+.swarm
+.mcp.json

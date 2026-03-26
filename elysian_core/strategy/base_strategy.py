@@ -26,15 +26,16 @@ Usage::
 import asyncio
 import time
 from concurrent.futures import ProcessPoolExecutor
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, FrozenSet, Optional, Set, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from elysian_core.execution.engine import ExecutionEngine
     from elysian_core.risk.optimizer import PortfolioOptimizer
     from elysian_core.config.app_config import AppConfig
+    from elysian_core.core.shadow_book import ShadowBook
 
 from elysian_core.connectors.base import SpotExchangeConnector, AbstractDataFeed
-from elysian_core.core.enums import Side, StrategyState, Venue
+from elysian_core.core.enums import Side, StrategyState, Venue, AssetType
 from elysian_core.core.event_bus import EventBus
 from elysian_core.core.portfolio import Portfolio
 from elysian_core.core.events import (
@@ -60,6 +61,8 @@ class SpotStrategy:
     All ``on_*`` hooks have default no-op implementations — override only the
     ones you need.  For CPU-heavy calculations, use :meth:`run_heavy` to
     offload work to a :class:`ProcessPoolExecutor`.
+    
+    Dictate one Spot Strategy to live in one exchange and asset type
     """
 
     def __init__(
@@ -71,6 +74,11 @@ class SpotStrategy:
         optimizer: Optional["PortfolioOptimizer"] = None,
         execution_engine: Optional["ExecutionEngine"] = None,
         cfg: Optional["AppConfig"] = None,
+        asset_type: AssetType = AssetType.SPOT,
+        venue: Venue = Venue.BINANCE,
+        venues: Optional[Set[Venue]] = None,
+        strategy_id: int = 0,
+        strategy_name: str = 'unknown_strategy'
     ):
         self._exchanges = exchanges
         self._event_bus = event_bus
@@ -80,8 +88,13 @@ class SpotStrategy:
         self._optimizer = optimizer
         self._execution_engine = execution_engine
         self.cfg = cfg
-        self.portfolio = Portfolio()
-
+        self.asset_type = asset_type
+        self.venue = venue
+        # Venue set for event filtering — forward-compatible with cross-venue strategies
+        self.venues: FrozenSet[Venue] = frozenset(venues) if venues is not None else frozenset({venue})
+        self.strategy_id = strategy_id
+        self.strategy_name = strategy_name
+        
         # Lifecycle state
         self._state = StrategyState.CREATED
 
@@ -90,6 +103,15 @@ class SpotStrategy:
 
         # Stop signal — set by stop() so run_forever() can unblock
         self._stop_event = asyncio.Event()
+        
+        # Shadow book — per-strategy virtual position ledger.
+        # Strategies read this (not the aggregate Portfolio) for their own
+        # positions, cash, weights, and PnL.  Set by StrategyRunner.setup_strategy().
+        self._shadow_book: Optional["ShadowBook"] = None
+
+        # Portfolio reference — kept for backward compat but strategies should
+        # use _shadow_book instead.  Managed by StrategyRunner, NOT by strategy.
+        self.portfolio: Optional[Portfolio] = None
 
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -100,11 +122,24 @@ class SpotStrategy:
         return self._state
 
     @property
+    def shadow_book(self) -> Optional["ShadowBook"]:
+        """This strategy's virtual position ledger.
+
+        Use this (not the aggregate Portfolio) to read your own positions,
+        cash, weights, and PnL::
+
+            my_eth_pos = self.shadow_book.position("ETHUSDT")
+            my_nav = self.shadow_book.nav
+            my_weights = self.shadow_book.current_weights()
+        """
+        return self._shadow_book
+
+    @property
     def rebalance_fsm(self) -> Optional[RebalanceFSM]:
         """The rebalance cycle FSM, or None if not configured."""
         return self._rebalance_fsm
 
-    async def start(self):
+    async def start(self, aggregator=None):
         """Register all hooks with the event bus and call :meth:`on_start`."""
         if self._state != StrategyState.CREATED:
             logger.warning(f"[Strategy] start() called in state {self._state.name}, ignoring")
@@ -119,7 +154,6 @@ class SpotStrategy:
         self._event_bus.subscribe(EventType.BALANCE_UPDATE, self._dispatch_balance)
         self._event_bus.subscribe(EventType.REBALANCE_COMPLETE, self._dispatch_rebalance)
 
-        # Initialize rebalance FSM if the pipeline is fully configured
         if self._optimizer is not None and self._execution_engine is not None:
             self._rebalance_fsm = RebalanceFSM(
                 strategy=self,
@@ -127,6 +161,7 @@ class SpotStrategy:
                 execution_engine=self._execution_engine,
                 event_bus=self._event_bus,
                 name=f"{self.__class__.__name__}.RebalanceFSM",
+                aggregator=aggregator,
             )
             logger.info(f"[Strategy] RebalanceFSM initialized for {self.__class__.__name__}")
 
@@ -144,6 +179,9 @@ class SpotStrategy:
             return
 
         self._state = StrategyState.STOPPING
+        # NOTE: Portfolio.stop() is the StrategyRunner's job — the portfolio
+        # is shared across strategies, so one strategy stopping must NOT
+        # unsubscribe the shared portfolio from the event bus.
         logger.info(f"[Strategy] {self.__class__.__name__} stopping...")
 
         # Signal run_forever() to unblock
@@ -204,6 +242,11 @@ class SpotStrategy:
             self._state = StrategyState.RUNNING
 
     async def _dispatch_kline(self, event: KlineEvent):
+        if event.venue not in self.venues:
+            return
+        # Keep shadow book mark prices in sync with live klines
+        if self._shadow_book is not None and event.kline.close and event.kline.close > 0:
+            self._shadow_book.update_mark_prices({event.symbol: event.kline.close})
         self._mark_running()
         try:
             await self.on_kline(event)
@@ -211,24 +254,32 @@ class SpotStrategy:
             logger.error(f"SpotStrategy.on_kline error: {e}", exc_info=True)
 
     async def _dispatch_ob(self, event: OrderBookUpdateEvent):
+        if event.venue not in self.venues:
+            return
         try:
             await self.on_orderbook_update(event)
         except Exception as e:
             logger.error(f"SpotStrategy.on_orderbook_update error: {e}", exc_info=True)
 
     async def _dispatch_order(self, event: OrderUpdateEvent):
+        if event.venue not in self.venues:
+            return
         try:
             await self.on_order_update(event)
         except Exception as e:
             logger.error(f"SpotStrategy.on_order_update error: {e}", exc_info=True)
 
     async def _dispatch_balance(self, event: BalanceUpdateEvent):
+        if event.venue not in self.venues:
+            return
         try:
             await self.on_balance_update(event)
         except Exception as e:
             logger.error(f"SpotStrategy.on_balance_update error: {e}", exc_info=True)
 
     async def _dispatch_rebalance(self, event: RebalanceCompleteEvent):
+        if hasattr(event, 'strategy_id') and event.strategy_id != self.strategy_id:
+            return
         try:
             await self.on_rebalance_complete(event)
         except Exception as e:
