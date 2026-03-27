@@ -23,7 +23,8 @@ import time
 from collections import deque
 from typing import Deque, Dict, List, Optional
 
-from elysian_core.core.enums import Side, Venue
+from elysian_core.core.enums import OrderStatus, Side, Venue
+from elysian_core.core.events import EventType
 from elysian_core.core.portfolio import Fill
 from elysian_core.core.position import Position
 from elysian_core.db.models import PortfolioSnapshot
@@ -71,6 +72,17 @@ class ShadowBook:
         self._nav: float = 0.0
         self._weights: Dict[str, float] = {}
 
+        # EventBus wiring
+        self._event_bus = None
+
+        # Fill tracking: order_id -> last known cumulative filled_qty (mirrors Portfolio)
+        self._fill_tracker: Dict[str, float] = {}
+
+        # Shared map from ExecutionEngine: order_id -> strategy_id for event routing
+        # Passed in via start(). ShadowBook only processes orders belonging to its strategy.
+        self._order_strategy_map: Optional[Dict[str, int]] = None
+
+
     # ── Initialization ────────────────────────────────────────────────────
 
     def init_from_portfolio_cash(self, portfolio_cash: float,
@@ -87,12 +99,12 @@ class ShadowBook:
         self._peak_equity = self._nav
         logger.info(
             f"[ShadowBook-{self._strategy_id}] Initialized: "
-            f"cash={self._cash:.2f}, allocation={self._allocation:.0%}"
+            f"cash={self._cash:.2f}, allocation={self._allocation:.2%}"
         )
 
     def init_from_existing(self, portfolio_cash: float,
-                           portfolio_positions: Dict[str, Position],
-                           mark_prices: Dict[str, float]):
+                                 portfolio_positions: Dict[str, Position],
+                                 mark_prices: Dict[str, float]):
         """Initialize by distributing existing Portfolio state proportionally.
 
         Used when restarting with pre-existing positions.  Distributes both
@@ -120,6 +132,86 @@ class ShadowBook:
             f"allocation={self._allocation:.0%}"
         )
 
+    # ── Lifecycle — EventBus wiring ──────────────────────────────────────
+
+    def start(self, event_bus, order_strategy_map: Optional[Dict[str, int]] = None):
+        """Subscribe to ORDER_UPDATE for event-driven fill attribution.
+
+        Parameters
+        ----------
+        event_bus:
+            Shared EventBus instance.
+        order_strategy_map:
+            Reference to ExecutionEngine._order_strategy_map — a shared dict
+            mapping exchange order_id -> strategy_id.  Used to filter events
+            to only fills placed by this strategy.
+        """
+        self._event_bus = event_bus
+        self._order_strategy_map = order_strategy_map
+        event_bus.subscribe(EventType.ORDER_UPDATE, self._on_order_update)
+        logger.info(
+            f"[ShadowBook-{self._strategy_id}] started — subscribed to ORDER_UPDATE"
+        )
+
+    def stop(self):
+        """Unsubscribe from EventBus."""
+        if self._event_bus is None:
+            return
+        self._event_bus.unsubscribe(EventType.ORDER_UPDATE, self._on_order_update)
+        self._event_bus = None
+        logger.info(f"[ShadowBook-{self._strategy_id}] stopped")
+
+    async def _on_order_update(self, event):
+        """Route exchange fill events into apply_fill().
+
+        Filters events to fills that belong to this strategy using
+        _order_strategy_map (order_id -> strategy_id, maintained by ExecutionEngine).
+        Computes the incremental fill delta to avoid double-counting partial fills.
+        commission is already per-fill from Binance field "n".
+        """
+        order = event.order
+
+        # Filter by strategy ownership
+        if self._order_strategy_map is not None:
+            if self._order_strategy_map.get(order.id) != self._strategy_id:
+                return
+        elif order.strategy_id is not None and order.strategy_id != self._strategy_id:
+            return
+
+        if order.status not in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
+            if order.is_terminal:
+                self._fill_tracker.pop(order.id, None)
+                if self._order_strategy_map is not None:
+                    self._order_strategy_map.pop(order.id, None)
+            return
+
+        order_id = order.id
+        prev_filled = self._fill_tracker.get(order_id, 0.0)
+        delta_filled = order.filled_qty - prev_filled
+
+        if delta_filled < 1e-10:
+            if order.is_terminal:
+                self._fill_tracker.pop(order_id, None)
+                if self._order_strategy_map is not None:
+                    self._order_strategy_map.pop(order_id, None)
+            return
+
+        self._fill_tracker[order_id] = order.filled_qty
+        qty_delta = delta_filled if order.side == Side.BUY else -delta_filled
+
+        self.apply_fill(
+            symbol=order.symbol,
+            qty_delta=qty_delta,
+            price=order.avg_fill_price,
+            commission=order.commission,    # per-fill from Binance field "n"
+            venue=event.venue,
+        )
+
+        if order.is_terminal:
+            self._fill_tracker.pop(order_id, None)
+            if self._order_strategy_map is not None:
+                self._order_strategy_map.pop(order_id, None)
+
     # ── Read — Identity ───────────────────────────────────────────────────
 
     @property
@@ -134,7 +226,7 @@ class ShadowBook:
 
     def position(self, symbol: str) -> Position:
         """Return this strategy's position for *symbol*, or a flat placeholder."""
-        return self._positions.get(symbol, Position(symbol=symbol))
+        return self._positions.get(symbol, Position(symbol=symbol, venue=self._venue))
 
     @property
     def positions(self) -> Dict[str, Position]:
@@ -161,12 +253,10 @@ class ShadowBook:
     @property
     def mark_prices(self) -> Dict[str, float]:
         return dict(self._mark_prices)
-    
-    
-    
+
 
     # ── Read — Valuation ──────────────────────────────────────────────────
-
+    
     def total_value(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
         """NAV = cash + sum(position_notional)."""
         prices = mark_prices if mark_prices is not None else self._mark_prices
@@ -331,9 +421,9 @@ class ShadowBook:
         self._nav = self.total_value()
         if self._nav > 0:
             self._weights = {
-                sym: (pos.quantity * self._mark_prices.get(sym, pos.avg_entry_price)) / self._nav
+                sym: (pos.quantity * self._mark_prices[sym]) / self._nav
                 for sym, pos in self._positions.items()
-                if not pos.is_flat() and sym in self._mark_prices
+                if not pos.is_flat() and sym in self._mark_prices  # BUG-7: skip stale prices
             }
         else:
             self._weights = {}
@@ -421,16 +511,17 @@ def reconcile_shadow_books(
     mark_prices: Dict[str, float],
     portfolio_total_value: float,
 ):
-    """Reconcile all shadow books to their target positions after a rebalance.
+    """Periodic drift-correction pass for shadow books.
 
-    For each strategy, computes the target position for each symbol based on
-    the strategy's raw weights, allocation, and portfolio total value.  The
-    delta between target and current shadow position is applied as a fill.
+    DEPRECATED AS PRIMARY ACCOUNTING — ShadowBook.start() + _on_order_update()
+    now handles real-time fill attribution at actual fill prices with correct
+    commission attribution.  This function should only be called as a periodic
+    reconciliation sweep to correct accumulated rounding drift, NOT as the
+    primary mechanism for updating shadow book positions.
 
-    This "mark to target" approach:
-      - Correctly attributes both buys and sells
-      - Handles position exits (weight → 0)
-      - Preserves entry price tracking through apply_fill()
+    Reconciles all shadow books to their *target* positions after a rebalance.
+    Uses mark prices (not fill prices) — cost basis accuracy is limited.
+    Commission is NOT attributed here.
 
     Parameters
     ----------

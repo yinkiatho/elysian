@@ -15,7 +15,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Deque, Dict, List, Optional
-from elysian_core.core.enums import Side, Venue
+from elysian_core.core.enums import OrderStatus, Side, Venue
 from elysian_core.core.position import Position
 import elysian_core.utils.logger as log
 
@@ -83,6 +83,14 @@ class Portfolio:
         # ── EventBus wiring ──────────────────────────────────────────────
         self._event_bus = None
         self._feeds: Dict = {}
+
+        # ── Fill tracking (for ORDER_UPDATE → update_position() delta) ───
+        # Tracks cumulative filled qty seen per order_id so that each
+        # ORDER_UPDATE event applies only the *incremental* fill qty,
+        # not the full cumulative qty.  Seeded at startup from open orders.
+        # Note: order.commission from OrderUpdateEvent is already per-fill
+        # (Binance field "n"), so no commission tracker is needed.
+        self._fill_tracker: Dict[str, float] = {}  # order_id -> last known filled_qty
         
         # Exchange and Venue setting, only one exchange and venue per portfolio
         self.exchange = exchange
@@ -176,6 +184,14 @@ class Portfolio:
             if orders:
                 self._open_orders[sym] = dict(orders)
 
+        # ── 5. Seed fill tracker from pre-existing partially-filled orders ─
+        # Prevents double-counting on restart when orders were partially
+        # filled before this Portfolio instance started.
+        for sym, orders in self.exchange._open_orders.items():
+            for oid, order in orders.items():
+                if order.filled_qty > 0:
+                    self._fill_tracker[oid] = order.filled_qty
+
         # ── Refresh derived state ─────────────────────────────────────────
         self._refresh_derived()  # Updates
         self._peak_equity = max(self._peak_equity, self._nav)
@@ -212,6 +228,7 @@ class Portfolio:
         self._refresh_derived()
         event_bus.subscribe(EventType.KLINE, self._on_kline)
         event_bus.subscribe(EventType.BALANCE_UPDATE, self._on_balance)
+        event_bus.subscribe(EventType.ORDER_UPDATE, self._on_order_update)
 
         logger.info(
             f"Portfolio started: cash={self._cash:.2f}, "
@@ -224,6 +241,7 @@ class Portfolio:
             return
         self._event_bus.unsubscribe(EventType.KLINE, self._on_kline)
         self._event_bus.unsubscribe(EventType.BALANCE_UPDATE, self._on_balance)
+        self._event_bus.unsubscribe(EventType.ORDER_UPDATE, self._on_order_update)
         self._event_bus = None
         logger.info("Portfolio stopped")
 
@@ -242,6 +260,7 @@ class Portfolio:
 
         Uses ``event.delta`` (the publisher currently sends ``new_balance=0.0``).
         Maintains both per-asset ``_cash_dict`` and aggregate ``_cash``.
+        Refreshes NAV/weights/drawdown after every cash change.
         """
         if event.asset in self._STABLECOINS and event.venue == self.venue:
             old_cash = self._cash
@@ -251,21 +270,71 @@ class Portfolio:
                 f"[Portfolio] Balance update: {event.asset} delta={event.delta:+.6f} "
                 f"cash {old_cash:.2f} -> {self._cash:.2f}"
             )
+            self._refresh_derived()
 
+
+    async def _on_order_update(self, event):
+        """Route exchange fill events into update_position().
+
+        Computes the incremental fill delta since the last seen state for
+        this order so that partial fills and multi-fill orders are handled
+        correctly without double-counting.
+
+        Only processes FILLED and PARTIALLY_FILLED statuses; ignores NEW,
+        OPEN, CANCELLED, REJECTED.
+        """
+        order = event.order
+        if event.venue != self.venue:
+            return
+        if order.status not in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
+            # Clean up tracker for terminal non-fill statuses (cancelled, rejected)
+            if order.is_terminal:
+                self._fill_tracker.pop(order.id, None)
+            return
+
+        order_id = order.id
+        prev_filled = self._fill_tracker.get(order_id, 0.0)
+        delta_filled = order.filled_qty - prev_filled
+
+        if delta_filled < 1e-10:
+            # No new fill qty since last event
+            if order.is_terminal:
+                self._fill_tracker.pop(order_id, None)
+            return
+
+        # order.commission is already per-fill (Binance field "n" via _parse_execution_to_order)
+        self._fill_tracker[order_id] = order.filled_qty
+
+        # BUY fills increase position (positive delta); SELL fills decrease it
+        qty_delta = delta_filled if order.side == Side.BUY else -delta_filled
+
+        self.update_position(
+            symbol=order.symbol,
+            qty_delta=qty_delta,
+            price=order.avg_fill_price,
+            commission=order.commission,
+            commission_asset=order.commission_asset or "",
+            venue=event.venue,
+            order_id=order_id,
+        )
+
+        # Clean up completed orders from tracker
+        if order.is_terminal:
+            self._fill_tracker.pop(order_id, None)
 
     def _refresh_derived(self):
         """Recomputes from current mark prices:"
-           1.weights, 
+           1.weights,
            2. Nav
            3. peak_equity
-           4. max_drawdown 
+           4. max_drawdown
         """
         self._nav = self._compute_total_value(self._mark_prices)
         if self._nav > 0:
             self._weights = {
-                sym: (pos.quantity * self._mark_prices.get(sym, pos.avg_entry_price)) / self._nav
+                sym: (pos.quantity * self._mark_prices[sym]) / self._nav
                 for sym, pos in self._positions.items()
-                if not pos.is_flat() and sym in self._mark_prices
+                if not pos.is_flat() and sym in self._mark_prices  # BUG-7: skip stale prices
             }
         else:
             self._weights = {}
@@ -480,7 +549,8 @@ class Portfolio:
             if new_qty == 0:
                 pos.avg_entry_price = 0.0
                 logger.info(f"[Portfolio] Position closed: {symbol}")
-            elif (new_qty > 0) != (pos.quantity - qty_delta > 0):
+            elif (new_qty > 0) != (old_qty > 0):
+                # Position flipped direction — reset entry price to fill price
                 pos.avg_entry_price = price
                 logger.info(f"[Portfolio] Position flipped: {symbol} new_entry={price:.4f}")
 

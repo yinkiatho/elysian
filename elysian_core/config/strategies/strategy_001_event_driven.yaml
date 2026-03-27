@@ -1,0 +1,49 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# strategy_001_event_driven.yaml — Per-strategy configuration
+#
+# Each strategy gets its own YAML file.  These are loaded by StrategyRunner
+# alongside trading_config.yaml and merged into AppConfig.strategies.
+#
+# Fields:
+#   id            — unique integer, used for shadow book and logging
+#   name          — human-readable identifier
+#   class         — Python class name (for documentation; instantiation is manual)
+#   asset_type    — "Spot" or "Perpetual"
+#   venue         — primary venue: "Binance", "Aster"
+#   venues        — list of venues this strategy may trade on
+#   allocation    — fraction of total portfolio capital [0.0, 1.0]
+#   symbols       — explicit symbol list; empty = loaded from config.json for this venue+asset_type
+#   risk_overrides    — overrides on top of venue and global risk (highest priority)
+#   execution_overrides — overrides on top of venue and global execution
+#   portfolio_overrides — overrides on top of global portfolio config
+#   params        — strategy-specific parameters passed to compute_weights / on_start
+# ═══════════════════════════════════════════════════════════════════════════════
+
+id: 1
+name: "event_driven_momentum_binance_spot"
+class: "EventDrivenStrategy"
+asset_type: "Spot"
+venue: "Binance"
+venues:
+  - "Binance"
+allocation: 1.0
+
+# Symbols — leave empty to load from config.json for this venue+asset_type
+symbols: []
+
+# ── Risk overrides (highest priority, applied on top of venue + global risk) ──
+# Only list fields you want to change; omitted fields inherit from venue/global.
+risk_overrides:
+  max_weight_per_asset: 0.20   # tighter per-asset cap for this strategy
+  min_cash_weight: 0.10        # keep 10% cash buffer
+
+# ── Execution overrides ────────────────────────────────────────────────────────
+execution_overrides: {}
+
+# ── Portfolio overrides ────────────────────────────────────────────────────────
+portfolio_overrides: {}
+
+# ── Strategy-specific parameters ──────────────────────────────────────────────
+# Accessible via strategy.strategy_config.params or strategy.cfg.strategies[i].params
+params:
+  rebalance_interval_s: 60     # minimum seconds between rebalance cycles

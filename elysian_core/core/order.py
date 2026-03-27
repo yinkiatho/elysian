@@ -27,12 +27,13 @@ class Order:
     timestamp: Optional[datetime.datetime] = None
     venue: Optional[Venue] = None
     commission: float = 0.0
-    commission_asset: str = None
-    last_updated_timestamp: int = None
+    commission_asset: Optional[str] = None
+    last_updated_timestamp: Optional[int] = None
+    strategy_id: Optional[int] = None      # set by ExecutionEngine at placement time
 
     @property
     def remaining_qty(self) -> float:
-        return self.quantity - self.filled_qty
+        return max(0.0, self.quantity - self.filled_qty)
 
     @property
     def is_filled(self) -> bool:
@@ -57,16 +58,19 @@ class Order:
         self.status = new_status
 
     def update_fill(self, filled_qty: float, fill_price: float):
-        prev_filled = self.filled_quantity
-        self.filled_quantity = filled_qty
+        prev_filled = self.filled_qty
+        if filled_qty <= prev_filled:
+            return
+        self.filled_qty = filled_qty
         # running weighted average fill price
         if filled_qty > 0:
             self.avg_fill_price = (
                 (prev_filled * self.avg_fill_price + (filled_qty - prev_filled) * fill_price)
                 / filled_qty
             )
-        self.status = OrderStatus.FILLED if filled_qty >= self.quantity else OrderStatus.PARTIAL
-        self.updated_at = int(datetime.datetime.now().timestamp() * 1000)
+        new_status = OrderStatus.FILLED if filled_qty >= self.quantity else OrderStatus.PARTIALLY_FILLED
+        self.transition_to(new_status)
+        self.last_updated_timestamp = int(datetime.datetime.now().timestamp() * 1000)
         
         
     def __str__(self) -> str:
@@ -84,7 +88,7 @@ class Order:
 @dataclass
 class LimitOrder:
     """
-    LP limit order used by Chainflip-style AMMs.
+    Generic LimitOrder Class
     """
     id: int
     base_asset: str

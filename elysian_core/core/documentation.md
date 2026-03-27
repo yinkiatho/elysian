@@ -157,6 +157,7 @@ await bus.publish(KlineEvent(symbol="ETHUSDT", venue=Venue.BINANCE, kline=k, tim
 - `client_order_id`: Client-specified order ID
 - `fee`: Trading fee amount
 - `fee_currency`: Fee currency
+- `strategy_id: Optional[int]`: Owning strategy; set by ExecutionEngine at placement time (default `None`)
 
 **Properties:**
 - `remaining_qty`: Unfilled quantity
@@ -168,6 +169,36 @@ await bus.publish(KlineEvent(symbol="ETHUSDT", venue=Venue.BINANCE, kline=k, tim
 
 ### RangeOrder (order.py)
 **Liquidity provider range order (concentrated liquidity).**
+
+## ShadowBook (shadow_book.py)
+
+### ShadowBook
+**Per-strategy virtual position ledger for isolated position tracking and PnL attribution.**
+
+Each strategy owns one `ShadowBook`. It mirrors the strategy's attributed slice of the aggregate `Portfolio` and updates via event-driven fills rather than periodic reconciliation.
+
+**Lifecycle methods:**
+
+| Method | Description |
+|--------|-------------|
+| `start(event_bus, order_strategy_map)` | Subscribe to `ORDER_UPDATE`; store reference to shared `_order_strategy_map` |
+| `stop()` | Unsubscribe from EventBus |
+
+**Fill attribution methods:**
+
+| Method | Description |
+|--------|-------------|
+| `apply_fill(symbol, qty_delta, price, commission)` | Apply a fill to the virtual position; updates avg entry, realized PnL, and commission |
+| `_on_order_update(event)` | Handler for `ORDER_UPDATE`; filters by `_order_strategy_map.get(order.id) == strategy_id`, computes incremental delta via `_fill_tracker`, calls `apply_fill()` with actual fill price and per-fill commission. Cleans up terminal order entries from `_order_strategy_map`. |
+| `_refresh_derived()` | Recompute NAV, weights, drawdown. Only includes symbols present in `_mark_prices` — no stale price fallback. |
+
+**Internal fields:**
+
+- `_fill_tracker: Dict[str, float]` — tracks cumulative `filled_qty` per order to compute incremental deltas across partial fill events
+- `_order_strategy_map: Dict[str, int]` — shared reference injected via `start()`; maps `order_id → strategy_id`
+- `_event_bus` — stored for unsubscription on `stop()`
+
+**`reconcile_shadow_books()`** is retained as a periodic drift-correction utility but is no longer the primary accounting mechanism. Event-driven attribution via `_on_order_update()` is the primary path.
 
 ## Portfolio Classes
 
@@ -186,7 +217,7 @@ await bus.publish(KlineEvent(symbol="ETHUSDT", venue=Venue.BINANCE, kline=k, tim
 - `is_flat()`: Check if position is closed
 
 ### Portfolio (portfolio.py)
-**Multi-asset portfolio management.**
+**Multi-asset portfolio management. In event-driven mode, subscribes to KLINE, BALANCE_UPDATE, and ORDER_UPDATE.**
 
 **Methods:**
 - `__init__(initial_cash)`: Initialize with starting cash
@@ -195,6 +226,13 @@ await bus.publish(KlineEvent(symbol="ETHUSDT", venue=Venue.BINANCE, kline=k, tim
 **Properties:**
 - `cash`: Available cash balance
 - `total_value`: Total portfolio value (cash + positions)
+
+**Event handlers (registered by `start()`):**
+- `_on_kline`: Updates mark prices, recomputes NAV and weights, tracks peak equity and drawdown
+- `_on_balance`: Syncs stablecoin cash via delta; calls `_refresh_derived()` after update
+- `_on_order_update`: Applies incremental fills from `ORDER_UPDATE` using `_fill_tracker` (a `Dict[str, float]`) to prevent double-counting partial fills
+
+**`_fill_tracker`**: Per-order running total of `filled_qty` seen so far. On each `ORDER_UPDATE`, the fill delta is `order.filled_qty - _fill_tracker.get(order.id, 0.0)`, ensuring only the new portion of a fill is applied to the position.
 
 ## Enums
 
@@ -232,10 +270,10 @@ await bus.publish(KlineEvent(symbol="ETHUSDT", venue=Venue.BINANCE, kline=k, tim
 1. **Market Data**: Exchange workers create `Kline`/`OrderBook` objects and mutate feed state
 2. **Event Emission**: Workers publish `KlineEvent`/`OrderBookUpdateEvent` to EventBus
 3. **Strategy Hooks**: EventBus dispatches to `SpotStrategy.on_kline()` / `on_orderbook_update()`
-4. **Order Execution**: Strategy calls `exchange.place_order()` → creates `Order` objects
-5. **Order Updates**: User data stream emits `OrderUpdateEvent` → `on_order_update()` fires
+4. **Order Execution**: Strategy calls `exchange.place_order()` → creates `Order` objects; ExecutionEngine records `orderId → strategy_id` in `_order_strategy_map`
+5. **Order Updates**: User data stream emits `OrderUpdateEvent` → `on_order_update()` fires on strategy; Portfolio `_on_order_update()` applies fill to aggregate positions; ShadowBook `_on_order_update()` applies fill to per-strategy virtual positions (filtered by `strategy_id` via `_order_strategy_map`)
 6. **Balance Updates**: User data stream emits `BalanceUpdateEvent` → `on_balance_update()` fires
-7. **Portfolio Tracking**: `Position`/`Portfolio` objects updated with fills
+7. **Portfolio Tracking**: `Position`/`Portfolio` objects updated with fills via `_fill_tracker` for incremental delta accounting
 8. **Persistence**: Trade/order records saved to database
 
 ## Key Design Patterns

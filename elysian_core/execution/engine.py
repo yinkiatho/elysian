@@ -65,6 +65,8 @@ class ExecutionEngine:
         self.cfg = cfg
         self.asset_type = asset_type
         self.venue = venue
+        # order_id -> strategy_id mapping: populated on placement, read by ShadowBooks for routing
+        self._order_strategy_map: Dict[str, int] = {}
         # Lock to prevent concurrent execute() calls from multiple strategy FSMs
         self._execute_lock = asyncio.Lock()
 
@@ -141,6 +143,7 @@ class ExecutionEngine:
         Step-size rounding is applied here.  Min-notional and balance checks
         are deferred to the exchange connector's ``order_health_check()``.
         """
+        strategy_id = int(validated.original.strategy_id) if validated.original.strategy_id else 0
         total_value = self._portfolio.total_value(mark_prices)
         if total_value <= 0:
             logger.warning("[ExecutionEngine] Portfolio total value <= 0, skipping")
@@ -201,6 +204,7 @@ class ExecutionEngine:
                 quantity=abs_qty,
                 order_type=self._default_order_type,
                 price=None if self._default_order_type == OrderType.MARKET else price,
+                strategy_id=strategy_id,
             ))
 
         logger.info(f"[ExecutionEngine] Generated {len(intents)} order intents")
@@ -224,14 +228,15 @@ class ExecutionEngine:
                 f"[ExecutionEngine] Submitting {intent.order_type.value} {intent.side.value} "
                 f"{intent.symbol} qty={intent.quantity:.6f} on {intent.venue.value}"
             )
+            resp = None
             if intent.order_type == OrderType.MARKET:
-                await exchange.place_market_order(
+                resp = await exchange.place_market_order(
                     symbol=intent.symbol,
                     side=intent.side,
                     quantity=intent.quantity,
                 )
             elif intent.order_type == OrderType.LIMIT and intent.price is not None:
-                await exchange.place_limit_order(
+                resp = await exchange.place_limit_order(
                     symbol=intent.symbol,
                     side=intent.side,
                     price=intent.price,
@@ -242,6 +247,12 @@ class ExecutionEngine:
                     f"[ExecutionEngine] Unsupported order type {intent.order_type} for {intent.symbol}"
                 )
                 return False
+
+            # Record order_id -> strategy_id so ShadowBooks can route ORDER_UPDATE events
+            if resp and intent.strategy_id:
+                order_id = str(resp.get("orderId", ""))
+                if order_id:
+                    self._order_strategy_map[order_id] = intent.strategy_id
 
             logger.info(f"[ExecutionEngine] Order submitted OK: {intent.side.value} {intent.symbol}")
             return True

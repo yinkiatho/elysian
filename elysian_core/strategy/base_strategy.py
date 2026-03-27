@@ -31,7 +31,7 @@ from typing import Any, Dict, FrozenSet, Optional, Set, TYPE_CHECKING
 if TYPE_CHECKING:
     from elysian_core.execution.engine import ExecutionEngine
     from elysian_core.risk.optimizer import PortfolioOptimizer
-    from elysian_core.config.app_config import AppConfig
+    from elysian_core.config.app_config import AppConfig, StrategyConfig
     from elysian_core.core.shadow_book import ShadowBook
 
 from elysian_core.connectors.base import SpotExchangeConnector, AbstractDataFeed
@@ -89,8 +89,9 @@ class SpotStrategy:
         self._execution_engine = execution_engine
         self.cfg = cfg
         self.asset_type = asset_type
-        self.venue = venue
+
         # Venue set for event filtering — forward-compatible with cross-venue strategies
+        self.venue = venue
         self.venues: FrozenSet[Venue] = frozenset(venues) if venues is not None else frozenset({venue})
         self.strategy_id = strategy_id
         self.strategy_name = strategy_name
@@ -112,6 +113,10 @@ class SpotStrategy:
         # Portfolio reference — kept for backward compat but strategies should
         # use _shadow_book instead.  Managed by StrategyRunner, NOT by strategy.
         self.portfolio: Optional[Portfolio] = None
+
+        # Per-strategy config — set by StrategyRunner.setup_strategy().
+        # Gives the strategy access to its own symbols, params, and risk overrides.
+        self.strategy_config: Optional["StrategyConfig"] = None
 
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -193,8 +198,8 @@ class SpotStrategy:
         self._event_bus.unsubscribe(EventType.BALANCE_UPDATE, self._dispatch_balance)
         self._event_bus.unsubscribe(EventType.REBALANCE_COMPLETE, self._dispatch_rebalance)
 
-        self._executor.shutdown(wait=False)
         await self.on_stop()
+        self._executor.shutdown(wait=False)
         self._state = StrategyState.STOPPED
         logger.info(f"[Strategy] {self.__class__.__name__} stopped")
 
@@ -278,7 +283,8 @@ class SpotStrategy:
             logger.error(f"SpotStrategy.on_balance_update error: {e}", exc_info=True)
 
     async def _dispatch_rebalance(self, event: RebalanceCompleteEvent):
-        if hasattr(event, 'strategy_id') and event.strategy_id != self.strategy_id:
+        event_strat_id = getattr(event, 'strategy_id', None)
+        if event_strat_id is not None and event_strat_id != self.strategy_id:
             return
         try:
             await self.on_rebalance_complete(event)

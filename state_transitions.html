@@ -586,7 +586,10 @@
         before applying. Even if validation returns False, the status is updated because the exchange is the source of truth.<br><br>
         <strong>Order.update_fill(filled_qty, fill_price):</strong> Updates <code>avg_fill_price</code> using weighted average,
         updates <code>filled_qty</code>, and auto-transitions to <code>FILLED</code> if <code>filled_qty >= quantity</code>,
-        or <code>PARTIALLY_FILLED</code> otherwise.
+        or <code>PARTIALLY_FILLED</code> otherwise.<br><br>
+        <strong>Order.strategy_id:</strong> <code>Optional[int]</code> field set by <code>ExecutionEngine</code> at placement time.
+        Used by <code>ShadowBook._on_order_update()</code> (via <code>_order_strategy_map</code>) to route each fill to the
+        correct per-strategy virtual ledger. Defaults to <code>None</code> for orders placed outside the pipeline.
     </div>
 
     <h3>Binance Status Mapping</h3>

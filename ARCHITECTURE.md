@@ -17,7 +17,9 @@ Market Data  →  Feature Compute  →  Strategy/Alpha  →  Risk Mgmt  →  Exe
 ```
 elysian_core/
 ├── config/
-│   ├── config.yaml          # Strategy, DB, networking config
+│   ├── trading_config.yaml  # System-level config: venues, DB, networking, risk defaults
+│   ├── strategies/          # Per-strategy config overrides
+│   │   └── strategy_NNN.yaml  # risk_overrides, execution_overrides, portfolio_overrides
 │   └── config.json          # Trading pairs per venue
 │
 ├── connectors/              # Stage 1 & 6: Exchange I/O
@@ -42,6 +44,7 @@ elysian_core/
 │   ├── order.py             # Order, LimitOrder
 │   ├── position.py          # Single-asset Position tracker
 │   ├── portfolio.py         # Portfolio: positions, cash, weights, risk, snapshots
+│   ├── shadow_book.py       # ShadowBook: per-strategy virtual position ledger
 │   └── signals.py           # Pipeline contracts: TargetWeights, ValidatedWeights,
 │                            #                     OrderIntent, RebalanceResult
 │
@@ -266,6 +269,7 @@ All inter-stage data is carried in **frozen (immutable) dataclasses** defined in
 │ quantity: float      │  base asset qty
 │ order_type: OrderType│
 │ price: float?        │  None for market
+│ strategy_id: int     │  owning strategy (default 0)
 └─────────────────────┘
          │
          ▼
@@ -302,7 +306,7 @@ The `Portfolio` is the centralized source of truth for position, cash, and risk 
 
 ```python
 portfolio.sync_from_exchange(exchange, venue, feeds)  # startup: full state sync
-portfolio.start(event_bus, feeds)                      # subscribe to KLINE + BALANCE_UPDATE
+portfolio.start(event_bus, feeds)                      # subscribe to KLINE + BALANCE_UPDATE + ORDER_UPDATE
 ```
 
 After `start()`, the portfolio **automatically**:
@@ -310,6 +314,7 @@ After `start()`, the portfolio **automatically**:
 - Recomputes weight vector and NAV
 - Tracks peak equity and max drawdown
 - Syncs cash from stablecoin `BalanceUpdateEvent` (delta-based)
+- Applies incremental fills from `OrderUpdateEvent` via `_on_order_update()`, using `_fill_tracker` to prevent double-counting fills across partial-fill events
 
 ### Standalone Mode (testing/backtesting)
 
@@ -363,6 +368,35 @@ Called once per exchange at startup after `exchange.run()`:
 
 For multi-venue: call once per exchange — state accumulates.
 
+### ShadowBook
+
+**File:** `core/shadow_book.py`
+
+Each strategy owns a `ShadowBook` — a virtual position ledger that mirrors the strategy's attributed slice of the aggregate portfolio. It operates in event-driven mode after `start()` is called.
+
+```python
+shadow_book.start(event_bus, order_strategy_map)  # subscribe to ORDER_UPDATE
+shadow_book.stop()                                 # unsubscribe
+```
+
+**Event-driven fill attribution:**
+
+`_on_order_update(event)` fires on every `OrderUpdateEvent`. It filters events by looking up `_order_strategy_map.get(order.id) == self._strategy_id`, so each ShadowBook only processes fills belonging to its own strategy. Incremental fill deltas are tracked via `_fill_tracker` to handle partial fills without double-counting. `apply_fill()` is called with `price=order.avg_fill_price` and `commission=order.commission` (per-fill amount). Terminal orders are cleaned out of `_order_strategy_map` on completion.
+
+`_order_strategy_map` is a shared `Dict[str, int]` owned by `ExecutionEngine` and passed into every `ShadowBook.start()` call. It maps `order_id → strategy_id` and is populated by `ExecutionEngine._submit_order()` after each exchange placement.
+
+`reconcile_shadow_books()` is retained as a periodic drift-correction pass but is no longer the primary accounting mechanism — event-driven attribution via `_on_order_update()` is the primary path.
+
+**Key methods:**
+
+| Method | Description |
+|--------|-------------|
+| `start(event_bus, order_strategy_map)` | Subscribe to ORDER_UPDATE; store shared map reference |
+| `stop()` | Unsubscribe from EventBus |
+| `apply_fill(symbol, qty_delta, price, commission)` | Update virtual position with a fill |
+| `_on_order_update(event)` | Filter by strategy_id, compute delta, call apply_fill |
+| `_refresh_derived()` | Recompute NAV, weights, drawdown (excludes symbols absent from `_mark_prices`) |
+
 ### Portfolio Snapshots
 
 ```python
@@ -414,7 +448,9 @@ class EventBus:
 |-----------|--------------|---------|
 | SpotStrategy | KLINE, ORDERBOOK_UPDATE, ORDER_UPDATE, BALANCE_UPDATE, REBALANCE_COMPLETE | `_dispatch_*` wrappers |
 | Portfolio | KLINE | `_on_kline` (mark prices, weights, drawdown) |
-| Portfolio | BALANCE_UPDATE | `_on_balance` (cash sync via delta) |
+| Portfolio | BALANCE_UPDATE | `_on_balance` (cash sync via delta; calls `_refresh_derived()`) |
+| Portfolio | ORDER_UPDATE | `_on_order_update` (incremental fill attribution via `_fill_tracker`) |
+| ShadowBook | ORDER_UPDATE | `_on_order_update` (per-strategy fill attribution filtered by `_order_strategy_map`) |
 
 ---
 
@@ -445,7 +481,8 @@ StrategyRunner.run(strategy)
     ├─ _setup_pipeline()         → Stage 3-5 wiring:
     │   ├─ _setup_portfolio()    → sync_from_exchange() + portfolio.start()
     │   ├─ _setup_risk()         → RiskConfig from args.risk.* + PortfolioOptimizer
-    │   └─ _setup_execution()    → ExecutionEngine (shares RiskConfig)
+    │   ├─ _setup_execution()    → ExecutionEngine (shares RiskConfig)
+    │   └─ shadow_book.start(event_bus, execution_engine._order_strategy_map)
     │
     └─ asyncio.gather(
          _setup_binance_data_feeds(),   ← blocks forever (multiplex feeds)
@@ -459,6 +496,7 @@ StrategyRunner.run(strategy)
 finally:
     ├─ exchange.cleanup()
     ├─ portfolio.stop()          → Unsubscribe from EventBus
+    ├─ strategy._shadow_book.stop() → Unsubscribe ShadowBook from EventBus
     ├─ strategy.stop()           → Unsubscribe hooks, shutdown ProcessPool
     └─ _cleanup()                → Stop all client managers
 ```
@@ -517,12 +555,15 @@ strategy.submit_weights({"ETHUSDT": 0.4, "BTCUSDT": 0.5})
     │   ├─ Snapshot mark prices
     │   ├─ Compute NAV
     │   ├─ compute_order_intents()
+    │   │   ├─ Extract strategy_id from validated.original.strategy_id
+    │   │   ├─ Stamp each OrderIntent with strategy_id
     │   │   ├─ target_qty = weight * NAV / price
     │   │   ├─ delta = target_qty - current_qty
     │   │   ├─ Skip if weight_delta < min_weight_delta
     │   │   └─ Round to step_size
     │   ├─ Sort: sells first, then buys
-    │   └─ Submit each order to exchange
+    │   ├─ _submit_order(): captures orderId from exchange response
+    │   │   └─ Stores in _order_strategy_map[orderId] = strategy_id
     │   └─ → RebalanceResult
     │
     └─ event_bus.publish(RebalanceCompleteEvent)      ← Observability
@@ -593,10 +634,13 @@ FuturesExchangeConnector (ABC)  → + positions, leverage, margin
 
 ## 11. Configuration
 
-### `config.yaml` → `args` (argparse.Namespace)
+### Two-Tier Config System
+
+Configuration is split into a system-level file and per-strategy override files.
+
+#### `trading_config.yaml` (system-level) → `AppConfig`
 
 ```yaml
-strategy_id: 1
 spot:
   venues: [Binance, Aster]
 futures:
@@ -605,10 +649,42 @@ database:
   host: localhost
   port: 5432
   name: elysian
-risk:                          # Optional — overrides RiskConfig defaults
+risk:                          # System-wide RiskConfig defaults
   max_weight_per_asset: 0.3
   min_cash_weight: 0.10
   min_rebalance_interval_ms: 30000
+venue_configs:                 # Per-venue execution/networking params
+  Binance:
+    ...
+```
+
+`AppConfig` exposes helper methods to resolve the effective config for a given strategy:
+- `effective_risk_for(strategy_id)` — merges system risk with strategy `risk_overrides`
+- `effective_execution_for(strategy_id)` — merges system execution with `execution_overrides`
+- `effective_portfolio_for(strategy_id)` — merges system portfolio with `portfolio_overrides`
+
+#### `strategies/strategy_NNN.yaml` (per-strategy) → `StrategyConfig`
+
+```yaml
+strategy_id: 1
+risk_overrides:
+  max_weight_per_asset: 0.25
+execution_overrides:
+  default_order_type: LIMIT
+portfolio_overrides:
+  initial_cash: 10000.0
+```
+
+`StrategyConfig` fields `risk_overrides`, `execution_overrides`, and `portfolio_overrides` are all optional dicts that overlay the system-level defaults.
+
+#### `load_app_config()` signature
+
+```python
+load_app_config(
+    trading_config_yaml: str,           # path to trading_config.yaml
+    strategy_config_yamls: list[str],   # list of per-strategy yaml paths
+    yaml_path: str = None,              # deprecated single-file path (backward-compat)
+)
 ```
 
 ### `config.json` → `config_json` (dict)

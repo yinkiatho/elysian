@@ -151,7 +151,8 @@
             subgraph S2["Stage 2: Feature Compute"]
                 KF["KlineFeed\nOHLCV + rolling vol\n60-sample history"]
                 OBF["OrderBookFeed\nL2 SortedDict depth\nbid/ask/mid/spread"]
-                PF["Portfolio\nmark prices + weights\nNAV + drawdown + fills"]
+                PF["Portfolio\nmark prices + weights\nNAV + drawdown + fills\nKLINE + BALANCE + ORDER_UPDATE"]
+                SBF["ShadowBook (per-strategy)\nvirtual positions + cash\nNAV + PnL\nORDER_UPDATE (filtered by strategy_id)"]
             end
 
             subgraph S3["Stage 3: Strategy / Alpha"]
@@ -176,6 +177,7 @@
             WS --> KF
             WS --> OBF
             UD --> PF
+            UD -.->|"OrderUpdateEvent"| SBF
             KF -->|"KlineEvent"| SS
             OBF -->|"OBUpdateEvent"| SS
             PF -.->|"weights + NAV"| SS
@@ -226,6 +228,8 @@
                 DR["strategy._dispatch_rebalance"]
                 PK["portfolio._on_kline"]
                 PB["portfolio._on_balance"]
+                PO["portfolio._on_order_update"]
+                SBO["shadow_book._on_order_update\n(per-strategy fill attribution)"]
             end
 
             subgraph Hooks["Strategy Hooks - user overrides"]
@@ -248,6 +252,8 @@
             EB --> DR
             EB --> PK
             EB --> PB
+            EB --> PO
+            EB --> SBO
 
             DK -->|"try/except"| OK
             DOB -->|"try/except"| OOB
@@ -266,7 +272,7 @@
         <tr><th>EventType</th><th>Dataclass</th><th>Key Fields</th><th>Published By</th></tr>
         <tr><td><code>KLINE</code></td><td><code>KlineEvent</code></td><td>symbol, venue, kline (Kline), timestamp</td><td>KlineClientManager workers</td></tr>
         <tr><td><code>ORDERBOOK_UPDATE</code></td><td><code>OrderBookUpdateEvent</code></td><td>symbol, venue, orderbook (OrderBook), timestamp</td><td>OrderBookClientManager workers</td></tr>
-        <tr><td><code>ORDER_UPDATE</code></td><td><code>OrderUpdateEvent</code></td><td>symbol, venue, order (Order), timestamp</td><td>UserData stream (executionReport)</td></tr>
+        <tr><td><code>ORDER_UPDATE</code></td><td><code>OrderUpdateEvent</code></td><td>symbol, venue, order (Order), timestamp</td><td>UserData stream (executionReport) &mdash; consumed by Portfolio <code>_on_order_update</code> (aggregate fills) and ShadowBook <code>_on_order_update</code> (per-strategy attribution via <code>_order_strategy_map</code>)</td></tr>
         <tr><td><code>BALANCE_UPDATE</code></td><td><code>BalanceUpdateEvent</code></td><td>asset, venue, delta, new_balance, timestamp</td><td>UserData stream (balanceUpdate)</td></tr>
         <tr><td><code>REBALANCE_COMPLETE</code></td><td><code>RebalanceCompleteEvent</code></td><td>result (RebalanceResult), validated_weights, timestamp</td><td>RebalanceFSM._on_enter_executing</td></tr>
         <tr><td><code>LIFECYCLE</code></td><td><code>LifecycleEvent</code></td><td>component, old_state, new_state, timestamp</td><td>Strategy/Runner state changes</td></tr>
@@ -540,7 +546,9 @@
         vectors — each scaled by its capital allocation fraction — into a single combined vector for the
         optimizer. Each strategy owns a <code>ShadowBook</code> (virtual position ledger) so strategies
         can read their own isolated positions, cash, weights, and PnL without touching the aggregate Portfolio.
-        After each execution, <code>reconcile_shadow_books()</code> resets shadow positions to match the actual fills.
+        ShadowBooks are updated in real time via event-driven fill attribution: each <code>ORDER_UPDATE</code>
+        event is routed to the correct ShadowBook using <code>ExecutionEngine._order_strategy_map</code>.
+        <code>reconcile_shadow_books()</code> is retained as a periodic drift-correction pass only.
     </p>
     <p class="file-ref">core/weight_aggregator.py &mdash; WeightAggregator &bull; core/shadow_book.py &mdash; ShadowBook, reconcile_shadow_books</p>
     <div class="mermaid">
@@ -593,7 +601,7 @@
         <tr><td>Scope</td><td>All strategies combined</td><td>One strategy's virtual slice</td></tr>
         <tr><td>Positions</td><td>Real exchange positions</td><td>Attributed virtual positions</td></tr>
         <tr><td>Cash</td><td>Total stablecoin balance</td><td>Strategy's allocated cash fraction</td></tr>
-        <tr><td>Updated by</td><td>Exchange fills + EventBus</td><td><code>reconcile_shadow_books()</code> after each rebalance</td></tr>
+        <tr><td>Updated by</td><td>Exchange fills + EventBus (ORDER_UPDATE, BALANCE_UPDATE, KLINE)</td><td>Event-driven via <code>_on_order_update()</code> filtered by <code>_order_strategy_map</code>; <code>reconcile_shadow_books()</code> is a periodic drift-correction pass only</td></tr>
         <tr><td>Strategy reads</td><td>Only StrategyRunner reads this</td><td>Strategy reads its own shadow_book</td></tr>
     </table>
 
@@ -656,7 +664,7 @@
                 SR->>P: sync_from_exchange
                 P->>P: "sync cash + positions + mark_prices"
                 SR->>P: "start with event_bus + feeds"
-                P->>EB: "subscribe KLINE + BALANCE_UPDATE"
+                P->>EB: "subscribe KLINE + BALANCE_UPDATE + ORDER_UPDATE"
 
                 SR->>POpt: create PortfolioOptimizer
                 SR->>S: inject optimizer
@@ -666,6 +674,7 @@
 
                 Note over S,RFSM: RebalanceFSM auto-created
                 S->>RFSM: create RebalanceFSM
+                SR->>S: "shadow_book.start(event_bus, EE._order_strategy_map)"
             end
 
             rect rgb(245,245,245)
@@ -710,6 +719,7 @@
                 +float quantity
                 +OrderType order_type
                 +float price
+                +int strategy_id
             }
 
             class RebalanceResult {
@@ -754,6 +764,7 @@
                 +float avg_fill_price
                 +float filled_qty
                 +OrderStatus status
+                +Optional~int~ strategy_id
                 +transition_to(new_status)
                 +update_fill(filled_qty, fill_price)
             }

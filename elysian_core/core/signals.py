@@ -57,6 +57,7 @@ class OrderIntent:
     quantity: float                                 # base asset quantity
     order_type: OrderType = OrderType.MARKET
     price: Optional[float] = None                   # None for market orders
+    strategy_id: int = 0                            # owning strategy — for ShadowBook routing
 
 
 @dataclass(frozen=True)

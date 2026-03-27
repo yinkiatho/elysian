@@ -388,11 +388,11 @@ class SpotExchangeConnector(ABC):
 
     def last_price(self, symbol: str) -> Optional[float]:
         """Best available mid-price: OB mid → last kline close → None."""
-        ob = self._ob_feeds.get(symbol)
+        ob = self.ob_feed(symbol)
         if ob and ob.data:
             return ob.data.mid_price
         
-        kf = self._kline_feeds.get(symbol)
+        kf = self.kline_feed(symbol)
         if kf and kf.latest_close:
             return kf.latest_close
         return None
@@ -612,10 +612,10 @@ class FuturesExchangeConnector(ABC):
 
     def last_price(self, symbol: str) -> Optional[float]:
         """Best available mid-price: OB mid → last kline close → None."""
-        ob = self._ob_feeds.get(symbol)
+        ob = self.ob_feed(symbol)
         if ob and ob.data:
             return ob.data.mid_price
-        kf = self._kline_feeds.get(symbol)
+        kf = self.kline_feed(symbol)
         if kf and kf.latest_close:
             return kf.latest_close
         return None
@@ -718,7 +718,7 @@ class FuturesExchangeConnector(ABC):
     @abstractmethod
     async def close_position(self, symbol: str):
         """Close entire position for a symbol."""
-        ...
+        pass
 
     # ── Snapshot printing ─────────────────────────────────────────────────────
     async def print_snapshot(self, poll_interval: int = 60 * 2, balance_filter: float = 1e-5):

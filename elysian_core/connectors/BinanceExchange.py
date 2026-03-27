@@ -36,7 +36,6 @@ import argparse
 
 logger = log.setup_custom_logger("root")
 
-
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # ────────────────────────────────────────────────────────────────────────────── BinanceExchange ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -121,8 +120,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
         
     async def _fetch_symbol_info(self, symbol: str):
         '''
-        Function to fetch symbbol information
-        
+        Function to fetch symbol information
         '''
         info = await self._client.get_symbol_info(symbol)
         step_size = float(
@@ -135,7 +133,6 @@ class BinanceSpotExchange(SpotExchangeConnector):
                                      "base_asset": info["baseAsset"], "quote_asset": info["quoteAsset"], 
                                      "base_asset_precision": info["baseAssetPrecision"], "quote_asset_precision": info["quoteAssetPrecision"]}
         #logger.info(f"[{symbol}] step={step_size} min_notional={min_notional}")
-
 
 
     # ── Account ───────────────────────────────────────────────────────────────
@@ -162,6 +159,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
                 locked = float(bal.get("l", 0))
                 self._balances[asset] = free + locked
             logger.info("outboundAccountPosition update applied to balances")
+        
         
         # other event types could be handled here (executionReport, etc.)
         elif et == "executionReport":
@@ -230,36 +228,36 @@ class BinanceSpotExchange(SpotExchangeConnector):
             return
 
         # ── Update existing order ─────────────────────────────────────────────────
-        order = symbol_orders.get(order_id)
-        if order is None:
-            logger.warning(f"[{symbol}] executionReport for unknown order {order_id} (status={status}), skipping")
-            return
+        else:
+            order = symbol_orders.get(order_id)
+            if order is None:
+                logger.warning(f"[{symbol}] executionReport for unknown order {order_id} (status={status}), skipping")
+                return
 
-        cum_filled_qty = float(msg.get("z", 0))
-        cum_quote_qty  = float(msg.get("Z", 0))
-        last_price     = float(msg.get("L", 0))
+            cum_filled_qty = float(msg.get("z", 0))
+            cum_quote_qty  = float(msg.get("Z", 0))
+            last_price     = float(msg.get("L", 0))
 
-        # Compute avg fill price from cumulative fields (more accurate than last price)
-        avg_price = (cum_quote_qty / cum_filled_qty) if cum_filled_qty > 0 else last_price
+            # Compute avg fill price from cumulative fields (more accurate than last price)
+            avg_price = (cum_quote_qty / cum_filled_qty) if cum_filled_qty > 0 else last_price
 
-        if cum_filled_qty > order.filled_qty:
-            order.update_fill(cum_filled_qty, avg_price)
+            if cum_filled_qty > order.filled_qty:
+                order.update_fill(cum_filled_qty, avg_price)
 
-        # Commission is cumulative per execution; take the latest
-        order.commission += float(msg.get("n", 0))
-        order.commission_asset = msg.get("N") or order.commission_asset
+            # Commission is cumulative per execution; take the latest
+            order.commission += float(msg.get("n", 0))
+            order.commission_asset = msg.get("N") or order.commission_asset
 
-        # Validate and apply status from exchange (source of truth).
-        # transition_to logs a warning on invalid transitions but always applies.
-        order.transition_to(internal_status)
-        logger.info(f"[{symbol}] Order updated: {order}")
+            # Validate and apply status from exchange (source of truth).
+            # transition_to logs a warning on invalid transitions but always applies.
+            # Pass the new status here and if validate correct then own order object will transition to that new status
+            order.transition_to(internal_status)  
+            logger.info(f"[{symbol}] Order updated: {order}")
 
-        # ── Remove terminal orders from open-orders registry ─────────────────────
-        if order.is_terminal:
-            self._open_orders[symbol].pop(order_id, None)
-            logger.info(f"[{symbol}] Order {order_id} removed from open orders (status={status})")
-        
-        
+            # ── Remove terminal orders from open-orders registry ─────────────────────
+            if order.is_terminal:
+                self._open_orders[symbol].pop(order_id, None)
+                logger.info(f"[{symbol}] Order {order_id} removed from open orders (status={status})")
         
         
     async def monitor_balances(self, poll_interval = 10):
@@ -352,7 +350,11 @@ class BinanceSpotExchange(SpotExchangeConnector):
     async def place_limit_order(
         self, symbol: str, side: Side, quantity: float, price: float
     ):
-        """Place a GTC limit order."""
+        """
+        Place a GTC limit order.
+        
+        Quantity is denoted in BASE_ASSET we set it as such
+        """
         try:
             order = await self._client.create_order(
                 symbol=symbol,
@@ -362,8 +364,19 @@ class BinanceSpotExchange(SpotExchangeConnector):
                 quantity=quantity,
                 price=str(price),
             )
-            self._open_orders[symbol].append(order)
-            logger.info(f"Limit order placed: {order}")
+            order_id = str(order.get("orderId", ""))
+            order_obj = Order(
+                id=order_id,
+                symbol=symbol,
+                side=side,
+                order_type=OrderType.LIMIT,
+                quantity=quantity,
+                price=price,
+                status=OrderStatus.PENDING,
+                venue=Venue.BINANCE,
+            )
+            self._open_orders[symbol][order_id] = order_obj
+            logger.info(f"Limit order placed: {order_id}")
             return order
         except BinanceAPIException as e:
             logger.error(f"[{symbol}] place_limit_order API error: {e}")
@@ -396,15 +409,17 @@ class BinanceSpotExchange(SpotExchangeConnector):
         """Refresh open orders for all symbols."""
         all_orders = await self._client.get_open_orders()
         
-        # Clear existing orders and repopulate
+        # Snapshot existing orders before repopulating to support staleness checks
+        prev_orders = {sym: dict(orders) for sym, orders in self._open_orders.items()}
         self._open_orders.clear()
         for o in all_orders:
             updated_time = o.get("updateTime")
             symbol = o.get("symbol")
             order_id = str(o.get("orderId"))
-            
-            existing_order = self._open_orders[symbol].get(order_id)
+
+            existing_order = prev_orders.get(symbol, {}).get(order_id)
             if existing_order and updated_time and existing_order.last_updated_timestamp and updated_time < existing_order.last_updated_timestamp:
+                self._open_orders[symbol][order_id] = existing_order
                 continue
             
             raw_status = o.get("status", "NEW")
@@ -443,14 +458,14 @@ class BinanceSpotExchange(SpotExchangeConnector):
         self,
         symbol: str,
         side: Side,
-        quantitiy: float, # Denoted in terms of base asset ie. 0.1 ETH
+        quantity: float, # Denoted in terms of base asset ie. 0.1 ETH
         use_quote_order_qty: bool = False
     ):
         """
         Place a market order. amount is in base asset unless use_quote_order_qty=True.
         """
         
-        if not self.order_health_check(symbol, side, quantitiy, use_quote_order_qty):
+        if not self.order_health_check(symbol, side, quantity, use_quote_order_qty):
             logger.error(f"[{symbol}] Market order health check failed. Order not placed.")
             return
                 
@@ -460,31 +475,31 @@ class BinanceSpotExchange(SpotExchangeConnector):
         
         try:
             step = self._token_infos.get(symbol, {}).get("step_size", 0.0001)
-            qty = round_step_size(abs(quantitiy), step)
+            qty = round_step_size(abs(quantity), step)
 
             # Amount denoted in Base Asset
             if not use_quote_order_qty:
-                logger.info(f"[{symbol}] Market {'BUY' if side == side.BUY else 'SELL'} qty={qty} {base_asset} (~{qty * price:.2f} {quote_asset})")
-                fn = self._client.order_market_buy if side == side.BUY else self._client.order_market_sell
+                logger.info(f"[{symbol}] Market {'BUY' if side == Side.BUY else 'SELL'} qty={qty} {base_asset} (~{qty * price:.2f} {quote_asset})")
+                fn = self._client.order_market_buy if side == Side.BUY else self._client.order_market_sell
                 
                 # Create new order obj and add to the open orders registry before placing the order, so that the user-data stream can update it when execution report arrives
                 resp = await fn(symbol=symbol, quantity=qty)
                 
             else:
-                logger.info(f"[{symbol}] Market {'BUY' if side == side.BUY else 'SELL'} quoteQty={qty:.2f} {quote_asset}")
-                fn = self._client.order_market_buy if side == side.BUY else self._client.order_market_sell
+                logger.info(f"[{symbol}] Market {'BUY' if side == Side.BUY else 'SELL'} quoteQty={qty:.2f} {quote_asset}")
+                fn = self._client.order_market_buy if side == Side.BUY else self._client.order_market_sell
                 resp = await fn(symbol=symbol, quoteOrderQty=qty)
                 
 
             # For market orders, we assume immediate fills and we process the market response immediately
             avg_price, total_comm = self._average_fill_price(resp)
             total_quote_quantity = float(resp["cummulativeQuoteQty"])
-            total_base_quantity = total_quote_quantity / float(resp["price"])
+            total_base_quantity = float(resp.get("executedQty", 0))
             order_id = int(resp["orderId"])
             status = str(resp["status"])
             side_str = str(resp["side"])
             order_type = OrderType.MARKET
-            comm_asset = resp["fills"][0]["commissionAsset"]
+            comm_asset = resp["fills"][0]["commissionAsset"] if resp.get("fills") else ""
 
             logger.success(
                 f"[{symbol}] Filled: {side_str} {total_base_quantity} @ {avg_price:.6f} "
@@ -503,6 +518,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
                 side_str=side_str,
                 comm_asset=comm_asset
             ))
+            return resp
 
         except BinanceAPIException as e:
             logger.error(f"[{symbol}] place_market_order API error: {e}")
@@ -521,6 +537,8 @@ class BinanceSpotExchange(SpotExchangeConnector):
         total_qty = sum(float(f["qty"]) for f in fills)
         total_notional = sum(float(f["qty"]) * float(f["price"]) for f in fills)
         total_comm = sum(float(f["commission"]) for f in fills)
+        if total_qty == 0:
+            return 0.0, 0.0
         return total_notional / total_qty, total_comm
     
     
@@ -546,7 +564,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
                 price=price,
                 commission_asset=comm_asset,
                 total_commission=commission,
-                total_commission_quote=commission * price if comm_asset.upper() not in self._STABLE_COINS else commission,
+                total_commission_quote=commission * price if comm_asset.upper() not in self._STABLECOINS else commission,
                 order_id=str(order_id),
                 status=_BINANCE_STATUS.get(status, OrderStatus.OPEN),
                 order_side=_BINANCE_SIDE.get(side_str, Side.BUY),
@@ -580,43 +598,6 @@ class BinanceSpotExchange(SpotExchangeConnector):
             await self.withdraw_asset(coin, round(bal / 2, 2), address, network)
 
 
-    # ── Trade recording ───────────────────────────────────────────────────────
-    async def _record_trade(
-        self,
-        amount: float,
-        base_asset: str,
-        quote_asset: str,
-        exec_qty: float,
-        price: float,
-        commission: float,
-        order_id: int,
-        status: str,
-        side: str,
-        comm_asset: str,
-    ):
-        ts = datetime.datetime.now(self._utc8)
-        try:
-            CexTrade.create(
-                id=ts.strftime("%Y-%m-%d_%H-%M-%S") + "_" + self.cfg.meta.version_name,
-                datetime=ts,
-                venue=Venue.BINANCE,
-                asset_type=AssetType.SPOT,
-                symbol=base_asset + quote_asset,
-                side=Side.BUY if amount > 0 else Side.SELL,
-                amount=amount,
-                executed_qty=exec_qty,
-                price=price,
-                commission_asset=comm_asset,
-                total_commission=commission,
-                total_commission_quote=commission * price if amount > 0 else commission,
-                order_id=str(order_id),
-                status=_BINANCE_STATUS.get(status, OrderStatus.OPEN),
-                order_side=_BINANCE_SIDE.get(side, Side.BUY),
-            )
-                
-            logger.info(f"Trade recorded at {ts.strftime('%Y-%m-%d_%H-%M-%S')}")
-        except Exception as e:
-            logger.error(f"_record_trade DB error: {e}")
 
     # ── Run ───────────────────────────────────────────────────────────────────
 

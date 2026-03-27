@@ -62,6 +62,15 @@ class EventDrivenStrategy(SpotStrategy):
 
         self._symbol_availability_status = {symbol: False for symbol in self._symbols}
         
+        
+    async def on_stop(self):
+        '''
+        Default on_stop behaviour for strategy is to convert all assets back to USDT + other functions to add 
+        '''
+        await self.request_rebalance(convert_all_base=True) # We convert all to base here 
+        
+        
+        
     async def on_kline(self, event: KlineEvent):
         '''
         on_kline hook, we update the price_series and _return_series first, check for status and then fire trigger,
@@ -82,8 +91,8 @@ class EventDrivenStrategy(SpotStrategy):
                 self._symbol_availability_status[event.symbol] = True
                  
         # Check for full availability and past rebalance interval and trigger
-        if all(self._symbol_availability_status.values()) and (self._last_marked_time is None or time.time() - self._last_marked_time > self._rebalance_interval):
-            self._last_marked_time = time.time()
+        if all(self._symbol_availability_status.values()) and (self._last_marked_time is None or time.monotonic() - self._last_marked_time > self._rebalance_interval):
+            self._last_marked_time = time.monotonic()
             await self.request_rebalance()
             
             
@@ -120,7 +129,14 @@ class EventDrivenStrategy(SpotStrategy):
 
         Weights are normalized to sum to 0.90 (10% cash buffer).
         """
-
+        
+        # Extract any kill signals here
+        if ctx.get('convert_all_base', False):
+            weights = {sym: 0.0 for sym in self._symbols}
+            weights['USDT'] = 1.0
+            return weights
+    
+        # Normal Signal Computation        
         signals = {}
         for sym in self._symbols:
             returns = self._returns_series.get(sym)

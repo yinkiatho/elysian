@@ -18,6 +18,10 @@ SpotStrategy(
     event_bus: EventBus,
     feeds: Optional[Dict[str, AbstractDataFeed]] = None,
     max_heavy_workers: int = 4,
+    strategy_id: int = 0,
+    strategy_name: str = "",
+    optimizer: Optional[PortfolioOptimizer] = None,
+    execution_engine: Optional[ExecutionEngine] = None,
 )
 ```
 
@@ -25,8 +29,12 @@ SpotStrategy(
 - `event_bus`: Shared EventBus instance (injected by StrategyRunner)
 - `feeds`: Optional map of symbol → data feed for price lookups
 - `max_heavy_workers`: Number of ProcessPoolExecutor workers for `run_heavy()`
+- `strategy_id`: Integer identifier used for ShadowBook routing and `_order_strategy_map` keying
+- `strategy_name`: Human-readable label for logging
+- `optimizer`: `PortfolioOptimizer` injected by StrategyRunner during pipeline setup
+- `execution_engine`: `ExecutionEngine` injected by StrategyRunner during pipeline setup
 
-**Note:** When using `StrategyRunner.run(strategy)`, the runner re-wires `strategy._event_bus` and `strategy._exchanges` before calling `start()`. Initial constructor values are placeholders.
+**Note:** When using `StrategyRunner.run(strategies=[...], strategy_ids=[...])`, the runner re-wires `strategy._event_bus`, `strategy._exchanges`, `strategy._optimizer`, and `strategy._execution_engine` before calling `start()`. Initial constructor values are placeholders.
 
 #### Lifecycle Methods
 
@@ -60,6 +68,16 @@ async def _dispatch_kline(self, event: KlineEvent):
 ```
 
 The EventBus subscribes to `_dispatch_kline`, not `on_kline` directly. This ensures a strategy bug never crashes the feed worker.
+
+#### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `strategy_id` | `int` | Owning strategy identifier; used for ShadowBook routing and `_order_strategy_map` |
+| `strategy_name` | `str` | Human-readable label used in log output |
+| `shadow_book` | `ShadowBook` | Per-strategy virtual position ledger; read-only view of attributed positions, cash, weights, and PnL |
+| `rebalance_fsm` | `RebalanceFSM` | The FSM instance driving the compute → validate → execute → cooldown cycle |
+| `strategy_config` | `Optional[StrategyConfig]` | Per-strategy config loaded from `strategies/strategy_NNN.yaml`; holds `risk_overrides`, `execution_overrides`, `portfolio_overrides` |
 
 #### Exchange & Feed Access
 
@@ -212,6 +230,33 @@ class MyArbStrategy(SpotStrategy):
             logger.info(f"Health: {sum(len(v) for v in self.prices.values())} prices tracked")
 ```
 
+### RebalanceFSM Pattern
+
+The `RebalanceFSM` (accessible via `self.rebalance_fsm`) drives the full compute → validate → execute → cooldown cycle. Strategies do not call `submit_weights()` directly; instead they implement `compute_weights()` and trigger the FSM.
+
+**`compute_weights()`** — override this to return the target weight dict for one rebalance cycle. Return an empty dict or `None` to skip the cycle.
+
+```python
+async def compute_weights(self, **ctx) -> dict:
+    # Return target weights or {} to skip
+    return {"ETHUSDT": 0.5, "BTCUSDT": 0.4}
+```
+
+**`request_rebalance()`** — call this to trigger a cycle from any event hook or `run_forever()`. Only fires if the FSM is currently IDLE; returns `False` silently if a cycle is already in progress.
+
+```python
+async def on_kline(self, event: KlineEvent):
+    if self._should_rebalance(event):
+        await self.request_rebalance()
+
+async def run_forever(self):
+    while True:
+        await asyncio.sleep(60)
+        await self.request_rebalance()
+```
+
+The FSM states are: `IDLE → COMPUTING → VALIDATING → EXECUTING → COOLDOWN → IDLE`. A wildcard `suspend` trigger pauses from any state; `resume` returns to IDLE.
+
 ### Running a Strategy
 
 ```python
@@ -220,8 +265,8 @@ from elysian_core.core.event_bus import EventBus
 
 async def main():
     runner = StrategyRunner()
-    strategy = MyArbStrategy(exchanges={}, event_bus=EventBus())
-    await runner.run(strategy=strategy)
+    strategy = MyArbStrategy(exchanges={}, event_bus=EventBus(), strategy_id=1)
+    await runner.run(strategies=[strategy], strategy_ids=[1])
 
 asyncio.run(main())
 ```
