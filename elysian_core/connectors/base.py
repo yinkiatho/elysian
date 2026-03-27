@@ -456,7 +456,7 @@ class SpotExchangeConnector(ABC):
         
     # ---------------- Orders ---------------------------------------------------------------# 
     @abstractmethod
-    async def place_limit_order(self, symbol: str, side: Side, price: float, quantity: float):
+    async def place_limit_order(self, symbol: str, side: Side, price: float, quantity: float, strategy_id: int):
         """Place a limit order adds order into the self._open_orders"""
         ...
         

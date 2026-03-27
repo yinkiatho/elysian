@@ -116,13 +116,12 @@ class ShadowBook:
         self._mark_prices = dict(mark_prices)
 
         for sym, pos in portfolio_positions.items():
-            if not pos.is_flat():
-                self._positions[sym] = Position(
-                    symbol=sym,
-                    venue=pos.venue,
-                    quantity=pos.quantity * self._allocation,
-                    avg_entry_price=pos.avg_entry_price,
-                )
+            self._positions[sym] = Position(
+                symbol=sym,
+                venue=pos.venue,
+                quantity=pos.quantity * self._allocation,
+                avg_entry_price=pos.avg_entry_price,
+            )
 
         self._refresh_derived()
         self._peak_equity = self._nav
@@ -147,7 +146,7 @@ class ShadowBook:
             to only fills placed by this strategy.
         """
         self._event_bus = event_bus
-        self._order_strategy_map = order_strategy_map
+        #self._order_strategy_map = order_strategy_map
         event_bus.subscribe(EventType.ORDER_UPDATE, self._on_order_update)
         logger.info(
             f"[ShadowBook-{self._strategy_id}] started — subscribed to ORDER_UPDATE"
@@ -172,10 +171,7 @@ class ShadowBook:
         order = event.order
 
         # Filter by strategy ownership
-        if self._order_strategy_map is not None:
-            if self._order_strategy_map.get(order.id) != self._strategy_id:
-                return
-        elif order.strategy_id is not None and order.strategy_id != self._strategy_id:
+        if order.strategy_id is not None and order.strategy_id != self._strategy_id:
             return
 
         if order.status not in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):

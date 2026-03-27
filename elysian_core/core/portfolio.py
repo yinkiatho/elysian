@@ -261,6 +261,8 @@ class Portfolio:
         Uses ``event.delta`` (the publisher currently sends ``new_balance=0.0``).
         Maintains both per-asset ``_cash_dict`` and aggregate ``_cash``.
         Refreshes NAV/weights/drawdown after every cash change.
+        
+        BalanceUpdate Event refers to transfers of assets via deposit or withdrawals not just for quote_asset
         """
         if event.asset in self._STABLECOINS and event.venue == self.venue:
             old_cash = self._cash
@@ -271,8 +273,33 @@ class Portfolio:
                 f"cash {old_cash:.2f} -> {self._cash:.2f}"
             )
             self._refresh_derived()
-
-
+        
+        elif event.venue == self.venue:
+            curr_position = self._positions.get(event.asset, None)
+            if not curr_position:
+                # Making new position
+                self._positions[event.asset] = Position(event.asset, 
+                                                        venue=self.venue, 
+                                                        quantity=event.delta,
+                                                        avg_entry_price=0.0,  # Check this one
+                                                        )
+            else:
+                # Update existing position
+                self._positions[event.asset] = Position(event.asset,
+                                                        venue=self.venue,
+                                                        quantity=curr_position.quantity + event.delta,
+                                                        avg_entry_price= curr_position.avg_entry_price,
+                                                        realized_pnl=curr_position.realized_pnl,
+                                                        total_commission=curr_position.total_commission)
+            logger.info(
+            f"[Portfolio] Balance update: {event.asset} delta={event.delta:+.6f} "
+            f"Old Position: {curr_position} to new Position: {self._positions[event.asset]}"
+            )
+            self._refresh_derived()
+        else:
+            return
+        
+    
     async def _on_order_update(self, event):
         """Route exchange fill events into update_position().
 
@@ -296,11 +323,11 @@ class Portfolio:
         prev_filled = self._fill_tracker.get(order_id, 0.0)
         delta_filled = order.filled_qty - prev_filled
 
-        if delta_filled < 1e-10:
-            # No new fill qty since last event
-            if order.is_terminal:
-                self._fill_tracker.pop(order_id, None)
-            return
+        # if delta_filled < 1e-10:
+        #     # No new fill qty since last event
+        #     if order.is_terminal:
+        #         self._fill_tracker.pop(order_id, None)
+        #     return
 
         # order.commission is already per-fill (Binance field "n" via _parse_execution_to_order)
         self._fill_tracker[order_id] = order.filled_qty
@@ -334,7 +361,7 @@ class Portfolio:
             self._weights = {
                 sym: (pos.quantity * self._mark_prices[sym]) / self._nav
                 for sym, pos in self._positions.items()
-                if not pos.is_flat() and sym in self._mark_prices  # BUG-7: skip stale prices
+                # if not pos.is_flat() and sym in self._mark_prices  # BUG-7: skip stale prices , we keep all filtering and let the bug hit
             }
         else:
             self._weights = {}
@@ -550,6 +577,7 @@ class Portfolio:
                 pos.avg_entry_price = 0.0
                 logger.info(f"[Portfolio] Position closed: {symbol}")
             elif (new_qty > 0) != (old_qty > 0):
+                
                 # Position flipped direction — reset entry price to fill price
                 pos.avg_entry_price = price
                 logger.info(f"[Portfolio] Position flipped: {symbol} new_entry={price:.4f}")

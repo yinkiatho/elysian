@@ -406,9 +406,7 @@ class BinanceKlineFeed(AbstractDataFeed):
     for realised volatility.
 
     Usage:
-        feed = BinanceKlineFeed()
         feed.create_new(asset="ETHUSDT", interval="1s")
-        await feed()
     """
 
     def __init__(self, save_data: bool = False, file_dir: Optional[str] = None):
@@ -452,20 +450,20 @@ class BinanceKlineFeed(AbstractDataFeed):
 
     async def __call__(self):
         """Register with shared client manager and wait for multiplex events."""
-        global binance_spot_kline_client_manager
+        # global binance_spot_kline_client_manager
 
-        # Register this feed with the shared manager
-        binance_spot_kline_client_manager.register_feed(self)
+        # # Register this feed with the shared manager
+        # binance_spot_kline_client_manager.register_feed(self)
 
-        # Start the shared manager if not already running
-        if not binance_spot_kline_client_manager._running:
-            await binance_spot_kline_client_manager.start()
-            # Start the multiplex feed runner in background
-            asyncio.create_task(binance_spot_kline_client_manager.run_multiplex_feeds())
+        # # Start the shared manager if not already running
+        # if not binance_spot_kline_client_manager._running:
+        #     await binance_spot_kline_client_manager.start()
+        #     # Start the multiplex feed runner in background
+        #     asyncio.create_task(binance_spot_kline_client_manager.run_multiplex_feeds())
 
-        # Keep the feed alive
-        while True:
-            await asyncio.sleep(1)
+        # # Keep the feed alive
+        # while True:
+        #     await asyncio.sleep(1)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -596,28 +594,28 @@ class BinanceOrderBookFeed(AbstractDataFeed):
 
     async def __call__(self):
         """Register with shared client manager and wait for multiplex events."""
-        global binance_spot_ob_client_manager
+        # global binance_spot_ob_client_manager
 
-        # Register this feed with the shared manager (WebSocket will start buffering)
-        binance_spot_ob_client_manager.register_feed(self)
+        # # Register this feed with the shared manager (WebSocket will start buffering)
+        # binance_spot_ob_client_manager.register_feed(self)
 
-        # Start the shared manager if not already running
-        if not binance_spot_ob_client_manager._running:
-            await binance_spot_ob_client_manager.start()
+        # # Start the shared manager if not already running
+        # if not binance_spot_ob_client_manager._running:
+        #     await binance_spot_ob_client_manager.start()
             
-            # Start the multiplex feed runner in background (WebSocket reader/workers)
-            asyncio.create_task(binance_spot_ob_client_manager.run_multiplex_feeds())
+        #     # Start the multiplex feed runner in background (WebSocket reader/workers)
+        #     asyncio.create_task(binance_spot_ob_client_manager.run_multiplex_feeds())
 
-        # Give WebSocket a moment to start buffering events
-        await asyncio.sleep(0.1)
+        # # Give WebSocket a moment to start buffering events
+        # await asyncio.sleep(0.1)
         
-        # NOW fetch the snapshot while events are being buffered
-        await self.get_initial_snapshot()
+        # # NOW fetch the snapshot while events are being buffered
+        # await self.get_initial_snapshot()
 
-        # Keep the feed alive
-        while True:
-            await asyncio.sleep(1)
-
+        # # Keep the feed alive
+        # while True:
+        #     await asyncio.sleep(1)
+    
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -822,6 +820,7 @@ class BinanceUserDataClientManager:
         if status is None:
             return None
 
+        strategy_id = msg.get('j', None)
         side = Side.BUY if msg.get("S") == "BUY" else Side.SELL
         raw_type = msg.get("o", "LIMIT")
         if raw_type.upper() == "MARKET":
@@ -852,4 +851,5 @@ class BinanceUserDataClientManager:
             commission=float(msg.get("n", 0)),
             commission_asset=msg.get("N"),
             last_updated_timestamp=int(msg.get("E", 0)),
+            strategy_id=strategy_id
         )

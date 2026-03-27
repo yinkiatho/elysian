@@ -185,13 +185,16 @@ class AsterKlineClientManager:
     # ── Run ───────────────────────────────────────────────────────────────────
 
     async def run_multiplex_feeds(self):
+        '''
+        Call to activate the multiplex feeds
+        '''
         if not self._active_feeds:
             logger.warning("AsterKlineClientManager: No feeds registered")
             return
 
         self._reader_task = asyncio.create_task(self._reader_coroutine())
 
-        num_workers       = min(8, len(self._active_feeds))
+        num_workers = min(8, len(self._active_feeds))
         self._worker_tasks = [
             asyncio.create_task(self._worker_coroutine(i)) for i in range(num_workers)
         ]

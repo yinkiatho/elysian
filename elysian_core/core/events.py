@@ -58,7 +58,7 @@ class BalanceUpdateEvent:
     asset: str
     venue: Venue
     delta: float
-    new_balance: float
+    new_balance: float # Optional for Binance we dont receive this
     timestamp: int
     event_type: EventType = field(default=EventType.BALANCE_UPDATE, init=False)
 

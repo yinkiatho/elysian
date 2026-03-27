@@ -94,10 +94,6 @@ class BinanceSpotExchange(SpotExchangeConnector):
         if event_bus and self.user_data_manager:
             self.user_data_manager.set_event_bus(event_bus)
 
-        # Initialize strategy id
-        self.strategy_name = args.strategy_name
-        self.strategy_id = args.strategy_id
-
     
     # ── Initialisation ────────────────────────────────────────────────────────
     async def initialize(self):
@@ -129,9 +125,12 @@ class BinanceSpotExchange(SpotExchangeConnector):
         min_notional = float(
             next(f["minNotional"] for f in info["filters"] if f["filterType"] == "NOTIONAL")
         )
-        self._token_infos[symbol] = {"step_size": step_size, "min_notional": min_notional, 
-                                     "base_asset": info["baseAsset"], "quote_asset": info["quoteAsset"], 
-                                     "base_asset_precision": info["baseAssetPrecision"], "quote_asset_precision": info["quoteAssetPrecision"]}
+        self._token_infos[symbol] = {"step_size": step_size, 
+                                     "min_notional": min_notional, 
+                                     "base_asset": info["baseAsset"], 
+                                     "quote_asset": info["quoteAsset"], 
+                                     "base_asset_precision": info["baseAssetPrecision"], 
+                                     "quote_asset_precision": info["quoteAssetPrecision"]}
         #logger.info(f"[{symbol}] step={step_size} min_notional={min_notional}")
 
 
@@ -186,7 +185,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
         symbol   = msg.get("s")
         status   = msg.get("X")  # current order status
         exec_type = msg.get("x") # execution type
-
+        strategy_id = msg.get('strategyId')
         internal_status = _BINANCE_STATUS.get(status)
         if internal_status is None:
             logger.warning(f"[{symbol}] Unknown order status '{status}' for order {order_id}")
@@ -221,7 +220,8 @@ class BinanceSpotExchange(SpotExchangeConnector):
                 venue       = Venue.BINANCE,
                 commission      = float(msg.get("n", 0)),
                 commission_asset = msg.get("N"),
-                last_updated_timestamp = int(msg.get('E'))
+                last_updated_timestamp = int(msg.get('E')),
+                strategy_id=strategy_id
             )
             self._open_orders[symbol][order_id] = order
             logger.info(f"[{symbol}] New order registered: {order}")
@@ -294,14 +294,6 @@ class BinanceSpotExchange(SpotExchangeConnector):
         """
         pass
     
-    async def withdraw_asset(self, coin, amount, address, network=None): 
-        """
-        Implementation to be done
-        """
-        pass
-    
-
-
 
     # ── Orders ────────────────────────────────────────────────────────────────
     
@@ -348,7 +340,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
                 
 
     async def place_limit_order(
-        self, symbol: str, side: Side, quantity: float, price: float
+        self, symbol: str, side: Side, quantity: float, price: float, strategy_id: int
     ):
         """
         Place a GTC limit order.
@@ -363,6 +355,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
                 timeInForce="GTC",
                 quantity=quantity,
                 price=str(price),
+                strategyId=strategy_id
             )
             order_id = str(order.get("orderId", ""))
             order_obj = Order(
@@ -374,6 +367,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
                 price=price,
                 status=OrderStatus.PENDING,
                 venue=Venue.BINANCE,
+                strategy_id=strategy_id
             )
             self._open_orders[symbol][order_id] = order_obj
             logger.info(f"Limit order placed: {order_id}")
@@ -416,6 +410,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
             updated_time = o.get("updateTime")
             symbol = o.get("symbol")
             order_id = str(o.get("orderId"))
+            strategy_id = int(o.get('strategyId'))
 
             existing_order = prev_orders.get(symbol, {}).get(order_id)
             if existing_order and updated_time and existing_order.last_updated_timestamp and updated_time < existing_order.last_updated_timestamp:
@@ -445,6 +440,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
                                 tz=datetime.timezone.utc
                             ),
                 venue = Venue.BINANCE,
+                strategy_id=strategy_id
             )
             
             self._open_orders[symbol][order_id] = order
@@ -459,7 +455,9 @@ class BinanceSpotExchange(SpotExchangeConnector):
         symbol: str,
         side: Side,
         quantity: float, # Denoted in terms of base asset ie. 0.1 ETH
-        use_quote_order_qty: bool = False
+        strategy_id: int, 
+        strategy_name: str,
+        use_quote_order_qty: bool = False,
     ):
         """
         Place a market order. amount is in base asset unless use_quote_order_qty=True.
@@ -483,12 +481,12 @@ class BinanceSpotExchange(SpotExchangeConnector):
                 fn = self._client.order_market_buy if side == Side.BUY else self._client.order_market_sell
                 
                 # Create new order obj and add to the open orders registry before placing the order, so that the user-data stream can update it when execution report arrives
-                resp = await fn(symbol=symbol, quantity=qty)
+                resp = await fn(symbol=symbol, quantity=qty, strategyId=strategy_id)
                 
             else:
                 logger.info(f"[{symbol}] Market {'BUY' if side == Side.BUY else 'SELL'} quoteQty={qty:.2f} {quote_asset}")
                 fn = self._client.order_market_buy if side == Side.BUY else self._client.order_market_sell
-                resp = await fn(symbol=symbol, quoteOrderQty=qty)
+                resp = await fn(symbol=symbol, quoteOrderQty=qty, strategyId=strategy_id)
                 
 
             # For market orders, we assume immediate fills and we process the market response immediately
@@ -516,7 +514,9 @@ class BinanceSpotExchange(SpotExchangeConnector):
                 order_id=order_id,
                 status=status,
                 side_str=side_str,
-                comm_asset=comm_asset
+                comm_asset=comm_asset,
+                strategy_id=strategy_id,
+                strategy_name=strategy_name
             ))
             return resp
 
@@ -544,7 +544,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
     
     async def _record_trade(self, base_asset: str, quote_asset: str, base_amount_executed: float, quote_amount_executed: float, 
                                   order_type: OrderType, price: float, commission: float, order_id: int, 
-                                  status: str, side_str: str, comm_asset: str):
+                                  status: str, side_str: str, comm_asset: str, strategy_id: int, strategy_name: str):
         """
         Record a trade in the database. This is called after a market order is filled.
         """
@@ -553,8 +553,8 @@ class BinanceSpotExchange(SpotExchangeConnector):
             CexTrade.create(
                 id=ts.strftime("%Y-%m-%d_%H-%M-%S") + "_" + self.cfg.meta.version_name,
                 datetime=ts,
-                strategy_id=self.strategy_id,
-                strategy_name=self.strategy_name,
+                strategy_id=strategy_id,
+                strategy_name=strategy_name,
                 venue=Venue.BINANCE,
                 asset_type=AssetType.SPOT,
                 symbol=base_asset + quote_asset,

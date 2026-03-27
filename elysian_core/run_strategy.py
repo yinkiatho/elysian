@@ -133,6 +133,13 @@ class StrategyRunner:
         self._state = RunnerState.CREATED
         
         
+        # Token Symbols
+        self.binance_token_symbols = None
+        self.binance_futures_token_symbols = None
+        self.aster_token_symbols = None
+        self.aster_futures_token_symbols = None
+        
+        
         # Binance Client Managers
         self.binance_kline_manager = BinanceKlineClientManager()
         self.binance_ob_manager = BinanceOrderBookClientManager()
@@ -433,10 +440,6 @@ class StrategyRunner:
         if multiplex_tasks:
             logger.info(f"Worker process running {len(multiplex_tasks)} futures feed task(s)...")
             await asyncio.gather(*multiplex_tasks)
-            
-            
-
-
 
 
 # --------- Setting up Aster Kline and OB Feeds with Multiplex Architecture --------- # 

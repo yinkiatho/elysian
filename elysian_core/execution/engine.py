@@ -85,7 +85,7 @@ class ExecutionEngine:
             ctx["_mark_prices"] = mark_prices
             ctx["_portfolio_total_value"] = self._portfolio.total_value(mark_prices)
 
-            intents = self.compute_order_intents(validated, mark_prices)
+            intents = self.compute_order_intents(validated, mark_prices, ctx.get('order_type', OrderType.MARKET))
 
             if not intents:
                 logger.info("[ExecutionEngine] No order intents generated — portfolio already aligned")
@@ -102,8 +102,7 @@ class ExecutionEngine:
                 f"(sells execute first)"
             )
 
-            submitted = 0
-            failed = 0
+            submitted, failed = 0, 0
             errors: List[str] = []
 
             for intent in sells + buys:
@@ -136,7 +135,7 @@ class ExecutionEngine:
             return result
 
     def compute_order_intents(
-        self, validated: ValidatedWeights, mark_prices: Dict[str, float]
+        self, validated: ValidatedWeights, mark_prices: Dict[str, float], order_type: OrderType
     ) -> List[OrderIntent]:
         """Pure computation: validated weights -> order intents.  No side effects.
 
@@ -153,7 +152,7 @@ class ExecutionEngine:
         intents: List[OrderIntent] = []
 
         for symbol, target_weight in validated.weights.items():
-            price = mark_prices.get(symbol)
+            price = mark_prices.get(symbol)  # Limit Orders price is set from the mark price
             if price is None or price <= 0:
                 logger.warning(f"[ExecutionEngine] No mark price for {symbol}, skipping")
                 continue
@@ -167,12 +166,14 @@ class ExecutionEngine:
             # Weight-delta filter: skip legs below threshold
             current_weight = (self._portfolio.position(symbol).quantity * price) / total_value
             weight_delta = abs(target_weight - current_weight)
-            if weight_delta < self._risk_config.min_weight_delta:
-                logger.debug(
-                    f"[ExecutionEngine] Skipping {symbol}: weight_delta={weight_delta:.4f} "
-                    f"< min={self._risk_config.min_weight_delta:.4f}"
-                )
-                continue
+            
+            
+            # if weight_delta < self._risk_config.min_weight_delta:    ### This should be handled in optimizer.py
+            #     logger.debug(
+            #         f"[ExecutionEngine] Skipping {symbol}: weight_delta={weight_delta:.4f} "
+            #         f"< min={self._risk_config.min_weight_delta:.4f}"
+            #     )
+            #     continue    
 
             # Target vs current quantity
             target_notional = target_weight * total_value
@@ -202,7 +203,7 @@ class ExecutionEngine:
                 venue=venue,
                 side=side,
                 quantity=abs_qty,
-                order_type=self._default_order_type,
+                order_type=order_type if order_type is not None else self._default_order_type,
                 price=None if self._default_order_type == OrderType.MARKET else price,
                 strategy_id=strategy_id,
             ))
@@ -234,6 +235,7 @@ class ExecutionEngine:
                     symbol=intent.symbol,
                     side=intent.side,
                     quantity=intent.quantity,
+                    strategy_id=intent.strategy_id
                 )
             elif intent.order_type == OrderType.LIMIT and intent.price is not None:
                 resp = await exchange.place_limit_order(
@@ -241,6 +243,7 @@ class ExecutionEngine:
                     side=intent.side,
                     price=intent.price,
                     quantity=intent.quantity,
+                    strategy_id=intent.strategy_id
                 )
             else:
                 logger.error(
@@ -248,14 +251,9 @@ class ExecutionEngine:
                 )
                 return False
 
-            # Record order_id -> strategy_id so ShadowBooks can route ORDER_UPDATE events
-            if resp and intent.strategy_id:
-                order_id = str(resp.get("orderId", ""))
-                if order_id:
-                    self._order_strategy_map[order_id] = intent.strategy_id
-
             logger.info(f"[ExecutionEngine] Order submitted OK: {intent.side.value} {intent.symbol}")
             return True
+        
         except Exception as e:
             logger.error(
                 f"[ExecutionEngine] Order FAILED: {intent.side.value} {intent.symbol} "
@@ -272,6 +270,7 @@ class ExecutionEngine:
                 price = feed.latest_price
                 if price and price > 0:
                     prices[symbol] = price
-            except Exception:
+            except Exception as e:
+                logger.error(f'Unable to get mark prices from feeds')
                 continue
         return prices

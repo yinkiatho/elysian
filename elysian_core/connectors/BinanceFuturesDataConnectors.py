@@ -546,15 +546,16 @@ class BinanceFuturesOrderBookFeed(AbstractDataFeed):
 
     async def __call__(self):
         """Keep the feed alive. Registration with manager is done externally via run_strategy."""
-        # Give WebSocket a moment to start buffering events
-        await asyncio.sleep(0.1)
+        # # Give WebSocket a moment to start buffering events
+        # await asyncio.sleep(0.1)
 
-        # Fetch the snapshot while events are being buffered
-        await self.get_initial_snapshot()
+        # # Fetch the snapshot while events are being buffered
+        # await self.get_initial_snapshot()
 
-        # Keep the feed alive
-        while True:
-            await asyncio.sleep(1)
+        # # Keep the feed alive
+        # while True:
+        #     await asyncio.sleep(1)
+        pass
 
 
 # ──────────────────────────────────────────────────────────────────────────────
