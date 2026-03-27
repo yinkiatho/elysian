@@ -277,6 +277,11 @@ class SpotStrategy:
     async def _dispatch_balance(self, event: BalanceUpdateEvent):
         if event.venue not in self.venues:
             return
+        if self._shadow_book is not None:
+            try:
+                self._shadow_book.on_balance(event)
+            except Exception as e:
+                logger.error(f"SpotStrategy shadow_book.on_balance error: {e}", exc_info=True)
         try:
             await self.on_balance_update(event)
         except Exception as e:

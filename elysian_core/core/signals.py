@@ -29,6 +29,7 @@ class TargetWeights:
     strategy_id: str = ""
     venue: Optional[Venue] = None                   # target venue (None = default)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    price_overrides: Optional[Dict[str, float]] = None  # per-symbol limit price override
 
 
 @dataclass(frozen=True)

@@ -23,12 +23,15 @@ import time
 from collections import deque
 from typing import Deque, Dict, List, Optional
 
-from elysian_core.core.enums import OrderStatus, Side, Venue
+from elysian_core.core.enums import OrderStatus, OrderType, Side, Venue
 from elysian_core.core.events import EventType
 from elysian_core.core.portfolio import Fill
 from elysian_core.core.position import Position
+from elysian_core.core.signals import OrderIntent
 from elysian_core.db.models import PortfolioSnapshot
 import elysian_core.utils.logger as log
+
+_STABLECOINS = frozenset({"USDT", "USDC", "BUSD"})
 
 logger = log.setup_custom_logger("root")
 
@@ -81,6 +84,13 @@ class ShadowBook:
         # Shared map from ExecutionEngine: order_id -> strategy_id for event routing
         # Passed in via start(). ShadowBook only processes orders belonging to its strategy.
         self._order_strategy_map: Optional[Dict[str, int]] = None
+
+        # ── Locked balance (pending LIMIT orders only) ────────────────────
+        self._locked_cash: float = 0.0
+        self._locked_quantities: Dict[str, float] = {}
+        self._locked_cash_per_order: Dict[str, float] = {}
+        self._locked_qty_per_order: Dict[str, float] = {}
+        self._pending_order_id_to_intent: Dict[str, OrderIntent] = {}
 
 
     # ── Initialization ────────────────────────────────────────────────────
@@ -179,6 +189,7 @@ class ShadowBook:
                 self._fill_tracker.pop(order.id, None)
                 if self._order_strategy_map is not None:
                     self._order_strategy_map.pop(order.id, None)
+                self.release_order_lock(order.id)
             return
 
         order_id = order.id
@@ -190,9 +201,14 @@ class ShadowBook:
                 self._fill_tracker.pop(order_id, None)
                 if self._order_strategy_map is not None:
                     self._order_strategy_map.pop(order_id, None)
+                self.release_order_lock(order_id)
             return
 
         self._fill_tracker[order_id] = order.filled_qty
+
+        # Release lock proportionally for this fill increment
+        self._partial_release_lock(order_id, delta_filled)
+
         qty_delta = delta_filled if order.side == Side.BUY else -delta_filled
 
         self.apply_fill(
@@ -207,6 +223,7 @@ class ShadowBook:
             self._fill_tracker.pop(order_id, None)
             if self._order_strategy_map is not None:
                 self._order_strategy_map.pop(order_id, None)
+            self.release_order_lock(order_id)
 
     # ── Read — Identity ───────────────────────────────────────────────────
 
@@ -400,6 +417,101 @@ class ShadowBook:
 
     def adjust_cash(self, delta: float):
         self._cash += delta
+
+    def on_balance(self, event) -> None:
+        """Mirror Portfolio._on_balance(), scaled by allocation.
+
+        Called automatically by base_strategy._dispatch_balance() so that
+        deposits and withdrawals are reflected in the shadow book.
+        """
+        if event.asset in _STABLECOINS:
+            self._cash += event.delta * self._allocation
+            self._refresh_derived()
+        elif event.venue == self._venue:
+            scaled_delta = event.delta * self._allocation
+            curr = self._positions.get(event.asset)
+            if curr is None:
+                self._positions[event.asset] = Position(
+                    symbol=event.asset,
+                    venue=self._venue,
+                    quantity=scaled_delta,
+                    avg_entry_price=self._mark_prices.get(event.asset, 0.0),
+                )
+            else:
+                self._positions[event.asset] = Position(
+                    symbol=event.asset,
+                    venue=curr.venue,
+                    quantity=curr.quantity + scaled_delta,
+                    avg_entry_price=curr.avg_entry_price,
+                    realized_pnl=curr.realized_pnl,
+                    total_commission=curr.total_commission,
+                )
+            self._refresh_derived()
+
+    # ── Locked balance — LIMIT order reservations ─────────────────────────
+
+    def lock_for_order(self, order_id: str, intent: OrderIntent) -> None:
+        """Reserve balance for a submitted LIMIT order. No-op for MARKET orders."""
+        if intent.order_type != OrderType.LIMIT:
+            return
+        if order_id in self._pending_order_id_to_intent:
+            return  # idempotent
+        self._pending_order_id_to_intent[order_id] = intent
+        if intent.side == Side.BUY:
+            notional = intent.quantity * intent.price
+            self._locked_cash += notional
+            self._locked_cash_per_order[order_id] = notional
+        else:  # SELL
+            self._locked_quantities[intent.symbol] = (
+                self._locked_quantities.get(intent.symbol, 0.0) + intent.quantity
+            )
+            self._locked_qty_per_order[order_id] = intent.quantity
+
+    def _partial_release_lock(self, order_id: str, delta_filled: float) -> None:
+        """Release lock proportionally as a partial/full fill arrives."""
+        intent = self._pending_order_id_to_intent.get(order_id)
+        if intent is None or intent.order_type != OrderType.LIMIT:
+            return
+        if intent.side == Side.BUY:
+            release = delta_filled * intent.price
+            remaining = max(0.0, self._locked_cash_per_order.get(order_id, 0.0) - release)
+            self._locked_cash_per_order[order_id] = remaining
+            self._locked_cash = max(0.0, self._locked_cash - release)
+        else:  # SELL
+            remaining = max(0.0, self._locked_qty_per_order.get(order_id, 0.0) - delta_filled)
+            self._locked_qty_per_order[order_id] = remaining
+            sym_locked = max(0.0, self._locked_quantities.get(intent.symbol, 0.0) - delta_filled)
+            if sym_locked == 0.0:
+                self._locked_quantities.pop(intent.symbol, None)
+            else:
+                self._locked_quantities[intent.symbol] = sym_locked
+
+    def release_order_lock(self, order_id: str) -> None:
+        """Release any remaining lock for a terminal order."""
+        intent = self._pending_order_id_to_intent.pop(order_id, None)
+        if intent is None or intent.order_type != OrderType.LIMIT:
+            self._locked_cash_per_order.pop(order_id, None)
+            self._locked_qty_per_order.pop(order_id, None)
+            return
+        if intent.side == Side.BUY:
+            remaining = self._locked_cash_per_order.pop(order_id, 0.0)
+            self._locked_cash = max(0.0, self._locked_cash - remaining)
+        else:  # SELL
+            remaining = self._locked_qty_per_order.pop(order_id, 0.0)
+            sym_locked = max(0.0, self._locked_quantities.get(intent.symbol, 0.0) - remaining)
+            if sym_locked == 0.0:
+                self._locked_quantities.pop(intent.symbol, None)
+            else:
+                self._locked_quantities[intent.symbol] = sym_locked
+
+    @property
+    def free_cash(self) -> float:
+        """Cash available for new orders (excludes locked LIMIT BUY reservations)."""
+        return max(0.0, self._cash - self._locked_cash)
+
+    def free_quantity(self, symbol: str) -> float:
+        """Base quantity available for new orders (excludes locked LIMIT SELL reservations)."""
+        return max(0.0, self.position(symbol).quantity - self._locked_quantities.get(symbol, 0.0))
 
     def update_mark_prices(self, prices: Dict[str, float]):
         """Update mark prices and refresh derived metrics.

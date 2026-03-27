@@ -106,9 +106,11 @@ class ExecutionEngine:
             errors: List[str] = []
 
             for intent in sells + buys:
-                ok = await self._submit_order(intent)
-                if ok:
+                order_id = await self._submit_order(intent)
+                if order_id:
                     submitted += 1
+                    self._portfolio.lock_for_order(order_id, intent)
+                    self._order_strategy_map[order_id] = intent.strategy_id
                 else:
                     failed += 1
                     errors.append(f"{intent.side.value} {intent.symbol} qty={intent.quantity:.6f}")
@@ -151,8 +153,10 @@ class ExecutionEngine:
         logger.info(f"[ExecutionEngine] Portfolio total value: {total_value:.2f}")
         intents: List[OrderIntent] = []
 
+        price_overrides = validated.original.price_overrides or {}
         for symbol, target_weight in validated.weights.items():
-            price = mark_prices.get(symbol)  # Limit Orders price is set from the mark price
+            # Use strategy-provided limit price if given, else fall back to mark price
+            price = price_overrides.get(symbol) or mark_prices.get(symbol)
             if price is None or price <= 0:
                 logger.warning(f"[ExecutionEngine] No mark price for {symbol}, skipping")
                 continue
@@ -198,13 +202,14 @@ class ExecutionEngine:
                 f"delta_w={weight_delta:.4f})"
             )
 
+            effective_order_type = order_type if order_type is not None else self._default_order_type
             intents.append(OrderIntent(
                 symbol=symbol,
                 venue=venue,
                 side=side,
                 quantity=abs_qty,
-                order_type=order_type if order_type is not None else self._default_order_type,
-                price=None if self._default_order_type == OrderType.MARKET else price,
+                order_type=effective_order_type,
+                price=None if effective_order_type == OrderType.MARKET else price,
                 strategy_id=strategy_id,
             ))
 
@@ -213,16 +218,17 @@ class ExecutionEngine:
 
     # ── Private ──────────────────────────────────────────────────────────────
 
-    async def _submit_order(self, intent: OrderIntent) -> bool:
+    async def _submit_order(self, intent: OrderIntent) -> Optional[str]:
         """Submit a single OrderIntent to the appropriate exchange connector.
 
+        Returns the exchange-assigned order_id string on success, None on failure.
         The connector's ``order_health_check()`` handles min-notional and
         balance validation — the engine does not duplicate those checks.
         """
         exchange = self._exchanges.get(intent.venue)
         if exchange is None:
             logger.error(f"[ExecutionEngine] No exchange for {intent.venue}")
-            return False
+            return None
 
         try:
             logger.info(
@@ -235,7 +241,8 @@ class ExecutionEngine:
                     symbol=intent.symbol,
                     side=intent.side,
                     quantity=intent.quantity,
-                    strategy_id=intent.strategy_id
+                    strategy_id=intent.strategy_id,
+                    strategy_name="",
                 )
             elif intent.order_type == OrderType.LIMIT and intent.price is not None:
                 resp = await exchange.place_limit_order(
@@ -249,18 +256,24 @@ class ExecutionEngine:
                 logger.error(
                     f"[ExecutionEngine] Unsupported order type {intent.order_type} for {intent.symbol}"
                 )
-                return False
+                return None
 
-            logger.info(f"[ExecutionEngine] Order submitted OK: {intent.side.value} {intent.symbol}")
-            return True
-        
+            order_id = str(resp.get("orderId", "")) if resp else ""
+            if order_id:
+                logger.info(
+                    f"[ExecutionEngine] Order submitted OK: {intent.side.value} {intent.symbol} "
+                    f"order_id={order_id}"
+                )
+                return order_id
+            return None
+
         except Exception as e:
             logger.error(
                 f"[ExecutionEngine] Order FAILED: {intent.side.value} {intent.symbol} "
                 f"qty={intent.quantity:.6f} — {e}",
                 exc_info=True,
             )
-            return False
+            return None
 
     def _get_mark_prices(self) -> Dict[str, float]:
         """Snapshot current mid prices from all feeds."""

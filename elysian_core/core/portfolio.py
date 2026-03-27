@@ -15,8 +15,9 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Deque, Dict, List, Optional
-from elysian_core.core.enums import OrderStatus, Side, Venue
+from elysian_core.core.enums import OrderStatus, OrderType, Side, Venue
 from elysian_core.core.position import Position
+from elysian_core.core.signals import OrderIntent
 import elysian_core.utils.logger as log
 
 from elysian_core.core.events import EventType
@@ -91,7 +92,17 @@ class Portfolio:
         # Note: order.commission from OrderUpdateEvent is already per-fill
         # (Binance field "n"), so no commission tracker is needed.
         self._fill_tracker: Dict[str, float] = {}  # order_id -> last known filled_qty
-        
+
+        # ── Locked balance (pending LIMIT orders only) ────────────────────
+        # LIMIT BUY: lock quote (USDT) = quantity * limit_price
+        # LIMIT SELL: lock base qty = quantity
+        # Released incrementally per partial fill; remainder on terminal status
+        self._locked_cash: float = 0.0                                   # quote locked in pending LIMIT BUYs
+        self._locked_quantities: Dict[str, float] = {}                   # symbol -> base qty locked in pending LIMIT SELLs
+        self._locked_cash_per_order: Dict[str, float] = {}               # order_id -> remaining locked quote
+        self._locked_qty_per_order: Dict[str, float] = {}                # order_id -> remaining locked base qty
+        self._pending_order_id_to_intent: Dict[str, OrderIntent] = {}    # order_id -> intent
+
         # Exchange and Venue setting, only one exchange and venue per portfolio
         self.exchange = exchange
         self.venue = venue
@@ -277,11 +288,11 @@ class Portfolio:
         elif event.venue == self.venue:
             curr_position = self._positions.get(event.asset, None)
             if not curr_position:
-                # Making new position
-                self._positions[event.asset] = Position(event.asset, 
-                                                        venue=self.venue, 
+                # Making new position — seed entry price from mark price so unrealized PnL starts at 0
+                self._positions[event.asset] = Position(event.asset,
+                                                        venue=self.venue,
                                                         quantity=event.delta,
-                                                        avg_entry_price=0.0,  # Check this one
+                                                        avg_entry_price=self._mark_prices.get(event.asset, 0.0),
                                                         )
             else:
                 # Update existing position
@@ -314,23 +325,21 @@ class Portfolio:
         if event.venue != self.venue:
             return
         if order.status not in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
-            # Clean up tracker for terminal non-fill statuses (cancelled, rejected)
+            # Clean up tracker for terminal non-fill statuses (cancelled, rejected, expired)
             if order.is_terminal:
                 self._fill_tracker.pop(order.id, None)
+                self.release_order_lock(order.id)
             return
 
         order_id = order.id
         prev_filled = self._fill_tracker.get(order_id, 0.0)
         delta_filled = order.filled_qty - prev_filled
 
-        # if delta_filled < 1e-10:
-        #     # No new fill qty since last event
-        #     if order.is_terminal:
-        #         self._fill_tracker.pop(order_id, None)
-        #     return
-
         # order.commission is already per-fill (Binance field "n" via _parse_execution_to_order)
         self._fill_tracker[order_id] = order.filled_qty
+
+        # Release lock proportionally for this fill increment
+        self._partial_release_lock(order_id, delta_filled)
 
         # BUY fills increase position (positive delta); SELL fills decrease it
         qty_delta = delta_filled if order.side == Side.BUY else -delta_filled
@@ -345,9 +354,10 @@ class Portfolio:
             order_id=order_id,
         )
 
-        # Clean up completed orders from tracker
+        # Clean up completed orders from tracker; release any remaining lock
         if order.is_terminal:
             self._fill_tracker.pop(order_id, None)
+            self.release_order_lock(order_id)
 
     def _refresh_derived(self):
         """Recomputes from current mark prices:"
@@ -361,7 +371,7 @@ class Portfolio:
             self._weights = {
                 sym: (pos.quantity * self._mark_prices[sym]) / self._nav
                 for sym, pos in self._positions.items()
-                # if not pos.is_flat() and sym in self._mark_prices  # BUG-7: skip stale prices , we keep all filtering and let the bug hit
+                if not pos.is_flat() and sym in self._mark_prices
             }
         else:
             self._weights = {}
@@ -586,6 +596,9 @@ class Portfolio:
         self._total_commission += commission
 
         self._positions[symbol] = pos
+        # Remove flat positions to prevent stale entries in weight/NAV calculations
+        if pos.is_flat():
+            self._positions.pop(symbol, None)
         self._cash -= qty_delta * price
         self._cash -= commission
 
@@ -606,6 +619,79 @@ class Portfolio:
 
     def adjust_cash(self, delta: float):
         self._cash += delta
+
+    # ── Locked balance — LIMIT order reservations ─────────────────────────────
+
+    def lock_for_order(self, order_id: str, intent: OrderIntent) -> None:
+        """Reserve balance for a submitted LIMIT order. No-op for MARKET orders."""
+        if intent.order_type != OrderType.LIMIT:
+            return
+        if order_id in self._pending_order_id_to_intent:
+            return  # idempotent
+        self._pending_order_id_to_intent[order_id] = intent
+        if intent.side == Side.BUY:
+            notional = intent.quantity * intent.price
+            self._locked_cash += notional
+            self._locked_cash_per_order[order_id] = notional
+            logger.info(
+                f"[Portfolio] Locked {notional:.4f} quote for LIMIT BUY {intent.symbol} "
+                f"qty={intent.quantity} @ {intent.price} order={order_id}"
+            )
+        else:  # SELL
+            self._locked_quantities[intent.symbol] = (
+                self._locked_quantities.get(intent.symbol, 0.0) + intent.quantity
+            )
+            self._locked_qty_per_order[order_id] = intent.quantity
+            logger.info(
+                f"[Portfolio] Locked {intent.quantity:.6f} {intent.symbol} "
+                f"for LIMIT SELL order={order_id}"
+            )
+
+    def _partial_release_lock(self, order_id: str, delta_filled: float) -> None:
+        """Release lock proportionally as a partial/full fill arrives."""
+        intent = self._pending_order_id_to_intent.get(order_id)
+        if intent is None or intent.order_type != OrderType.LIMIT:
+            return
+        if intent.side == Side.BUY:
+            release = delta_filled * intent.price
+            remaining = max(0.0, self._locked_cash_per_order.get(order_id, 0.0) - release)
+            self._locked_cash_per_order[order_id] = remaining
+            self._locked_cash = max(0.0, self._locked_cash - release)
+        else:  # SELL
+            remaining = max(0.0, self._locked_qty_per_order.get(order_id, 0.0) - delta_filled)
+            self._locked_qty_per_order[order_id] = remaining
+            sym_locked = max(0.0, self._locked_quantities.get(intent.symbol, 0.0) - delta_filled)
+            if sym_locked == 0.0:
+                self._locked_quantities.pop(intent.symbol, None)
+            else:
+                self._locked_quantities[intent.symbol] = sym_locked
+
+    def release_order_lock(self, order_id: str) -> None:
+        """Release any remaining lock for a terminal order (filled/cancelled/rejected)."""
+        intent = self._pending_order_id_to_intent.pop(order_id, None)
+        if intent is None or intent.order_type != OrderType.LIMIT:
+            self._locked_cash_per_order.pop(order_id, None)
+            self._locked_qty_per_order.pop(order_id, None)
+            return
+        if intent.side == Side.BUY:
+            remaining = self._locked_cash_per_order.pop(order_id, 0.0)
+            self._locked_cash = max(0.0, self._locked_cash - remaining)
+        else:  # SELL
+            remaining = self._locked_qty_per_order.pop(order_id, 0.0)
+            sym_locked = max(0.0, self._locked_quantities.get(intent.symbol, 0.0) - remaining)
+            if sym_locked == 0.0:
+                self._locked_quantities.pop(intent.symbol, None)
+            else:
+                self._locked_quantities[intent.symbol] = sym_locked
+
+    @property
+    def free_cash(self) -> float:
+        """Cash available for new orders (excludes locked LIMIT BUY reservations)."""
+        return max(0.0, self._cash - self._locked_cash)
+
+    def free_quantity(self, symbol: str) -> float:
+        """Base quantity available for new orders (excludes locked LIMIT SELL reservations)."""
+        return max(0.0, self.position(symbol).quantity - self._locked_quantities.get(symbol, 0.0))
 
     # ══════════════════════════════════════════════════════════════════════════
     #  Snapshot / display
