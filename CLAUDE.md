@@ -186,3 +186,32 @@ npx @claude-flow/cli@latest doctor --fix
 
 - Documentation: https://github.com/ruvnet/claude-flow
 - Issues: https://github.com/ruvnet/claude-flow/issues
+
+## Persistent Elysian Swarm (Always Active)
+
+This repo runs a persistent 7-agent quant swarm. Every session starts with this swarm loaded. Coordinate all work through these roles:
+
+| Agent | Subagent Type | Role | Memory Namespace |
+|-------|--------------|------|-----------------|
+| **system-quant-architect** | `system-architect-quant` | Lead — pipeline design, FSM, signal contracts, cross-cutting integrity | `elysian-arch` |
+| **quant-strategist** | `quant-strategist` | Strategy layer, signal generation, weight construction | `elysian-strat` |
+| **quant-developer** | `quant-developer` | Infrastructure, exchange connectivity, async data pipelines | `elysian-dev` |
+| **coder** | `coder` | Implementation, refactoring, clean production code | `elysian-code` |
+| **quant-analyst** | `quant-analyst` | Code quality, performance analysis, portfolio analytics | `elysian-analysis` |
+| **tester** | `tester` | TDD, unit/integration tests, verification | `elysian-test` |
+| **architect** | `architect` | High-level system design, ADRs, cross-domain decisions | `elysian-arch` |
+
+### Swarm Coordination
+
+- **Lead**: `system-quant-architect` — architectural decisions and cross-agent coordination
+- **Topology**: hierarchical-mesh
+- **Shared namespace**: `elysian-swarm`
+- Manifest: `.claude/swarm-manifest.json`
+- When spawning agents for complex tasks, use ALL relevant agents in ONE message
+
+### Persistent Memory Namespaces
+
+```bash
+npx @claude-flow/cli@latest memory search --query "<query>" --namespace elysian-swarm
+# Per-agent: elysian-arch | elysian-strat | elysian-dev | elysian-code | elysian-analysis | elysian-test
+```

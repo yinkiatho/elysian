@@ -488,7 +488,8 @@
         The Order FSM validates <code>OrderStatus</code> transitions but operates in <strong>warn-mode</strong> &mdash;
         illegal transitions are logged as warnings but still applied, because the exchange is the
         source of truth. This is not a <code>BaseFSM</code> subclass; it uses a simple dict of valid transitions
-        and two standalone functions.
+        and two standalone functions. New code should prefer the <code>OrderFSM</code> class for per-order
+        lifecycle management; the module-level functions remain for backwards compatibility.
     </p>
     <p class="file-ref">core/order_fsm.py &mdash; validate_order_transition(), is_terminal() &bull; core/enums.py &mdash; class OrderStatus &bull; core/order.py &mdash; Order.transition_to()</p>
 
@@ -501,6 +502,8 @@
         <tr><td><code>FILLED</code></td><td><code>"Filled"</code></td><td>Order completely filled. All quantity executed.</td><td><span class="tag-terminal">TERMINAL</span></td></tr>
         <tr><td><code>CANCELLED</code></td><td><code>"Cancelled"</code></td><td>Order cancelled (by user, exchange, or expiration).</td><td><span class="tag-terminal">TERMINAL</span></td></tr>
         <tr><td><code>REJECTED</code></td><td><code>"Rejected"</code></td><td>Order rejected by exchange (insufficient balance, invalid params, etc.).</td><td><span class="tag-terminal">TERMINAL</span></td></tr>
+        <tr><td><code>EXPIRED</code></td><td><code>"Expired"</code></td><td>GTT/IOC order whose time-in-force lapsed without a full fill. Semantically distinct from CANCELLED (which is a deliberate cancellation action, not a passive expiry).</td><td><span class="tag-terminal">TERMINAL</span></td></tr>
+        <tr><td><code>TRIGGERED</code></td><td><code>"Triggered"</code></td><td>Conditional order (Stop-Loss / Take-Profit) whose trigger price was hit. The child order is now active and executing on the exchange.</td><td><span class="tag-active">ACTIVE</span></td></tr>
     </table>
 
     <h3>State Diagram</h3>
@@ -515,15 +518,25 @@
 
             OPEN --> PARTIALLY_FILLED : partial execution
             OPEN --> FILLED : full execution
-            OPEN --> CANCELLED : user cancel / expiry
+            OPEN --> CANCELLED : user cancel
+            OPEN --> EXPIRED : GTT/IOC lapsed
+            OPEN --> TRIGGERED : SL/TP trigger price hit
 
             PARTIALLY_FILLED --> PARTIALLY_FILLED : additional partial fill
             PARTIALLY_FILLED --> FILLED : remaining filled
             PARTIALLY_FILLED --> CANCELLED : cancel remaining
+            PARTIALLY_FILLED --> EXPIRED : GTT/IOC remainder lapsed
+
+            TRIGGERED --> OPEN : child order placed as resting limit
+            TRIGGERED --> PARTIALLY_FILLED : child order began filling
+            TRIGGERED --> FILLED : child order instant full fill
+            TRIGGERED --> CANCELLED : cancelled after trigger
+            TRIGGERED --> EXPIRED : expired after trigger (IOC child)
 
             FILLED --> [*]
             CANCELLED --> [*]
             REJECTED --> [*]
+            EXPIRED --> [*]
     </div>
 
     <h3>Valid Transition Table (<code>_VALID_TRANSITIONS</code>)</h3>
@@ -536,13 +549,13 @@
         </tr>
         <tr>
             <td><code>OPEN</code></td>
-            <td><code>PARTIALLY_FILLED</code>, <code>FILLED</code>, <code>CANCELLED</code></td>
-            <td>Standard limit order lifecycle. Cannot return to PENDING.</td>
+            <td><code>PARTIALLY_FILLED</code>, <code>FILLED</code>, <code>CANCELLED</code>, <code>EXPIRED</code>, <code>TRIGGERED</code></td>
+            <td>Standard limit order lifecycle. Cannot return to PENDING. EXPIRED for GTT/IOC orders whose time-in-force lapsed; TRIGGERED for SL/TP conditional orders.</td>
         </tr>
         <tr>
             <td><code>PARTIALLY_FILLED</code></td>
-            <td><code>PARTIALLY_FILLED</code>, <code>FILLED</code>, <code>CANCELLED</code></td>
-            <td>Self-transition for additional partial fills. Can cancel remaining quantity.</td>
+            <td><code>PARTIALLY_FILLED</code>, <code>FILLED</code>, <code>CANCELLED</code>, <code>EXPIRED</code></td>
+            <td>Self-transition for additional partial fills. Can cancel remaining quantity. EXPIRED if GTT/IOC remainder lapses after partial fill.</td>
         </tr>
         <tr>
             <td><code>FILLED</code></td>
@@ -558,6 +571,16 @@
             <td><code>REJECTED</code></td>
             <td><em>(none)</em></td>
             <td><span class="tag-terminal">TERMINAL</span> &mdash; no further transitions allowed.</td>
+        </tr>
+        <tr>
+            <td><code>TRIGGERED</code></td>
+            <td><code>OPEN</code>, <code>PARTIALLY_FILLED</code>, <code>FILLED</code>, <code>CANCELLED</code>, <code>EXPIRED</code></td>
+            <td>Full lifecycle of the child order after the trigger condition is met. Can rest on book (OPEN), fill immediately (FILLED), or be cancelled/expired before filling.</td>
+        </tr>
+        <tr>
+            <td><code>EXPIRED</code></td>
+            <td><em>(none)</em></td>
+            <td><span class="tag-terminal">TERMINAL</span> &mdash; GTT/IOC time-in-force lapsed; distinct from CANCELLED.</td>
         </tr>
     </table>
 
@@ -576,9 +599,55 @@
         <tr>
             <td><code>is_terminal</code></td>
             <td><code>is_terminal(status: OrderStatus) -> bool</code></td>
-            <td>Returns <code>True</code> if status is FILLED, CANCELLED, or REJECTED.</td>
+            <td>Returns <code>True</code> if status is FILLED, CANCELLED, REJECTED, or EXPIRED.</td>
         </tr>
     </table>
+
+    <h3>OrderFSM Class &mdash; Per-order lifecycle wrapper</h3>
+    <p class="desc">
+        <code>OrderFSM</code> is a thin, per-order wrapper around the <code>_VALID_TRANSITIONS</code> table.
+        It provides a clean object-oriented API for tracking a single order's lifecycle and is designed
+        as groundwork for Stop-Loss / Take-Profit order management. Operates in the same warn-mode as
+        the module-level functions: invalid transitions are logged but still applied.
+    </p>
+    <p class="file-ref">core/order_fsm.py &mdash; class OrderFSM</p>
+    <table>
+        <tr><th>Member</th><th>Type</th><th>Behaviour</th></tr>
+        <tr>
+            <td><code>transition(new_status, order_id)</code></td>
+            <td>method &rarr; bool</td>
+            <td>Validates and applies the transition. Logs a warning on invalid transitions but always applies. Returns <code>True</code> if valid.</td>
+        </tr>
+        <tr>
+            <td><code>is_terminal</code></td>
+            <td>property &rarr; bool</td>
+            <td>True if current status is in <code>_TERMINAL</code> (FILLED, CANCELLED, REJECTED, EXPIRED).</td>
+        </tr>
+        <tr>
+            <td><code>is_active</code></td>
+            <td>property &rarr; bool</td>
+            <td>True if the order is still live. Delegates to <code>OrderStatus.is_active()</code>. Includes TRIGGERED.</td>
+        </tr>
+        <tr>
+            <td><code>can_fill</code></td>
+            <td>property &rarr; bool</td>
+            <td>True when fill events are expected: status is OPEN, PARTIALLY_FILLED, or TRIGGERED.</td>
+        </tr>
+        <tr>
+            <td><code>is_conditional</code></td>
+            <td>property &rarr; bool</td>
+            <td>True if <code>order_type</code> is in <code>_CONDITIONAL_ORDER_TYPES</code> (STOP_MARKET, TAKE_PROFIT_MARKET).</td>
+        </tr>
+    </table>
+    <div class="note-box">
+        <strong>SL/TP Order Lifecycle:</strong>
+        <code>PENDING &rarr; OPEN &rarr; TRIGGERED &rarr; [PARTIALLY_FILLED*] &rarr; FILLED</code><br><br>
+        When a conditional order's trigger price is hit, the exchange moves it to <code>TRIGGERED</code>.
+        The child order then executes like a normal order: it may rest on the book (<code>OPEN</code>),
+        receive partial fills (<code>PARTIALLY_FILLED</code>), and eventually reach <code>FILLED</code>
+        or be cancelled/expired.<br><br>
+        <strong>Conditional Order Types:</strong> <code>_CONDITIONAL_ORDER_TYPES = {STOP_MARKET, TAKE_PROFIT_MARKET}</code>
+    </div>
 
     <h3>Integration with <code>Order</code> class</h3>
     <div class="note-box">
@@ -601,7 +670,7 @@
         <tr><td><code>"CANCELED"</code></td><td><code>OrderStatus.CANCELLED</code></td></tr>
         <tr><td><code>"PENDING_CANCEL"</code></td><td><code>OrderStatus.PENDING</code></td></tr>
         <tr><td><code>"REJECTED"</code></td><td><code>OrderStatus.REJECTED</code></td></tr>
-        <tr><td><code>"EXPIRED"</code></td><td><code>OrderStatus.CANCELLED</code></td></tr>
+        <tr><td><code>"EXPIRED"</code></td><td><code>OrderStatus.EXPIRED</code></td></tr>
     </table>
 
     <hr class="divider">
@@ -962,7 +1031,12 @@
                 OS3["PARTIALLY_FILLED"]
                 OS4["FILLED"]
                 OS5["CANCELLED"]
+                OS6["EXPIRED"]
+                OS7["TRIGGERED"]
                 OS1 --> OS2 --> OS3 --> OS4
+                OS2 --> OS6
+                OS2 --> OS7
+                OS7 --> OS3
             end
 
             RS3 -->|"strategy.start#40;#41;"| SS1
@@ -1038,9 +1112,9 @@
         <tr>
             <td><strong>Order FSM</strong></td>
             <td><code>OrderStatus</code></td>
-            <td>6: PENDING, OPEN, PARTIALLY_FILLED, FILLED, CANCELLED, REJECTED</td>
-            <td>FILLED, CANCELLED, REJECTED</td>
-            <td>Dict-based validation (warn-mode), standalone functions</td>
+            <td>8: PENDING, OPEN, PARTIALLY_FILLED, FILLED, CANCELLED, REJECTED, EXPIRED, TRIGGERED</td>
+            <td>FILLED, CANCELLED, REJECTED, EXPIRED</td>
+            <td>Dict-based validation (warn-mode) + <code>OrderFSM</code> class; standalone functions for backwards compatibility</td>
             <td><code>core/order_fsm.py</code></td>
         </tr>
         <tr>

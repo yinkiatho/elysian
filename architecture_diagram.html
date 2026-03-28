@@ -403,14 +403,14 @@
             COI["compute_order_intents#40;#41;\nFor each symbol in validated.weights:"]
 
             STEP1["1. Get mark price + venue + exchange\nSkip if no price"]
-            STEP2["2. Weight-delta filter\ncurrent_w = #40;pos.qty * price#41; / NAV\nSkip if abs#40;target_w - current_w#41;\n    lt min_weight_delta"]
-            STEP3["3. Compute target qty\ntarget_qty = target_w * NAV / price\ndelta = target_qty - current_qty"]
+            STEP2["2. Compute free quantity\nfree_qty = free_quantity#40;symbol#41;\n= pos.qty - locked_qty\ncurrent_w = #40;free_qty * price#41; / NAV"]
+            STEP3["3. Compute target qty\ntarget_qty = target_w * NAV / price\ndelta = target_qty - free_qty\nAvoids duplicate orders on pending LIMIT"]
             STEP4["4. Round to step_size\nabs_qty = floor#40;abs#40;delta#41; / step#41; * step\nSkip if rounded qty lte 0"]
             STEP5["5. Create OrderIntent\nside = BUY if delta gt 0 else SELL"]
 
             PART["Partition:\nSELLS first #40;free capital#41;\nthen BUYS"]
-            SUB["_submit_order per intent\nplace_market_order or place_limit_order\nError isolated: try/except per order"]
-            RR["RebalanceResult\nintents + submitted + failed + errors"]
+            SUB["_submit_order per intent\nplace_market_order or place_limit_order\nOn success: lock_for_order#40;order_id, intent#41;\nError isolated: try/except per order"]
+            RR["RebalanceResult\nintents + submitted + failed + errors\nsubmitted_orders: Dict#91;order_id, OrderIntent#93;"]
 
             V --> MP
             MP --> TV
@@ -548,9 +548,9 @@
         can read their own isolated positions, cash, weights, and PnL without touching the aggregate Portfolio.
         ShadowBooks are updated in real time via event-driven fill attribution: each <code>ORDER_UPDATE</code>
         event is routed to the correct ShadowBook using <code>ExecutionEngine._order_strategy_map</code>.
-        <code>reconcile_shadow_books()</code> is retained as a periodic drift-correction pass only.
+        After order submission, <code>lock_for_order(order_id, intent)</code> is called on the ShadowBook to reserve locked cash/qty for pending LIMIT orders. Locks are released incrementally on each partial fill and fully on terminal status via <code>_partial_release_lock()</code> and <code>release_order_lock()</code>.
     </p>
-    <p class="file-ref">core/weight_aggregator.py &mdash; WeightAggregator &bull; core/shadow_book.py &mdash; ShadowBook, reconcile_shadow_books</p>
+    <p class="file-ref">core/weight_aggregator.py &mdash; WeightAggregator &bull; core/shadow_book.py &mdash; ShadowBook</p>
     <div class="mermaid">
         graph TD
             subgraph Strategies["Strategies (each with own ShadowBook)"]
@@ -566,7 +566,8 @@
 
             OPT2["PortfolioOptimizer\nvalidate#40;merged#41;"]
             EE2["ExecutionEngine\nexecute#40;validated#41;"]
-            RECONCILE["reconcile_shadow_books#40;#41;\nFor each strategy:\n  target_pos = weight * alloc * nav / price\n  apply_fill#40;delta#41; to ShadowBook"]
+            LOCK["lock_for_order#40;order_id, intent#41;\nLIMIT BUY: lock USDT = qty * limit_price\nLIMIT SELL: lock base qty\nReleased on fill via _partial_release_lock"]
+            ROUTE["_order_strategy_map\norder_id → strategy_id\nRoutes ORDER_UPDATE events\nto correct ShadowBook via _on_order_update"]
 
             SA -->|"update_weights"| WA
             SB -->|"update_weights"| WA
@@ -575,16 +576,20 @@
             WA -->|"get_merged_weights"| MERGED
             MERGED --> OPT2
             OPT2 --> EE2
-            EE2 -->|"mark_prices + portfolio_total_value"| RECONCILE
-            RECONCILE --> SBOA
-            RECONCILE --> SBOB
+            EE2 -->|"for each submitted order"| LOCK
+            LOCK --> SBOA
+            LOCK --> SBOB
+            EE2 --> ROUTE
+            ROUTE -.->|"event-driven fill attribution"| SBOA
+            ROUTE -.->|"event-driven fill attribution"| SBOB
 
             style Strategies fill:#f0fdf4,stroke:#16a34a,color:#166534
             style WA fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
             style MERGED fill:#fefce8,stroke:#ca8a04,color:#713f12
             style OPT2 fill:#eff6ff,stroke:#2563eb,color:#1e40af
             style EE2 fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
-            style RECONCILE fill:#ecfeff,stroke:#0891b2,color:#155e75
+            style LOCK fill:#fef9c3,stroke:#ca8a04,color:#713f12
+            style ROUTE fill:#ecfeff,stroke:#0891b2,color:#155e75
     </div>
 
     <h3>WeightAggregator: Merging Formula</h3>
@@ -601,7 +606,7 @@
         <tr><td>Scope</td><td>All strategies combined</td><td>One strategy's virtual slice</td></tr>
         <tr><td>Positions</td><td>Real exchange positions</td><td>Attributed virtual positions</td></tr>
         <tr><td>Cash</td><td>Total stablecoin balance</td><td>Strategy's allocated cash fraction</td></tr>
-        <tr><td>Updated by</td><td>Exchange fills + EventBus (ORDER_UPDATE, BALANCE_UPDATE, KLINE)</td><td>Event-driven via <code>_on_order_update()</code> filtered by <code>_order_strategy_map</code>; <code>reconcile_shadow_books()</code> is a periodic drift-correction pass only</td></tr>
+        <tr><td>Updated by</td><td>Exchange fills + EventBus (ORDER_UPDATE, BALANCE_UPDATE, KLINE)</td><td>Event-driven via <code>_on_order_update()</code> filtered by <code>_order_strategy_map</code>; <code>lock_for_order()</code> called after each order submission; <code>_completed_order_ids</code> guard ensures terminal cleanup runs exactly once</td></tr>
         <tr><td>Strategy reads</td><td>Only StrategyRunner reads this</td><td>Strategy reads its own shadow_book</td></tr>
     </table>
 
@@ -729,6 +734,7 @@
                 +int failed
                 +int timestamp
                 +Tuple errors
+                +Dict submitted_orders
             }
 
             class Kline {

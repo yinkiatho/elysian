@@ -246,6 +246,17 @@ class RebalanceFSM(BaseFSM):
             await self.trigger("failed", error=e, **ctx)
             return
 
+        # Lock shadow book for submitted limit orders (Fix B)
+        book = getattr(self._strategy, '_shadow_book', None)
+        if book is not None and result.submitted_orders:
+            for order_id, intent in result.submitted_orders.items():
+                try:
+                    book.lock_for_order(order_id, intent)
+                except Exception as e:
+                    logger.error(
+                        "[%s] shadow_book.lock_for_order error: %s", self._name, e, exc_info=True
+                    )
+
         self._last_result = result
         ctx["rebalance_result"] = result
         logger.info(
@@ -265,19 +276,6 @@ class RebalanceFSM(BaseFSM):
                     "[%s] %d orders failed — shadow books may drift from Portfolio. "
                     "Reconciliation recommended.",
                     self._name, result.failed,
-                )
-        else:
-            # Single-strategy: reconcile this strategy's shadow book directly
-            book = getattr(self._strategy, '_shadow_book', None)
-            if book is not None and portfolio_total_value > 0:
-                from elysian_core.core.shadow_book import reconcile_shadow_books
-                weights = ctx.get("target_weights", {})
-                reconcile_shadow_books(
-                    shadow_books={self._strategy.strategy_id: book},
-                    strategy_weights={self._strategy.strategy_id: weights},
-                    allocations={self._strategy.strategy_id: 1.0},
-                    mark_prices=mark_prices,
-                    portfolio_total_value=portfolio_total_value,
                 )
 
         # Publish RebalanceCompleteEvent for strategy hooks

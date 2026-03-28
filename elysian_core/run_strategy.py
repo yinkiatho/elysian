@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Optional
+from typing import Dict, List, Optional, Callable
 import asyncio
 import os
 import datetime
@@ -56,10 +56,8 @@ from elysian_core.strategy.base_strategy import SpotStrategy
 from elysian_core.core.weight_aggregator import WeightAggregator
 from elysian_core.core.shadow_book import ShadowBook
 import sys
-from pathlib import Path
-    
+
 import aiohttp
-import asyncio
 # Add parent directory to path so imports work when running this script directly
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -841,7 +839,7 @@ class StrategyRunner:
             f"ShadowBook -> Aggregator -> Optimizer -> ExecutionEngine"
         )
 
-    def _start_snapshot_task(self, strategy: SpotStrategy) -> None:
+    def _start_snapshot_task(self, callable: Callable, tag: str) -> None:
         """Start a periodic portfolio snapshot saver using PeriodicTask.
 
         Replaces the old ``while True`` snapshot loop with a clean
@@ -851,21 +849,13 @@ class StrategyRunner:
         if interval <= 0:
             return
 
-        def _save():
-            try:
-                #strategy.portfolio.save_snapshot()
-                strategy._shadow_book.save_snapshot()
-                logger.info(f"[Runner] Strategy {strategy.strategy_id} Shadow Book snapshot saved")
-            except Exception as e:
-                logger.error(f"[Runner] Snapshot save failed: {e}", exc_info=True)
-
-        self._snapshot_task_dict[strategy.strategy_id] = PeriodicTask(
-            callback=_save,
+        self._snapshot_task_dict[tag] = PeriodicTask(
+            callback=callable,
             interval_s=interval,
-            name=f"Strategy {strategy.strategy_id} ShadowBookSnapshot",
+            name=f"{tag} Snapshot Task",
         )
-        self._snapshot_task_dict[strategy.strategy_id].start()
-        logger.info(f"[Runner] Shadow Book snapshot task started (every {interval}s) for {strategy}")
+        self._snapshot_task_dict[tag].start()
+        logger.info(f"[Runner] {tag} snapshot task started (every {interval}s)")
 
 
 #############################################################################################################################################################
@@ -911,9 +901,6 @@ class StrategyRunner:
 
             # Run exchange + feeds in single event loop
             try:
-                # Initialize the exchange first so its AsyncClient and
-                    # get_exchange_info() call don't compete with the kline/OB
-                    # managers creating their own AsyncClients concurrently.
                     
                 # We can do async gather run all exchanges here 
                 logger.info("[Runner] Binance exchange initialized")
@@ -955,11 +942,14 @@ class StrategyRunner:
 
                     # Periodic shadow portfolio snapshot via PeriodicTask (no while-True loop)
                     if self._snapshot_interval_s > 0:
-                        self._start_snapshot_task(strategy)
+                        self._start_snapshot_task(callable=strategy._shadow_book.save_snapshot, 
+                                                  tag=f'Strategy {strategy.strategy_id} Shadow Book Snapshot')
                 
                 # Add the snapshot task for Portfolio
-
-
+                for asset, venue_portfolios_dict in self._portfolio_dict.items():
+                    for venue, portfolio in venue_portfolios_dict.items():
+                        self._start_snapshot_task(portfolio.save_snapshot, portfolio.name)
+                        
 
                 # ── RUNNING ──
                 self._state = RunnerState.RUNNING

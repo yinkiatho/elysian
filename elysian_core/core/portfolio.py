@@ -14,7 +14,7 @@ It can also be used standalone (without an EventBus) by calling
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional, Set
 from elysian_core.core.enums import OrderStatus, OrderType, Side, Venue
 from elysian_core.core.position import Position
 from elysian_core.core.signals import OrderIntent
@@ -92,6 +92,7 @@ class Portfolio:
         # Note: order.commission from OrderUpdateEvent is already per-fill
         # (Binance field "n"), so no commission tracker is needed.
         self._fill_tracker: Dict[str, float] = {}  # order_id -> last known filled_qty
+        self._completed_order_ids: Set[str] = set()  # guards terminal cleanup against duplicate events
 
         # ── Locked balance (pending LIMIT orders only) ────────────────────
         # LIMIT BUY: lock quote (USDT) = quantity * limit_price
@@ -326,7 +327,8 @@ class Portfolio:
             return
         if order.status not in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
             # Clean up tracker for terminal non-fill statuses (cancelled, rejected, expired)
-            if order.is_terminal:
+            if order.is_terminal and order.id not in self._completed_order_ids:
+                self._completed_order_ids.add(order.id)
                 self._fill_tracker.pop(order.id, None)
                 self.release_order_lock(order.id)
             return
@@ -334,6 +336,13 @@ class Portfolio:
         order_id = order.id
         prev_filled = self._fill_tracker.get(order_id, 0.0)
         delta_filled = order.filled_qty - prev_filled
+
+        if delta_filled < 1e-10:
+            if order.is_terminal and order_id not in self._completed_order_ids:
+                self._completed_order_ids.add(order_id)
+                self._fill_tracker.pop(order_id, None)
+                self.release_order_lock(order_id)
+            return
 
         # order.commission is already per-fill (Binance field "n" via _parse_execution_to_order)
         self._fill_tracker[order_id] = order.filled_qty
@@ -355,7 +364,8 @@ class Portfolio:
         )
 
         # Clean up completed orders from tracker; release any remaining lock
-        if order.is_terminal:
+        if order.is_terminal and order_id not in self._completed_order_ids:
+            self._completed_order_ids.add(order_id)
             self._fill_tracker.pop(order_id, None)
             self.release_order_lock(order_id)
 
@@ -432,6 +442,10 @@ class Portfolio:
     @property
     def fills(self) -> List[Fill]:
         return list(self._fills)
+    
+    @property
+    def name(self) -> str:
+        return f'Portfolio @{self.venue.value}'
 
     # ══════════════════════════════════════════════════════════════════════════
     #  READ — Valuation
@@ -630,6 +644,9 @@ class Portfolio:
             return  # idempotent
         self._pending_order_id_to_intent[order_id] = intent
         if intent.side == Side.BUY:
+            if intent.price is None:
+                logger.warning(f"[Portfolio] lock_for_order: LIMIT order {order_id} has price=None, skipping lock")
+                return
             notional = intent.quantity * intent.price
             self._locked_cash += notional
             self._locked_cash_per_order[order_id] = notional
@@ -759,3 +776,4 @@ class Portfolio:
             f"dd={self._max_drawdown:.4%} | "
             f"{', '.join(active) or 'flat'})"
         )
+        

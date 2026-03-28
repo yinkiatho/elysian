@@ -21,7 +21,7 @@ and "what it owns".
 
 import time
 from collections import deque
-from typing import Deque, Dict, List, Optional
+from typing import Deque, Dict, List, Optional, Set
 
 from elysian_core.core.enums import OrderStatus, OrderType, Side, Venue
 from elysian_core.core.events import EventType
@@ -49,8 +49,9 @@ class ShadowBook:
         Default venue for positions created by fills.
     """
 
-    def __init__(self, strategy_id: int, allocation: float,
-                 venue: Venue = Venue.BINANCE):
+    def __init__(self, strategy_id: int, 
+                       allocation: float,
+                       venue: Venue = Venue.BINANCE):
         self._strategy_id = strategy_id
         self._allocation = allocation
         self._venue = venue
@@ -80,6 +81,7 @@ class ShadowBook:
 
         # Fill tracking: order_id -> last known cumulative filled_qty (mirrors Portfolio)
         self._fill_tracker: Dict[str, float] = {}
+        self._completed_order_ids: Set[str] = set()  # guards terminal cleanup against duplicate events
 
         # Shared map from ExecutionEngine: order_id -> strategy_id for event routing
         # Passed in via start(). ShadowBook only processes orders belonging to its strategy.
@@ -156,7 +158,7 @@ class ShadowBook:
             to only fills placed by this strategy.
         """
         self._event_bus = event_bus
-        #self._order_strategy_map = order_strategy_map
+        self._order_strategy_map = order_strategy_map
         event_bus.subscribe(EventType.ORDER_UPDATE, self._on_order_update)
         logger.info(
             f"[ShadowBook-{self._strategy_id}] started — subscribed to ORDER_UPDATE"
@@ -185,7 +187,8 @@ class ShadowBook:
             return
 
         if order.status not in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
-            if order.is_terminal:
+            if order.is_terminal and order.id not in self._completed_order_ids:
+                self._completed_order_ids.add(order.id)
                 self._fill_tracker.pop(order.id, None)
                 if self._order_strategy_map is not None:
                     self._order_strategy_map.pop(order.id, None)
@@ -197,7 +200,8 @@ class ShadowBook:
         delta_filled = order.filled_qty - prev_filled
 
         if delta_filled < 1e-10:
-            if order.is_terminal:
+            if order.is_terminal and order_id not in self._completed_order_ids:
+                self._completed_order_ids.add(order_id)
                 self._fill_tracker.pop(order_id, None)
                 if self._order_strategy_map is not None:
                     self._order_strategy_map.pop(order_id, None)
@@ -219,7 +223,8 @@ class ShadowBook:
             venue=event.venue,
         )
 
-        if order.is_terminal:
+        if order.is_terminal and order_id not in self._completed_order_ids:
+            self._completed_order_ids.add(order_id)
             self._fill_tracker.pop(order_id, None)
             if self._order_strategy_map is not None:
                 self._order_strategy_map.pop(order_id, None)
@@ -387,6 +392,8 @@ class ShadowBook:
         pos.total_commission += commission
         self._total_commission += commission
         self._positions[symbol] = pos
+        if pos.is_flat():
+            self._positions.pop(symbol, None)
         self._cash -= qty_delta * price
         self._cash -= commission
 
@@ -458,6 +465,9 @@ class ShadowBook:
             return  # idempotent
         self._pending_order_id_to_intent[order_id] = intent
         if intent.side == Side.BUY:
+            if intent.price is None:
+                logger.warning(f"[ShadowBook] lock_for_order: LIMIT order {order_id} has price=None, skipping lock")
+                return
             notional = intent.quantity * intent.price
             self._locked_cash += notional
             self._locked_cash_per_order[order_id] = notional

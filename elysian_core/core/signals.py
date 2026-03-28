@@ -70,3 +70,4 @@ class RebalanceResult:
     failed: int
     timestamp: int                                  # epoch ms
     errors: Tuple[str, ...] = ()
+    submitted_orders: Dict[str, "OrderIntent"] = field(default_factory=dict)  # order_id -> intent for submitted limit orders

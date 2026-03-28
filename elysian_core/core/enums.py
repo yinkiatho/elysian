@@ -34,9 +34,16 @@ class OrderStatus(Enum):
     FILLED = "Filled"
     CANCELLED = "Cancelled"
     REJECTED = "Rejected"
+    EXPIRED = "Expired"          # GTT/IOC orders that expire without fill (distinct from CANCELLED)
+    TRIGGERED = "Triggered"      # Conditional order (SL/TP) whose trigger condition was met; now active
 
     def is_active(self) -> bool:
-        return self in (OrderStatus.PENDING, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED)
+        return self in (
+            OrderStatus.PENDING,
+            OrderStatus.OPEN,
+            OrderStatus.PARTIALLY_FILLED,
+            OrderStatus.TRIGGERED,   # SL/TP condition met, order now executing
+        )
 
 
     # Binance sends uppercase "BUY"/"SELL"; map to our Side enum.
@@ -53,7 +60,7 @@ _BINANCE_STATUS: Dict[str, OrderStatus] = {
         "CANCELED": OrderStatus.CANCELLED,
         "PENDING_CANCEL": OrderStatus.PENDING,
         "REJECTED": OrderStatus.REJECTED,
-        "EXPIRED": OrderStatus.CANCELLED,
+        "EXPIRED": OrderStatus.EXPIRED,
     }
 
 

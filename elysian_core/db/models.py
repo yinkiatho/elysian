@@ -149,6 +149,7 @@ ALL_TABLES = [
     CexTrade,
     DexTrade,
     PortfolioSnapshot,
+    AccountSnapshots,
 ]
 
 

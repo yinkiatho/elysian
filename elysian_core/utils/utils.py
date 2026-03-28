@@ -64,6 +64,7 @@ class DataFrameIterator:
         self.n_dates = args.regression.S3.window_size
         self.n_tickers = args.regression.S3.ticker_size
         
+        start_date, end_date = None, None
         if stage == 'train':
             start_date, end_date = args.regression.S3.train_start_date, args.regression.S3.train_end_date
         elif stage == 'test':

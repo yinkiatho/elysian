@@ -104,6 +104,7 @@ class ExecutionEngine:
 
             submitted, failed = 0, 0
             errors: List[str] = []
+            submitted_orders_map: Dict[str, OrderIntent] = {}
 
             for intent in sells + buys:
                 order_id = await self._submit_order(intent)
@@ -111,6 +112,7 @@ class ExecutionEngine:
                     submitted += 1
                     self._portfolio.lock_for_order(order_id, intent)
                     self._order_strategy_map[order_id] = intent.strategy_id
+                    submitted_orders_map[order_id] = intent
                 else:
                     failed += 1
                     errors.append(f"{intent.side.value} {intent.symbol} qty={intent.quantity:.6f}")
@@ -122,6 +124,7 @@ class ExecutionEngine:
                 failed=failed,
                 timestamp=now_ms,
                 errors=tuple(errors),
+                submitted_orders=submitted_orders_map,
             )
 
             if failed > 0:
@@ -168,7 +171,7 @@ class ExecutionEngine:
                 continue
 
             # Weight-delta filter: skip legs below threshold
-            current_weight = (self._portfolio.position(symbol).quantity * price) / total_value
+            current_weight = (self._portfolio.free_quantity(symbol) * price) / total_value
             weight_delta = abs(target_weight - current_weight)
             
             
@@ -182,7 +185,7 @@ class ExecutionEngine:
             # Target vs current quantity
             target_notional = target_weight * total_value
             target_qty = target_notional / price
-            current_qty = self._portfolio.position(symbol).quantity
+            current_qty = self._portfolio.free_quantity(symbol)
             delta_qty = target_qty - current_qty
 
             # Round to exchange step size
