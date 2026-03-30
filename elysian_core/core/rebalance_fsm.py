@@ -207,6 +207,8 @@ class RebalanceFSM(BaseFSM):
             weights=weights,
             timestamp=int(time.time() * 1000),
             metadata={},
+            strategy_id=self._strategy.strategy_id,
+            venue=self._optimizer.venue,
         )
 
         try:

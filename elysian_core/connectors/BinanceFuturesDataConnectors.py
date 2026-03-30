@@ -18,6 +18,8 @@ from binance.exceptions import BinanceAPIException
 
 from elysian_core.connectors.base import AbstractDataFeed
 from elysian_core.core.market_data import Kline, OrderBook, BinanceOrderBook
+
+from elysian_core.connectors.base import AbstractClientManager, KlineClientManager, OrderBookClientManager
 import elysian_core.utils.logger as log
 
 logger = log.setup_custom_logger("root")
@@ -27,7 +29,7 @@ logger = log.setup_custom_logger("root")
 # Shared Client Managers
 # ──────────────────────────────────────────────────────────────────────────────
 
-class BinanceFuturesKlineClientManager:
+class BinanceFuturesKlineClientManager(KlineClientManager):
     """Shared AsyncClient for multiplex futures kline streams with queue-based processing."""
 
     def __init__(self):
@@ -201,7 +203,7 @@ class BinanceFuturesKlineClientManager:
         await self._reader_task
 
 
-class BinanceFuturesOrderBookClientManager:
+class BinanceFuturesOrderBookClientManager(OrderBookClientManager):
     """Shared AsyncClient for multiplex futures orderbook streams with queue-based processing."""
 
     def __init__(self):

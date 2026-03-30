@@ -617,7 +617,8 @@ class BinanceSpotExchange(SpotExchangeConnector):
         asyncio.create_task(self.print_snapshot())
         await asyncio.sleep(0.5)   # let first balance fetch settle
         logger.info("BinanceExchange running................")
-
+        
+    
 
     async def cleanup(self):
         """

@@ -16,6 +16,8 @@ import websockets
 from elysian_core.connectors.base import AbstractDataFeed
 from elysian_core.core.market_data import Kline, OrderBook, AsterOrderBook
 import elysian_core.utils.logger as log
+from elysian_core.connectors.base import AbstractClientManager, KlineClientManager, OrderBookClientManager
+
 
 logger = log.setup_custom_logger("root")
 
@@ -28,7 +30,7 @@ WEBSOCKET_STREAM_BASE  = "wss://sstream.asterdex.com/stream"      # combined str
 # AsterKlineClientManager
 # ──────────────────────────────────────────────────────────────────────────────
 
-class AsterKlineClientManager:
+class AsterKlineClientManager(KlineClientManager):
     """Shared WebSocket client for multiplex kline streams with queue-based processing."""
 
     def __init__(self):
@@ -207,7 +209,7 @@ class AsterKlineClientManager:
 # AsterOrderBookClientManager
 # ──────────────────────────────────────────────────────────────────────────────
 
-class AsterOrderBookClientManager:
+class AsterOrderBookClientManager(OrderBookClientManager):
     """Shared WebSocket client for multiplex order-book streams with queue-based processing."""
 
     def __init__(self):

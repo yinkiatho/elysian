@@ -30,6 +30,7 @@ from elysian_core.core.portfolio import Fill
 from elysian_core.core.position import Position
 from elysian_core.core.signals import OrderIntent
 from elysian_core.db.models import PortfolioSnapshot
+from elysian_core.core.events import BalanceUpdateEvent, OrderUpdateEvent
 import elysian_core.utils.logger as log
 
 _STABLECOINS = frozenset({"USDT", "USDC", "BUSD"})
@@ -51,10 +52,8 @@ class ShadowBook:
     """
 
     def __init__(self, strategy_id: int, 
-                       allocation: float,
                        venue: Venue = Venue.BINANCE):
         self._strategy_id = strategy_id
-        self._allocation = allocation
         self._venue = venue
 
         # Position state
@@ -100,7 +99,7 @@ class ShadowBook:
 
         # Sub-account mode state
         self._exchange = None                  # set by sync_from_exchange()
-        self._sub_account_mode: bool = False   # real account vs virtual slice
+        self._sub_account_mode: bool = True   # real account vs virtual slice
         self._cash_dict: Dict[str, float] = {}
         self._private_event_bus = None         # per-strategy bus for user data events
 
@@ -115,13 +114,13 @@ class ShadowBook:
         starts with ``allocation * portfolio_cash`` and builds positions
         through rebalance cycles.
         """
-        self._cash = portfolio_cash * self._allocation
+        self._cash = portfolio_cash 
         self._mark_prices = dict(mark_prices or {})
         self._refresh_derived()
         self._peak_equity = self._nav
         logger.info(
             f"[ShadowBook-{self._strategy_id}] Initialized: "
-            f"cash={self._cash:.2f}, allocation={self._allocation:.2%}"
+            f"cash={self._cash:.2f}"
         )
 
     def init_from_existing(self, portfolio_cash: float,
@@ -134,14 +133,14 @@ class ShadowBook:
         approximation — subsequent rebalance cycles will correct any
         mis-attribution.
         """
-        self._cash = portfolio_cash * self._allocation
+        self._cash = portfolio_cash
         self._mark_prices = dict(mark_prices)
 
         for sym, pos in portfolio_positions.items():
             self._positions[sym] = Position(
                 symbol=sym,
                 venue=pos.venue,
-                quantity=pos.quantity * self._allocation,
+                quantity=pos.quantity,
                 avg_entry_price=pos.avg_entry_price,
             )
 
@@ -150,7 +149,6 @@ class ShadowBook:
         logger.info(
             f"[ShadowBook-{self._strategy_id}] Initialized from existing: "
             f"cash={self._cash:.2f}, {len(self._positions)} positions, "
-            f"allocation={self._allocation:.0%}"
         )
 
     def sync_from_exchange(self, exchange, feeds: Optional[Dict] = None):
@@ -189,8 +187,8 @@ class ShadowBook:
                     if p and p > 0:
                         entry_price = p
                         self._mark_prices[symbol] = p
-                except Exception:
-                    logger.warning(f"[ShadowBook-{self._strategy_id}] Failed to get price for {symbol} during sync")
+                except Exception as e:
+                    logger.warning(f"[ShadowBook-{self._strategy_id}] Failed to get price for {symbol} during sync: {e}")
             self._positions[symbol] = Position(
                 symbol=symbol, venue=self._venue, quantity=qty, avg_entry_price=entry_price
             )
@@ -225,7 +223,7 @@ class ShadowBook:
     # ── Lifecycle — EventBus wiring ──────────────────────────────────────
 
     def start(self, event_bus, order_strategy_map: Optional[Dict[str, int]] = None,
-              sub_account_mode: bool = False, private_event_bus=None):
+                sub_account_mode: bool = False, private_event_bus=None):
         """Subscribe to event buses for fill attribution and mark price updates.
 
         Parameters
@@ -247,31 +245,26 @@ class ShadowBook:
         self._event_bus = event_bus
         self._private_event_bus = private_event_bus
 
-        # ORDER_UPDATE from private bus (sub-account) or shared bus (shared-account)
-        bus_for_orders = private_event_bus if (sub_account_mode and private_event_bus) else event_bus
-        bus_for_orders.subscribe(EventType.ORDER_UPDATE, self._on_order_update)
 
-        if sub_account_mode and private_event_bus:
-            # KLINE from shared bus (market data)
-            event_bus.subscribe(EventType.KLINE, self._on_kline)
-            # BALANCE_UPDATE from private bus (account-specific)
-            private_event_bus.subscribe(EventType.BALANCE_UPDATE, self._on_balance_update)
-            logger.info(
-                f"[ShadowBook-{self._strategy_id}] started in sub-account mode — "
-                f"ORDER_UPDATE+BALANCE_UPDATE on private bus, KLINE on shared bus"
-            )
-        else:
-            logger.info(
-                f"[ShadowBook-{self._strategy_id}] started — subscribed to ORDER_UPDATE"
-            )
+        # Curerntly our strategy class subscribes to the private event bus for us and calls the on_order/on_balnce funcs
+        # # ORDER_UPDATE from private bus (sub-account) or shared bus (shared-account)
+        # self._private_event_bus.subscribe(EventType.ORDER_UPDATE, self._on_order_update)
+        
+        # # BALANCE_UPDATE from private bus (account-specific)
+        # self._private_event_bus.subscribe(EventType.BALANCE_UPDATE, self._on_balance_update)
+
+        # KLINE from shared bus (market data)
+        self._event_bus.subscribe(EventType.KLINE, self._on_kline)
+        
+        logger.info(
+            f"[ShadowBook-{self._strategy_id}] started in sub-account mode — "
+            f"ORDER_UPDATE+BALANCE_UPDATE on private bus, KLINE on shared bus"
+        )
 
     def stop(self):
         """Unsubscribe from all event buses."""
         if self._event_bus:
-            if self._sub_account_mode:
-                self._event_bus.unsubscribe(EventType.KLINE, self._on_kline)
-            else:
-                self._event_bus.unsubscribe(EventType.ORDER_UPDATE, self._on_order_update)
+            self._event_bus.unsubscribe(EventType.KLINE, self._on_kline)
             self._event_bus = None
         if self._private_event_bus:
             self._private_event_bus.unsubscribe(EventType.ORDER_UPDATE, self._on_order_update)
@@ -314,7 +307,7 @@ class ShadowBook:
             self._mark_prices[event.symbol] = event.kline.close
             self._refresh_derived()
 
-    async def _on_balance_update(self, event):
+    async def _on_balance_update(self, event: BalanceUpdateEvent):
         """Handle balance updates from the private sub-account event bus."""
         base_to_symbol = {}
         if self._exchange:
@@ -347,26 +340,18 @@ class ShadowBook:
                 )
             self._refresh_derived()
 
-    async def _on_order_update(self, event):
+    async def _on_order_update(self, event: OrderUpdateEvent):
         """Route exchange fill events into apply_fill().
 
         Filters events to fills that belong to this strategy using
         _order_strategy_map (order_id -> strategy_id, maintained by ExecutionEngine).
         Computes the incremental fill delta to avoid double-counting partial fills.
         commission is already per-fill from Binance field "n".
+        
+        Orders come from private event bus so should be own strategy
         """
-        order = event.order
-
-        # In sub-account mode: private bus scopes to this strategy, verify venue only
-        # In shared-account mode: filter by strategy_id ownership
-        if self._sub_account_mode:
-            if event.venue != self._venue:
-                return
-        else:
-            if order.strategy_id is not None and order.strategy_id != self._strategy_id:
-                return
-
-        self._update_order(order)
+        order = event.order 
+        self._update_order(order)  # Transition the orders
 
         if order.status not in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
             if order.is_terminal and order.id not in self._completed_order_ids:
@@ -423,9 +408,6 @@ class ShadowBook:
     def strategy_id(self) -> int:
         return self._strategy_id
 
-    @property
-    def allocation(self) -> float:
-        return self._allocation
 
     @property
     def is_sub_account_mode(self) -> bool:
@@ -587,13 +569,6 @@ class ShadowBook:
         self._positions[symbol] = pos
         if pos.is_flat():
             self._positions.pop(symbol, None)
-        # In sub-account mode, cash is managed exclusively by _on_balance_update()
-        # (which derives _cash from _cash_dict). Adjusting _cash here would cause
-        # double-counting because Binance emits both ORDER_UPDATE and BALANCE_UPDATE
-        # for the same fill event.
-        if not self._sub_account_mode:
-            self._cash -= qty_delta * price
-            self._cash -= commission
 
         self._mark_prices[symbol] = price
         self._refresh_derived()
@@ -633,10 +608,10 @@ class ShadowBook:
         if self._sub_account_mode:
             return  # handled by _on_balance_update on private event bus
         if event.asset in _STABLECOINS:
-            self._cash += event.delta * self._allocation
+            self._cash += event.delta
             self._refresh_derived()
         elif event.venue == self._venue:
-            scaled_delta = event.delta * self._allocation
+            scaled_delta = event.delta
             curr = self._positions.get(event.asset)
             if curr is None:
                 self._positions[event.asset] = Position(
@@ -759,7 +734,6 @@ class ShadowBook:
     def snapshot(self) -> dict:
         return {
             "strategy_id": self._strategy_id,
-            "allocation": self._allocation,
             "cash": self._cash,
             "nav": self._nav,
             "realized_pnl": self._realized_pnl,
@@ -816,7 +790,7 @@ class ShadowBook:
     def __repr__(self) -> str:
         active = len(self.active_positions)
         return (
-            f"ShadowBook(strategy={self._strategy_id} alloc={self._allocation:.0%} "
+            f"ShadowBook(strategy={self._strategy_id}"
             f"cash={self._cash:.2f} nav={self._nav:.2f} positions={active})"
         )
 

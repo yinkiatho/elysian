@@ -212,7 +212,7 @@ class PeriodicTask:
         """Start the periodic loop as a background asyncio task."""
         if self.running:
             return
-        self._task = asyncio.get_event_loop().create_task(
+        self._task = asyncio.get_running_loop().create_task(
             self._loop(), name=self._name,
         )
 

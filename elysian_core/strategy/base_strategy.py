@@ -68,7 +68,8 @@ class SpotStrategy:
     def __init__(
         self,
         exchanges: Dict[Venue, SpotExchangeConnector],
-        event_bus: EventBus,
+        shared_event_bus: EventBus,
+        private_event_bus: EventBus,
         feeds: Optional[Dict[str, AbstractDataFeed]] = None,
         max_heavy_workers: int = 4,
         optimizer: Optional["PortfolioOptimizer"] = None,
@@ -81,7 +82,8 @@ class SpotStrategy:
         strategy_name: str = 'unknown_strategy'
     ):
         self._exchanges = exchanges
-        self._event_bus = event_bus
+        self._shared_event_bus = shared_event_bus
+        self._private_event_bus = private_event_bus
         self._feeds = feeds or {}
         self._executor = ProcessPoolExecutor(max_workers=max_heavy_workers)
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -158,18 +160,18 @@ class SpotStrategy:
         self._state = StrategyState.STARTING
         self._loop = asyncio.get_running_loop()
 
-        self._event_bus.subscribe(EventType.KLINE, self._dispatch_kline)
-        self._event_bus.subscribe(EventType.ORDERBOOK_UPDATE, self._dispatch_ob)
-        self._event_bus.subscribe(EventType.ORDER_UPDATE, self._dispatch_order)
-        self._event_bus.subscribe(EventType.BALANCE_UPDATE, self._dispatch_balance)
-        self._event_bus.subscribe(EventType.REBALANCE_COMPLETE, self._dispatch_rebalance)
+        self._shared_event_bus.subscribe(EventType.KLINE, self._dispatch_kline)
+        self._shared_event_bus.subscribe(EventType.ORDERBOOK_UPDATE, self._dispatch_ob)
+        self._private_event_bus.subscribe(EventType.ORDER_UPDATE, self._dispatch_order)
+        self._private_event_bus.subscribe(EventType.BALANCE_UPDATE, self._dispatch_balance)
+        self._private_event_bus.subscribe(EventType.REBALANCE_COMPLETE, self._dispatch_rebalance)
 
         if self._optimizer is not None and self._execution_engine is not None:
             self._rebalance_fsm = RebalanceFSM(
                 strategy=self,
                 optimizer=self._optimizer,
                 execution_engine=self._execution_engine,
-                event_bus=self._event_bus,
+                event_bus=self._private_event_bus,
                 name=f"{self.__class__.__name__}.RebalanceFSM",
                 aggregator=aggregator,
             )
@@ -197,14 +199,15 @@ class SpotStrategy:
         # Signal run_forever() to unblock
         self._stop_event.set()
 
-        self._event_bus.unsubscribe(EventType.KLINE, self._dispatch_kline)
-        self._event_bus.unsubscribe(EventType.ORDERBOOK_UPDATE, self._dispatch_ob)
-        self._event_bus.unsubscribe(EventType.ORDER_UPDATE, self._dispatch_order)
-        self._event_bus.unsubscribe(EventType.BALANCE_UPDATE, self._dispatch_balance)
-        self._event_bus.unsubscribe(EventType.REBALANCE_COMPLETE, self._dispatch_rebalance)
+        self._shared_event_bus.unsubscribe(EventType.KLINE, self._dispatch_kline)
+        self._shared_event_bus.unsubscribe(EventType.ORDERBOOK_UPDATE, self._dispatch_ob)
+        self._private_event_bus.unsubscribe(EventType.ORDER_UPDATE, self._dispatch_order)
+        self._private_event_bus.unsubscribe(EventType.BALANCE_UPDATE, self._dispatch_balance)
+        self._private_event_bus.unsubscribe(EventType.REBALANCE_COMPLETE, self._dispatch_rebalance)
 
         await self.on_stop()
         self._executor.shutdown(wait=False)
+        self._shadow_book.stop()
         self._state = StrategyState.STOPPED
         logger.info(f"[Strategy] {self.__class__.__name__} stopped")
 
@@ -274,34 +277,43 @@ class SpotStrategy:
             logger.error(f"SpotStrategy.on_orderbook_update error: {e}", exc_info=True)
 
     async def _dispatch_order(self, event: OrderUpdateEvent):
-        if event.venue not in self.venues:
-            return
+        '''
+        Order Update Events from the Private Event Bus
+        '''
         try:
-            await self.on_order_update(event)
+            asyncio.gather(*[self.on_order_update(event), 
+                             self._shadow_book.on_order_update(event)])
         except Exception as e:
             logger.error(f"SpotStrategy.on_order_update error: {e}", exc_info=True)
 
     async def _dispatch_balance(self, event: BalanceUpdateEvent):
+        '''
+        Balance Update Events from the Private Event Bus
+        '''
         if event.venue not in self.venues:
             return
+        
         # Only manually call on_balance in shared-account mode.
         # In sub-account mode, ShadowBook handles balance updates via its private bus subscription.
-        if self._shadow_book is not None and not self.is_sub_account_mode:
-            try:
-                self._shadow_book.on_balance(event)
-            except Exception as e:
-                logger.error(f"SpotStrategy shadow_book.on_balance error: {e}", exc_info=True)
+        try:
+            asyncio.gather(*[self.on_balance_update(event), 
+                             self._shadow_book._on_balance_update(event)])
+        except Exception as e:
+            logger.error(f"SpotStrategy shadow_book.on_balance error: {e}", exc_info=True)
         try:
             await self.on_balance_update(event)
         except Exception as e:
             logger.error(f"SpotStrategy.on_balance_update error: {e}", exc_info=True)
 
     async def _dispatch_rebalance(self, event: RebalanceCompleteEvent):
-        event_strat_id = getattr(event, 'strategy_id', None)
-        if event_strat_id is not None and event_strat_id != self.strategy_id:
-            return
+        '''
+        Rebalance Complete Events from the Private Event Bus
+        '''
         try:
             await self.on_rebalance_complete(event)
+            
+            # Currently no on_rebalance_complete event for the shadow book, but we may want to add one in the future if we want to update the shadow book based on rebalance results (e.g. adjust positions based on fills, update PnL, etc.)
+            # await self._shadow_book.on_rebalance_complete(event)
         except Exception as e:
             logger.error(f"SpotStrategy.on_rebalance_complete error: {e}", exc_info=True)
 

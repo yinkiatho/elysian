@@ -1,669 +1,1470 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Elysian Trading System — State Transitions</title>
-<style>
-/* ── Reset & base ─────────────────────────────────────────────────────── */
-*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-  background: #0d1117;
-  color: #c9d1d9;
-  padding: 40px 24px 80px;
-  line-height: 1.6;
-  min-width: 900px;
-}
-h1 {
-  text-align: center;
-  font-size: 2rem;
-  font-weight: 300;
-  letter-spacing: 3px;
-  color: #e6edf3;
-  margin-bottom: 6px;
-}
-h1 span { color: #58a6ff; font-weight: 600; }
-.subtitle {
-  text-align: center;
-  color: #6e7681;
-  font-size: 0.9rem;
-  margin-bottom: 60px;
-}
-h2 {
-  font-size: 1.3rem;
-  font-weight: 400;
-  margin: 56px 0 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #21262d;
-  color: #58a6ff;
-}
-h2 span { color: #6e7681; font-size: 0.85rem; font-weight: 300; margin-left: 12px; }
-h3 {
-  font-size: 1.05rem;
-  font-weight: 500;
-  color: #8b949e;
-  margin: 28px 0 10px;
-}
-p.desc {
-  color: #8b949e;
-  font-size: 0.9rem;
-  max-width: 860px;
-  margin-bottom: 24px;
-}
-.file-ref {
-  color: #6e7681;
-  font-size: 0.82rem;
-  font-style: italic;
-  margin-bottom: 18px;
-  margin-top: -6px;
-}
-.diagram-wrap {
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 10px;
-  padding: 36px 28px;
-  margin: 0 0 40px;
-  overflow-x: auto;
-}
-svg { font-family: 'Segoe UI', system-ui, sans-serif; display: block; margin: 0 auto; }
-/* ── Tables ────────────────────────────────────────────────────────────── */
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.875rem;
-  margin: 12px 0 32px;
-}
-th {
-  background: #1f2937;
-  color: #93c5fd;
-  text-align: left;
-  padding: 10px 14px;
-  border-bottom: 2px solid #374151;
-}
-td {
-  padding: 8px 14px;
-  border-bottom: 1px solid #21262d;
-  color: #c9d1d9;
-  vertical-align: top;
-}
-tr:hover td { background: #161b22; }
-code {
-  font-family: 'Cascadia Code', 'Consolas', monospace;
-  font-size: 0.82rem;
-  background: #1f2937;
-  color: #79c0ff;
-  padding: 1px 6px;
-  border-radius: 4px;
-}
-.note {
-  background: #161b22;
-  border-left: 3px solid #d29922;
-  padding: 12px 16px;
-  border-radius: 0 6px 6px 0;
-  font-size: 0.875rem;
-  color: #8b949e;
-  margin: 16px 0 24px;
-  max-width: 860px;
-}
-.note strong { color: #fde68a; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Elysian Trading System — State Transitions</title>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'default',
+            flowchart: { curve: 'basis', padding: 20 },
+            stateDiagram: { padding: 20 },
+            themeVariables: {
+                primaryColor: '#dbeafe',
+                primaryTextColor: '#1e3a5f',
+                primaryBorderColor: '#2563eb',
+                lineColor: '#2563eb',
+                secondaryColor: '#eff6ff',
+                tertiaryColor: '#bfdbfe',
+                fontSize: '14px'
+            }
+        });
+    </script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #f8f9fa;
+            color: #1a1a2e;
+            padding: 40px 20px;
+            line-height: 1.6;
+        }
+        h1 {
+            text-align: center;
+            font-size: 2.2rem;
+            font-weight: 300;
+            margin-bottom: 8px;
+            color: #1a1a2e;
+            letter-spacing: 2px;
+        }
+        h1 span { color: #2563eb; font-weight: 600; }
+        .subtitle {
+            text-align: center;
+            color: #6b7280;
+            margin-bottom: 50px;
+            font-size: 1rem;
+        }
+        h2 {
+            font-size: 1.5rem;
+            font-weight: 400;
+            margin: 50px 0 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #dee2e6;
+            color: #2563eb;
+        }
+        h2 span { color: #6b7280; font-size: 0.9rem; font-weight: 300; margin-left: 12px; }
+        h3 {
+            color: #374151;
+            font-size: 1.15rem;
+            margin: 30px 0 10px;
+            font-weight: 500;
+        }
+        p.desc {
+            color: #4b5563;
+            margin-bottom: 20px;
+            max-width: 960px;
+            font-size: 0.95rem;
+        }
+        .file-ref {
+            color: #6b7280;
+            font-size: 0.82rem;
+            font-style: italic;
+            margin-top: -12px;
+            margin-bottom: 16px;
+        }
+        .mermaid {
+            background: #ffffff;
+            border: 1px solid #dee2e6;
+            border-radius: 12px;
+            padding: 30px 20px;
+            margin: 20px 0 40px;
+            overflow-x: auto;
+        }
+        .mermaid svg { max-width: 100%; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0 30px;
+            font-size: 0.9rem;
+        }
+        th {
+            background: #e8f0fe;
+            color: #1d4ed8;
+            text-align: left;
+            padding: 10px 14px;
+            border-bottom: 2px solid #c7d7fd;
+        }
+        td {
+            padding: 8px 14px;
+            border-bottom: 1px solid #e5e7eb;
+            color: #374151;
+        }
+        tr:nth-child(odd) td { background: #f9fafb; }
+        tr:hover td { background: #f0f4ff; }
+        code {
+            background: #e8f0fe;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.88em;
+            color: #1d4ed8;
+        }
+        .tag-terminal {
+            background: #fef2f2;
+            color: #dc2626;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.82em;
+            font-weight: 600;
+        }
+        .tag-active {
+            background: #f0fdf4;
+            color: #16a34a;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.82em;
+            font-weight: 600;
+        }
+        .tag-wildcard {
+            background: #fefce8;
+            color: #ca8a04;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.82em;
+            font-weight: 600;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .note-box {
+            background: #eff6ff;
+            border-left: 3px solid #2563eb;
+            padding: 14px 18px;
+            margin: 16px 0 24px;
+            border-radius: 0 8px 8px 0;
+            font-size: 0.92rem;
+            color: #374151;
+        }
+        .note-box strong { color: #2563eb; }
+        .divider {
+            border: none;
+            border-top: 1px solid #dee2e6;
+            margin: 60px 0 20px;
+        }
+    </style>
 </head>
 <body>
+<div class="container">
 
-<h1>ELYSIAN <span>Trading System</span> — State Transitions</h1>
-<p class="subtitle">Updated 2026-03-30 &nbsp;|&nbsp; RebalanceFSM · Order Lifecycle · Connection FSM</p>
+    <h1><span>ELYSIAN</span> State Transitions</h1>
+    <p class="subtitle">Every state machine, transition, trigger, callback, and terminal state in the system</p>
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     SECTION 1 — RebalanceFSM
-     ═══════════════════════════════════════════════════════════════════════════ -->
-<h2>1. RebalanceFSM <span>core/rebalance_fsm.py · core/fsm.py</span></h2>
-<p class="desc">
-  The RebalanceFSM is the central state machine that drives the full rebalance pipeline.
-  It extends BaseFSM and is purely state-driven — the strategy triggers it by calling
-  <code>request()</code>. Re-entrant transitions are queued and drained after the current
-  callback completes. Context flows as <code>**ctx</code> through every stage, accumulating
-  keys: <code>target_weights</code>, <code>validated_weights</code>, <code>rebalance_result</code>.
-</p>
-<div class="file-ref">Source: elysian_core/core/rebalance_fsm.py · elysian_core/core/fsm.py</div>
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 1: BaseFSM Foundation -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>1. BaseFSM &mdash; Generic Async Finite-State Machine <span>Foundation for all FSMs</span></h2>
+    <p class="desc">
+        <code>BaseFSM</code> is the abstract base class for all state machines in Elysian.
+        It provides a dict-based transition table, wildcard transitions, a re-entrancy guard,
+        and optional EventBus integration. Subclasses define <code>_TRANSITIONS</code> as a mapping
+        from <code>(State, trigger_name)</code> &rarr; <code>(NextState, callback_method_name_or_None)</code>.
+    </p>
+    <p class="file-ref">core/fsm.py &mdash; class BaseFSM, class PeriodicTask, class InvalidTransition</p>
 
-<div class="diagram-wrap">
-<svg viewBox="0 0 1060 560" width="1060" height="560" xmlns="http://www.w3.org/2000/svg">
-<defs>
-  <!-- Normal arrow -->
-  <marker id="a" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-    <polygon points="0 0, 8 3, 0 6" fill="#a855f7"/>
-  </marker>
-  <!-- Error/fail arrow -->
-  <marker id="ae" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-    <polygon points="0 0, 8 3, 0 6" fill="#f85149"/>
-  </marker>
-  <!-- Cooldown/idle arrow -->
-  <marker id="ac" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-    <polygon points="0 0, 8 3, 0 6" fill="#58a6ff"/>
-  </marker>
-  <!-- Reject arrow -->
-  <marker id="ar" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-    <polygon points="0 0, 8 3, 0 6" fill="#d29922"/>
-  </marker>
-  <!-- Suspend arrow -->
-  <marker id="as" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-    <polygon points="0 0, 8 3, 0 6" fill="#60a5fa"/>
-  </marker>
-  <!-- Retry arrow -->
-  <marker id="aret" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-    <polygon points="0 0, 8 3, 0 6" fill="#3fb950"/>
-  </marker>
-</defs>
+    <h3>Core Mechanics</h3>
+    <table>
+        <tr><th>Feature</th><th>Mechanism</th><th>Details</th></tr>
+        <tr>
+            <td>Transition Table</td>
+            <td><code>_TRANSITIONS: Dict[(State, str), (State, Optional[str])]</code></td>
+            <td>Class-level dict mapping <code>(current_state, trigger_name)</code> to <code>(next_state, callback_name)</code>. Callback name is a string referencing a method on the subclass, or <code>None</code> to skip.</td>
+        </tr>
+        <tr>
+            <td>Wildcard Transitions</td>
+            <td><code>("*", trigger_name)</code></td>
+            <td>Use the string <code>"*"</code> as the state key to match <strong>any</strong> current state. Explicit (State, trigger) matches take priority over wildcard matches. Used by RebalanceFSM for the <code>"suspend"</code> trigger.</td>
+        </tr>
+        <tr>
+            <td>Re-entrancy Guard</td>
+            <td><code>_transitioning</code> flag + <code>_pending</code> deque</td>
+            <td>If a callback triggers another transition (e.g. <code>_on_enter_computing</code> triggers <code>"weights_ready"</code>), the nested trigger is queued in <code>_pending</code> rather than recursing. After the current transition completes, queued transitions are drained in FIFO order.</td>
+        </tr>
+        <tr>
+            <td>Terminal States</td>
+            <td><code>_terminal_states: Set[Enum]</code></td>
+            <td>States in this set reject all further transitions by raising <code>InvalidTransition</code>. Checked before table lookup.</td>
+        </tr>
+        <tr>
+            <td>EventBus Integration</td>
+            <td>Optional <code>_event_bus</code> parameter</td>
+            <td>When provided, subclass callbacks can publish events on state changes for external observability.</td>
+        </tr>
+        <tr>
+            <td>Context Passing</td>
+            <td><code>**ctx</code> keyword args</td>
+            <td>Arbitrary context passed through <code>trigger(event, **ctx)</code> is forwarded to the callback method. The FSM also injects <code>_fsm_old_state</code> into ctx so callbacks can see the pre-transition state.</td>
+        </tr>
+    </table>
 
-<!-- ── States on the happy path (top row) ──────────────────────────────── -->
+    <h3>Key Methods</h3>
+    <table>
+        <tr><th>Method</th><th>Signature</th><th>Purpose</th></tr>
+        <tr>
+            <td><code>trigger</code></td>
+            <td><code>async trigger(event: str, **ctx) -> Enum</code></td>
+            <td>Fire a named trigger. Resolves transition from <code>_TRANSITIONS</code>, updates <code>_state</code>, runs the callback (sync or async), drains pending queue. Returns new state. Raises <code>InvalidTransition</code> if no matching transition exists.</td>
+        </tr>
+        <tr>
+            <td><code>_do_transition</code></td>
+            <td><code>async _do_transition(event: str, **ctx) -> Enum</code></td>
+            <td>Internal: resolves transition key (explicit first, then wildcard), updates <code>_state</code>, calls callback via <code>getattr</code>. Logs transition at DEBUG level.</td>
+        </tr>
+        <tr>
+            <td><code>state</code></td>
+            <td><code>@property state -> Enum</code></td>
+            <td>Returns the current state enum value.</td>
+        </tr>
+        <tr>
+            <td><code>is_terminal</code></td>
+            <td><code>@property is_terminal -> bool</code></td>
+            <td>True if current state is in <code>_terminal_states</code>.</td>
+        </tr>
+    </table>
 
-<!-- IDLE -->
-<rect x="30" y="180" width="110" height="60" rx="30" fill="#1f1435" stroke="#a855f7" stroke-width="2.5"/>
-<text x="85" y="207" font-size="13" font-weight="700" fill="#d8b4fe" text-anchor="middle">IDLE</text>
-<text x="85" y="223" font-size="9.5" fill="#9333ea" text-anchor="middle">initial state</text>
+    <div class="note-box">
+        <strong>Transition Resolution Order:</strong>
+        1. Check <code>is_terminal</code> &mdash; if True, raise <code>InvalidTransition</code>.<br>
+        2. Look up <code>(current_state, event)</code> in <code>_TRANSITIONS</code>.<br>
+        3. If not found, look up <code>("*", event)</code> (wildcard).<br>
+        4. If neither found, raise <code>InvalidTransition</code>.<br>
+        5. Update <code>_state</code> to <code>next_state</code>.<br>
+        6. Call callback (if not None) with <code>**ctx</code>.
+    </div>
 
-<!-- COMPUTING -->
-<rect x="200" y="180" width="130" height="60" rx="6" fill="#1f1435" stroke="#a855f7" stroke-width="2"/>
-<text x="265" y="205" font-size="12" font-weight="700" fill="#d8b4fe" text-anchor="middle">COMPUTING</text>
-<text x="265" y="221" font-size="9" fill="#6e7681" text-anchor="middle">strategy.compute_weights()</text>
-<text x="265" y="233" font-size="9" fill="#9333ea" text-anchor="middle">ctx += target_weights</text>
+    <hr class="divider">
 
-<!-- VALIDATING -->
-<rect x="395" y="180" width="130" height="60" rx="6" fill="#1f1435" stroke="#a855f7" stroke-width="2"/>
-<text x="460" y="205" font-size="12" font-weight="700" fill="#d8b4fe" text-anchor="middle">VALIDATING</text>
-<text x="460" y="221" font-size="9" fill="#6e7681" text-anchor="middle">optimizer.validate(target)</text>
-<text x="460" y="233" font-size="9" fill="#9333ea" text-anchor="middle">ctx += validated_weights</text>
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 2: RebalanceFSM -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>2. RebalanceFSM &mdash; Rebalance Cycle State Machine <span>Drives Stages 3-5</span></h2>
+    <p class="desc">
+        The <code>RebalanceFSM</code> (subclass of <code>BaseFSM</code>) replaces <code>while True + asyncio.sleep()</code>
+        loops with an explicit state machine driving the <strong>compute &rarr; validate &rarr; execute &rarr; cooldown</strong>
+        pipeline. It can be driven by a periodic timer (<code>start_timer(interval_s)</code>) and/or on-demand
+        signals (<code>request()</code> / <code>strategy.request_rebalance()</code>).
+    </p>
+    <p class="file-ref">core/rebalance_fsm.py &mdash; class RebalanceFSM &bull; core/enums.py &mdash; class RebalanceState</p>
 
-<!-- EXECUTING -->
-<rect x="592" y="180" width="130" height="60" rx="6" fill="#1f1435" stroke="#a855f7" stroke-width="2"/>
-<text x="657" y="205" font-size="12" font-weight="700" fill="#d8b4fe" text-anchor="middle">EXECUTING</text>
-<text x="657" y="221" font-size="9" fill="#6e7681" text-anchor="middle">execution_engine.execute()</text>
-<text x="657" y="233" font-size="9" fill="#9333ea" text-anchor="middle">ctx += rebalance_result</text>
+    <h3>State Enum: <code>RebalanceState</code></h3>
+    <table>
+        <tr><th>State</th><th>Value</th><th>Description</th><th>Type</th></tr>
+        <tr><td><code>IDLE</code></td><td><code>auto()</code></td><td>Waiting for next timer tick or manual signal. Ready to start a new cycle.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>COMPUTING</code></td><td><code>auto()</code></td><td>Calling <code>strategy.compute_weights()</code>. Waiting for weight dict or None.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>VALIDATING</code></td><td><code>auto()</code></td><td>Running <code>optimizer.validate(TargetWeights)</code>. Checking risk constraints.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>EXECUTING</code></td><td><code>auto()</code></td><td>Running <code>execution_engine.execute(ValidatedWeights)</code>. Submitting orders.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>COOLDOWN</code></td><td><code>auto()</code></td><td>Waiting <code>cooldown_s</code> seconds before returning to IDLE. Prevents rapid-fire.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>SUSPENDED</code></td><td><code>auto()</code></td><td>Rebalancing paused. Timer cancelled, pending state cleared. Requires explicit <code>resume</code>.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>ERROR</code></td><td><code>auto()</code></td><td>Execution failed with exception. Auto-retries after cooldown period.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+    </table>
 
-<!-- COOLDOWN -->
-<rect x="790" y="180" width="130" height="60" rx="6" fill="#1c2040" stroke="#58a6ff" stroke-width="2"/>
-<text x="855" y="205" font-size="12" font-weight="700" fill="#93c5fd" text-anchor="middle">COOLDOWN</text>
-<text x="855" y="221" font-size="9" fill="#6e7681" text-anchor="middle">call_later(cooldown_s)</text>
-<text x="855" y="233" font-size="9" fill="#58a6ff" text-anchor="middle">_fire_cooldown_done()</text>
+    <h3>Full State Diagram</h3>
+    <div class="mermaid">
+        stateDiagram-v2
+            [*] --> IDLE
 
-<!-- ── Off-path states ─────────────────────────────────────────────────── -->
+            IDLE --> COMPUTING : signal (via request())
 
-<!-- ERROR -->
-<rect x="592" y="390" width="130" height="60" rx="6" fill="#2d1010" stroke="#f85149" stroke-width="2"/>
-<text x="657" y="415" font-size="12" font-weight="700" fill="#fca5a5" text-anchor="middle">ERROR</text>
-<text x="657" y="431" font-size="9" fill="#6e7681" text-anchor="middle">auto-retry after cooldown_s</text>
-<text x="657" y="445" font-size="9" fill="#f85149" text-anchor="middle">_fire_retry()</text>
+            COMPUTING --> VALIDATING : weights_ready
+            COMPUTING --> IDLE : no_signal
 
-<!-- SUSPENDED -->
-<rect x="430" y="390" width="130" height="60" rx="6" fill="#1a2040" stroke="#60a5fa" stroke-width="2"/>
-<text x="495" y="415" font-size="12" font-weight="700" fill="#93c5fd" text-anchor="middle">SUSPENDED</text>
-<text x="495" y="431" font-size="9" fill="#6e7681" text-anchor="middle">all rebalancing paused</text>
-<text x="495" y="445" font-size="9" fill="#60a5fa" text-anchor="middle">resume → IDLE</text>
+            VALIDATING --> EXECUTING : accepted
+            VALIDATING --> COOLDOWN : rejected
 
-<!-- ── Happy-path arrows ───────────────────────────────────────────────── -->
+            EXECUTING --> COOLDOWN : complete
+            EXECUTING --> ERROR : failed
 
-<!-- IDLE → COMPUTING (signal) -->
-<line x1="140" y1="210" x2="200" y2="210" stroke="#a855f7" stroke-width="2" marker-end="url(#a)"/>
-<text x="170" y="204" font-size="9.5" fill="#9333ea" text-anchor="middle">signal</text>
-<text x="170" y="224" font-size="8.5" fill="#6e7681" text-anchor="middle">[state==IDLE]</text>
+            COOLDOWN --> IDLE : cooldown_done
 
-<!-- COMPUTING → VALIDATING (weights_ready) -->
-<line x1="330" y1="210" x2="395" y2="210" stroke="#a855f7" stroke-width="2" marker-end="url(#a)"/>
-<text x="362" y="204" font-size="9.5" fill="#9333ea" text-anchor="middle">weights_ready</text>
-<text x="362" y="224" font-size="8.5" fill="#6e7681" text-anchor="middle">[weights != {}]</text>
+            ERROR --> IDLE : retry
 
-<!-- VALIDATING → EXECUTING (accepted) -->
-<line x1="525" y1="210" x2="592" y2="210" stroke="#a855f7" stroke-width="2" marker-end="url(#a)"/>
-<text x="558" y="204" font-size="9.5" fill="#9333ea" text-anchor="middle">accepted</text>
-<text x="558" y="224" font-size="8.5" fill="#6e7681" text-anchor="middle">[!rejected]</text>
+            IDLE --> SUSPENDED : suspend [wildcard]
+            COMPUTING --> SUSPENDED : suspend [wildcard]
+            VALIDATING --> SUSPENDED : suspend [wildcard]
+            EXECUTING --> SUSPENDED : suspend [wildcard]
+            COOLDOWN --> SUSPENDED : suspend [wildcard]
+            ERROR --> SUSPENDED : suspend [wildcard]
 
-<!-- EXECUTING → COOLDOWN (complete) -->
-<line x1="722" y1="210" x2="790" y2="210" stroke="#a855f7" stroke-width="2" marker-end="url(#a)"/>
-<text x="756" y="204" font-size="9.5" fill="#9333ea" text-anchor="middle">complete</text>
-<text x="756" y="224" font-size="8.5" fill="#6e7681" text-anchor="middle">[no exception]</text>
+            SUSPENDED --> IDLE : resume
+    </div>
 
-<!-- COOLDOWN → IDLE (cooldown_done) via arc below -->
-<path d="M 855 240 Q 855 310 85 310 Q 85 270 85 240" stroke="#58a6ff" stroke-width="1.8" fill="none" marker-end="url(#ac)"/>
-<text x="470" y="328" font-size="9.5" fill="#58a6ff" text-anchor="middle">cooldown_done</text>
-<text x="470" y="342" font-size="8.5" fill="#6e7681" text-anchor="middle">[cooldown_s elapsed]</text>
+    <h3>Complete Transition Table</h3>
+    <table>
+        <tr><th>From State</th><th>Trigger</th><th>To State</th><th>Callback</th><th>Description</th></tr>
+        <tr>
+            <td><code>IDLE</code></td>
+            <td><code>signal</code></td>
+            <td><code>COMPUTING</code></td>
+            <td><code>_on_enter_computing</code></td>
+            <td>Request via <code>RebalanceFSM.request()</code> or <code>strategy.request_rebalance()</code>. Only triggers if FSM is IDLE — returns <code>False</code> silently if busy. Strategies drive timing via <code>run_forever()</code> loops or event hooks.</td>
+        </tr>
+        <tr>
+            <td><code>COMPUTING</code></td>
+            <td><code>weights_ready</code></td>
+            <td><code>VALIDATING</code></td>
+            <td><code>_on_enter_validating</code></td>
+            <td><code>compute_weights()</code> returned a non-empty dict. Weights forwarded via <code>ctx["target_weights"]</code>; in multi-strategy mode the aggregator merges all strategies' weights before forwarding.</td>
+        </tr>
+        <tr>
+            <td><code>COMPUTING</code></td>
+            <td><code>no_signal</code></td>
+            <td><code>IDLE</code></td>
+            <td><em>None</em></td>
+            <td><code>compute_weights()</code> returned <code>{}</code>, <code>None</code>, or raised an exception. Cycle aborted cleanly.</td>
+        </tr>
+        <tr>
+            <td><code>VALIDATING</code></td>
+            <td><code>accepted</code></td>
+            <td><code>EXECUTING</code></td>
+            <td><code>_on_enter_executing</code></td>
+            <td><code>optimizer.validate()</code> returned <code>ValidatedWeights(rejected=False)</code>. Validated weights forwarded via <code>ctx["validated_weights"]</code>.</td>
+        </tr>
+        <tr>
+            <td><code>VALIDATING</code></td>
+            <td><code>rejected</code></td>
+            <td><code>COOLDOWN</code></td>
+            <td><code>_on_enter_cooldown</code></td>
+            <td><code>optimizer.validate()</code> returned <code>rejected=True</code> (rate limit, constraint violation) or raised an exception.</td>
+        </tr>
+        <tr>
+            <td><code>EXECUTING</code></td>
+            <td><code>complete</code></td>
+            <td><code>COOLDOWN</code></td>
+            <td><code>_on_enter_cooldown</code></td>
+            <td><code>execution_engine.execute()</code> returned <code>RebalanceResult</code> successfully. <code>RebalanceCompleteEvent</code> published to EventBus.</td>
+        </tr>
+        <tr>
+            <td><code>EXECUTING</code></td>
+            <td><code>failed</code></td>
+            <td><code>ERROR</code></td>
+            <td><code>_on_enter_error</code></td>
+            <td><code>execution_engine.execute()</code> raised an exception. The error is passed via <code>error=e</code> kwarg.</td>
+        </tr>
+        <tr>
+            <td><code>COOLDOWN</code></td>
+            <td><code>cooldown_done</code></td>
+            <td><code>IDLE</code></td>
+            <td><em>None</em></td>
+            <td>Cooldown timer expired. Fired by <code>call_later(cooldown_s, _fire_cooldown_done)</code> &rarr; <code>_end_cooldown()</code>. If <code>cooldown_s == 0</code>, transitions immediately.</td>
+        </tr>
+        <tr>
+            <td><code>ERROR</code></td>
+            <td><code>retry</code></td>
+            <td><code>IDLE</code></td>
+            <td><em>None</em></td>
+            <td>Auto-retry after cooldown period. Fired by <code>call_later(cooldown_s, _fire_retry)</code> &rarr; <code>_do_retry()</code>. If <code>cooldown_s == 0</code>, retries immediately.</td>
+        </tr>
+        <tr>
+            <td><code>*</code> <span class="tag-wildcard">WILDCARD</span></td>
+            <td><code>suspend</code></td>
+            <td><code>SUSPENDED</code></td>
+            <td><code>_on_enter_suspended</code></td>
+            <td>Matches ANY non-terminal state. Logs WARNING and pauses rebalancing. Called via <code>strategy.suspend_rebalancing()</code>.</td>
+        </tr>
+        <tr>
+            <td><code>SUSPENDED</code></td>
+            <td><code>resume</code></td>
+            <td><code>IDLE</code></td>
+            <td><code>_on_resume</code></td>
+            <td>Resumes rebalancing, logs INFO. Called via <code>strategy.resume_rebalancing()</code>.</td>
+        </tr>
+    </table>
 
-<!-- ── Skip path: COMPUTING → IDLE (no_signal) ─────────────────────── -->
-<path d="M 265 180 Q 265 130 85 130 Q 85 155 85 180" stroke="#6e7681" stroke-width="1.5" fill="none" stroke-dasharray="5,3" marker-end="url(#ac)"/>
-<text x="170" y="120" font-size="9.5" fill="#6e7681" text-anchor="middle">no_signal</text>
-<text x="170" y="134" font-size="8.5" fill="#6e7681" text-anchor="middle">[weights empty / exception]</text>
+    <h3>Callback Details</h3>
+    <table>
+        <tr><th>Callback</th><th>What It Does</th><th>Triggers Next</th></tr>
+        <tr>
+            <td><code>_on_enter_computing(**ctx)</code></td>
+            <td>
+                1. Publishes <code>RebalanceCycleEvent</code> via <code>_publish_cycle_event("signal")</code><br>
+                2. Calls <code>self._strategy.compute_weights(**ctx)</code> (handles both sync and async)<br>
+                3. On exception: triggers <code>"no_signal"</code><br>
+                4. On empty/None result: triggers <code>"no_signal"</code><br>
+                5. If <code>aggregator</code> set: stores weights, merges all strategies via <code>aggregator.get_merged_weights()</code>, tags <code>ctx["target_weights"]</code> with merged<br>
+                6. Otherwise: tags <code>ctx["target_weights"]</code> with raw weights, triggers <code>"weights_ready"</code>
+            </td>
+            <td><code>weights_ready</code> or <code>no_signal</code></td>
+        </tr>
+        <tr>
+            <td><code>_on_enter_validating(**ctx)</code></td>
+            <td>
+                1. Publishes <code>RebalanceCycleEvent</code><br>
+                2. Wraps <code>ctx["target_weights"]</code> in <code>TargetWeights(weights, timestamp, metadata={})</code><br>
+                3. Calls <code>self._optimizer.validate(target, **ctx)</code><br>
+                4. On exception: triggers <code>"rejected"</code><br>
+                5. If <code>validated.rejected</code>: logs rejection reason, triggers <code>"rejected"</code><br>
+                6. On success: stores in <code>ctx["validated_weights"]</code>, triggers <code>"accepted"</code>
+            </td>
+            <td><code>accepted</code> or <code>rejected</code></td>
+        </tr>
+        <tr>
+            <td><code>_on_enter_executing(**ctx)</code></td>
+            <td>
+                1. Publishes <code>RebalanceCycleEvent</code><br>
+                2. Reads <code>ctx["validated_weights"]</code> from validating stage<br>
+                3. Calls <code>await self._execution_engine.execute(validated, **ctx)</code><br>
+                4. On exception: triggers <code>"failed"</code> with <code>error=e</code><br>
+                5. On success: calls <code>shadow_book.lock_for_order(order_id, intent)</code> for each submitted limit order in <code>result.submitted_orders</code> (reserves balance in the shadow book)<br>
+                6. Stores result in <code>_last_result</code>; if <code>aggregator</code> is set, calls <code>aggregator.attribute_fills(mark_prices, portfolio_total_value)</code> — <strong>this call is a no-op when portfolio_total_value is 0 or ctx keys are absent</strong><br>
+                7. Publishes <code>RebalanceCompleteEvent(result, validated_weights, timestamp, strategy_id)</code> to EventBus<br>
+                8. Triggers <code>"complete"</code>
+            </td>
+            <td><code>complete</code> or <code>failed</code></td>
+        </tr>
+        <tr>
+            <td><code>_on_enter_cooldown(**ctx)</code></td>
+            <td>
+                1. Publishes <code>RebalanceCycleEvent("cooldown")</code><br>
+                2. If <code>cooldown_s &gt; 0</code>: schedules <code>call_later(cooldown_s, _fire_cooldown_done)</code><br>
+                3. If <code>cooldown_s == 0</code>: immediately triggers <code>"cooldown_done"</code>
+            </td>
+            <td><code>cooldown_done</code> (after timer or immediately)</td>
+        </tr>
+        <tr>
+            <td><code>_on_enter_error(error=None, **ctx)</code></td>
+            <td>
+                1. Publishes <code>RebalanceCycleEvent("failed")</code><br>
+                2. Logs error at ERROR level<br>
+                3. If <code>cooldown_s &gt; 0</code>: schedules <code>call_later(cooldown_s, _fire_retry)</code> for auto-recovery<br>
+                4. If <code>cooldown_s == 0</code>: immediately triggers <code>"retry"</code>
+            </td>
+            <td><code>retry</code> (after cooldown timer or immediately)</td>
+        </tr>
+        <tr>
+            <td><code>_on_enter_suspended(**ctx)</code></td>
+            <td>
+                1. Publishes <code>RebalanceCycleEvent("suspend")</code><br>
+                2. Logs WARNING: "SUSPENDED &mdash; rebalancing paused"
+            </td>
+            <td>Waits for explicit <code>resume</code></td>
+        </tr>
+        <tr>
+            <td><code>_on_resume(**ctx)</code></td>
+            <td>
+                1. Publishes <code>RebalanceCycleEvent("resume")</code><br>
+                2. Logs INFO: "Resumed &mdash; back to IDLE"
+            </td>
+            <td>Returns to IDLE</td>
+        </tr>
+    </table>
 
-<!-- ── Reject path: VALIDATING → COOLDOWN ──────────────────────────── -->
-<path d="M 525 210 Q 580 130 790 180" stroke="#d29922" stroke-width="1.5" fill="none" stroke-dasharray="5,3" marker-end="url(#ar)"/>
-<text x="690" y="138" font-size="9.5" fill="#d29922" text-anchor="middle">rejected</text>
-<text x="690" y="152" font-size="8.5" fill="#6e7681" text-anchor="middle">[rejected==True or exception]</text>
+    <h3>Timing Strategy</h3>
+    <div class="note-box">
+        <strong>The FSM has no built-in timer.</strong> The strategy controls when to trigger rebalance cycles:
+        <ul style="margin-top:6px;">
+            <li><strong>Timer-driven:</strong> Override <code>run_forever()</code> with <code>asyncio.sleep(interval)</code> + <code>await self.request_rebalance()</code></li>
+            <li><strong>Event-driven:</strong> Call <code>await self.request_rebalance()</code> from <code>on_kline()</code> or <code>on_orderbook_update()</code> when a signal condition is met</li>
+            <li><strong>Hybrid:</strong> Combine both — periodic background loop + reactive event hooks</li>
+        </ul>
+        <br>
+        <strong>Request flow:</strong>
+        <code>strategy.request_rebalance(**ctx)</code> &rarr; <code>RebalanceFSM.request(**ctx)</code> &rarr;
+        checks if state == IDLE, then calls <code>trigger("signal", **ctx)</code>. Returns <code>False</code> silently if busy.
+    </div>
 
-<!-- ── Fail path: EXECUTING → ERROR ─────────────────────────────────── -->
-<line x1="657" y1="240" x2="657" y2="390" stroke="#f85149" stroke-width="1.8" marker-end="url(#ae)"/>
-<text x="680" y="322" font-size="9.5" fill="#f85149">failed</text>
-<text x="680" y="338" font-size="8.5" fill="#6e7681">[exception]</text>
+    <h3>Public API</h3>
+    <table>
+        <tr><th>Method</th><th>Signature</th><th>Purpose</th></tr>
+        <tr><td><code>request</code></td><td><code>async request(**ctx) -> bool</code></td><td>Request a rebalance cycle. Returns True if triggered (IDLE), False if busy (mid-cycle, cooldown, suspended, error).</td></tr>
+        <tr><td><code>last_result</code></td><td><code>@property -> Optional[RebalanceResult]</code></td><td>The most recent rebalance result, or None if no cycle has completed.</td></tr>
+        <tr><td><code>suspend_rebalancing</code></td><td><code>async strategy.suspend_rebalancing()</code></td><td>Triggers the wildcard "suspend" transition from any state.</td></tr>
+        <tr><td><code>resume_rebalancing</code></td><td><code>async strategy.resume_rebalancing()</code></td><td>Triggers "resume" from SUSPENDED state.</td></tr>
+    </table>
 
-<!-- ── ERROR → IDLE (retry) ─────────────────────────────────────────── -->
-<path d="M 592 420 Q 480 490 85 490 Q 65 490 65 450 Q 65 420 65 300 Q 65 250 85 240" stroke="#3fb950" stroke-width="1.5" fill="none" stroke-dasharray="5,3" marker-end="url(#aret)"/>
-<text x="310" y="502" font-size="9.5" fill="#3fb950" text-anchor="middle">retry</text>
-<text x="310" y="516" font-size="8.5" fill="#6e7681" text-anchor="middle">[after cooldown_s or immediate]</text>
+    <hr class="divider">
 
-<!-- ── Suspend (wildcard "*" state) arrows ─────────────────────────── -->
-<!-- From COMPUTING to SUSPENDED -->
-<path d="M 265 240 Q 265 370 430 420" stroke="#60a5fa" stroke-width="1.2" fill="none" stroke-dasharray="4,3" marker-end="url(#as)"/>
-<!-- From VALIDATING to SUSPENDED -->
-<path d="M 460 240 Q 460 360 460 390" stroke="#60a5fa" stroke-width="1.2" fill="none" stroke-dasharray="4,3" marker-end="url(#as)"/>
-<!-- From IDLE to SUSPENDED -->
-<path d="M 110 220 Q 240 330 430 415" stroke="#60a5fa" stroke-width="1" fill="none" stroke-dasharray="4,3" marker-end="url(#as)"/>
-<text x="185" y="352" font-size="9.5" fill="#60a5fa">suspend (any state)</text>
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 3: OrderStatus FSM -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>3. OrderStatus FSM &mdash; Order Lifecycle Validation <span>Warn-mode, exchange-authoritative</span></h2>
+    <p class="desc">
+        The Order FSM validates <code>OrderStatus</code> transitions but operates in <strong>warn-mode</strong> &mdash;
+        illegal transitions are logged as warnings but still applied, because the exchange is the
+        source of truth. This is not a <code>BaseFSM</code> subclass; it uses a simple dict of valid transitions
+        and two standalone functions. New code should prefer the <code>OrderFSM</code> class for per-order
+        lifecycle management; the module-level functions remain for backwards compatibility.
+    </p>
+    <p class="file-ref">core/order_fsm.py &mdash; validate_order_transition(), is_terminal() &bull; core/enums.py &mdash; class OrderStatus &bull; core/order.py &mdash; Order.transition_to()</p>
 
-<!-- SUSPENDED → IDLE (resume) -->
-<path d="M 430 420 Q 330 490 85 490 Q 65 490 65 450 Q 65 260 85 240" stroke="#60a5fa" stroke-width="1.5" fill="none" stroke-dasharray="5,3" marker-end="url(#as)"/>
-<text x="205" y="492" font-size="9.5" fill="#60a5fa" text-anchor="middle">resume</text>
+    <h3>State Enum: <code>OrderStatus</code></h3>
+    <table>
+        <tr><th>State</th><th>Value</th><th>Description</th><th>Type</th></tr>
+        <tr><td><code>PENDING</code></td><td><code>"Pending"</code></td><td>Order created locally, not yet acknowledged by exchange.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>OPEN</code></td><td><code>"Open"</code></td><td>Order acknowledged by exchange and resting on the book (or pending execution for market orders).</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>PARTIALLY_FILLED</code></td><td><code>"PartiallyFilled"</code></td><td>Part of the order has been filled. Remaining quantity is still active.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+        <tr><td><code>FILLED</code></td><td><code>"Filled"</code></td><td>Order completely filled. All quantity executed.</td><td><span class="tag-terminal">TERMINAL</span></td></tr>
+        <tr><td><code>CANCELLED</code></td><td><code>"Cancelled"</code></td><td>Order cancelled (by user, exchange, or expiration).</td><td><span class="tag-terminal">TERMINAL</span></td></tr>
+        <tr><td><code>REJECTED</code></td><td><code>"Rejected"</code></td><td>Order rejected by exchange (insufficient balance, invalid params, etc.).</td><td><span class="tag-terminal">TERMINAL</span></td></tr>
+        <tr><td><code>EXPIRED</code></td><td><code>"Expired"</code></td><td>GTT/IOC order whose time-in-force lapsed without a full fill. Semantically distinct from CANCELLED (which is a deliberate cancellation action, not a passive expiry).</td><td><span class="tag-terminal">TERMINAL</span></td></tr>
+        <tr><td><code>TRIGGERED</code></td><td><code>"Triggered"</code></td><td>Conditional order (Stop-Loss / Take-Profit) whose trigger price was hit. The child order is now active and executing on the exchange.</td><td><span class="tag-active">ACTIVE</span></td></tr>
+    </table>
 
-<!-- ── Callback labels on each state ──────────────────────────────── -->
-<text x="265" y="268" font-size="8.5" fill="#6e7681" text-anchor="middle" font-style="italic">_on_enter_computing()</text>
-<text x="460" y="268" font-size="8.5" fill="#6e7681" text-anchor="middle" font-style="italic">_on_enter_validating()</text>
-<text x="657" y="268" font-size="8.5" fill="#6e7681" text-anchor="middle" font-style="italic">_on_enter_executing()</text>
-<text x="855" y="268" font-size="8.5" fill="#6e7681" text-anchor="middle" font-style="italic">_on_enter_cooldown()</text>
-<text x="657" y="462" font-size="8.5" fill="#6e7681" text-anchor="middle" font-style="italic">_on_enter_error()</text>
-<text x="495" y="462" font-size="8.5" fill="#6e7681" text-anchor="middle" font-style="italic">_on_enter_suspended()</text>
+    <h3>State Diagram</h3>
+    <div class="mermaid">
+        stateDiagram-v2
+            [*] --> PENDING
 
-<!-- ── Side-effect annotations ──────────────────────────────────────── -->
-<rect x="10" y="30" width="320" height="90" rx="6" fill="#12192b" stroke="#374151" stroke-width="1"/>
-<text x="20" y="50" font-size="10" font-weight="600" fill="#93c5fd">Side effects per stage</text>
-<text x="20" y="66" font-size="9" fill="#6e7681">COMPUTING: publishes RebalanceCycleEvent("signal")</text>
-<text x="20" y="80" font-size="9" fill="#6e7681">VALIDATING: publishes RebalanceCycleEvent("weights_ready")</text>
-<text x="20" y="94" font-size="9" fill="#6e7681">EXECUTING: publishes RebalanceCycleEvent("accepted")</text>
-<text x="20" y="108" font-size="9" fill="#6e7681">                + RebalanceCompleteEvent on success</text>
-<text x="20" y="122" font-size="9" fill="#6e7681">                + shadow_book.lock_for_order() per submitted limit</text>
-</svg>
+            PENDING --> OPEN : exchange ACK
+            PENDING --> FILLED : instant fill (market order)
+            PENDING --> CANCELLED : cancelled before ACK
+            PENDING --> REJECTED : exchange rejection
+
+            OPEN --> PARTIALLY_FILLED : partial execution
+            OPEN --> FILLED : full execution
+            OPEN --> CANCELLED : user cancel
+            OPEN --> EXPIRED : GTT/IOC lapsed
+            OPEN --> TRIGGERED : SL/TP trigger price hit
+
+            PARTIALLY_FILLED --> PARTIALLY_FILLED : additional partial fill
+            PARTIALLY_FILLED --> FILLED : remaining filled
+            PARTIALLY_FILLED --> CANCELLED : cancel remaining
+            PARTIALLY_FILLED --> EXPIRED : GTT/IOC remainder lapsed
+
+            TRIGGERED --> OPEN : child order placed as resting limit
+            TRIGGERED --> PARTIALLY_FILLED : child order began filling
+            TRIGGERED --> FILLED : child order instant full fill
+            TRIGGERED --> CANCELLED : cancelled after trigger
+            TRIGGERED --> EXPIRED : expired after trigger (IOC child)
+
+            FILLED --> [*]
+            CANCELLED --> [*]
+            REJECTED --> [*]
+            EXPIRED --> [*]
+    </div>
+
+    <h3>Valid Transition Table (<code>_VALID_TRANSITIONS</code>)</h3>
+    <table>
+        <tr><th>From State</th><th>Allowed To States</th><th>Notes</th></tr>
+        <tr>
+            <td><code>PENDING</code></td>
+            <td><code>OPEN</code>, <code>REJECTED</code>, <code>CANCELLED</code>, <code>FILLED</code></td>
+            <td>Market orders can fill instantly (PENDING &rarr; FILLED). Can be cancelled before exchange ACK.</td>
+        </tr>
+        <tr>
+            <td><code>OPEN</code></td>
+            <td><code>PARTIALLY_FILLED</code>, <code>FILLED</code>, <code>CANCELLED</code>, <code>EXPIRED</code>, <code>TRIGGERED</code></td>
+            <td>Standard limit order lifecycle. Cannot return to PENDING. EXPIRED for GTT/IOC orders whose time-in-force lapsed; TRIGGERED for SL/TP conditional orders.</td>
+        </tr>
+        <tr>
+            <td><code>PARTIALLY_FILLED</code></td>
+            <td><code>PARTIALLY_FILLED</code>, <code>FILLED</code>, <code>CANCELLED</code>, <code>EXPIRED</code></td>
+            <td>Self-transition for additional partial fills. Can cancel remaining quantity. EXPIRED if GTT/IOC remainder lapses after partial fill.</td>
+        </tr>
+        <tr>
+            <td><code>FILLED</code></td>
+            <td><em>(none)</em></td>
+            <td><span class="tag-terminal">TERMINAL</span> &mdash; no further transitions allowed.</td>
+        </tr>
+        <tr>
+            <td><code>CANCELLED</code></td>
+            <td><em>(none)</em></td>
+            <td><span class="tag-terminal">TERMINAL</span> &mdash; no further transitions allowed.</td>
+        </tr>
+        <tr>
+            <td><code>REJECTED</code></td>
+            <td><em>(none)</em></td>
+            <td><span class="tag-terminal">TERMINAL</span> &mdash; no further transitions allowed.</td>
+        </tr>
+        <tr>
+            <td><code>TRIGGERED</code></td>
+            <td><code>OPEN</code>, <code>PARTIALLY_FILLED</code>, <code>FILLED</code>, <code>CANCELLED</code>, <code>EXPIRED</code></td>
+            <td>Full lifecycle of the child order after the trigger condition is met. Can rest on book (OPEN), fill immediately (FILLED), or be cancelled/expired before filling.</td>
+        </tr>
+        <tr>
+            <td><code>EXPIRED</code></td>
+            <td><em>(none)</em></td>
+            <td><span class="tag-terminal">TERMINAL</span> &mdash; GTT/IOC time-in-force lapsed; distinct from CANCELLED.</td>
+        </tr>
+    </table>
+
+    <h3>Functions</h3>
+    <table>
+        <tr><th>Function</th><th>Signature</th><th>Purpose</th></tr>
+        <tr>
+            <td><code>validate_order_transition</code></td>
+            <td><code>validate_order_transition(current: OrderStatus, target: OrderStatus, order_id: str = "") -> bool</code></td>
+            <td>
+                Returns <code>True</code> if the transition is valid.<br>
+                Returns <code>True</code> for same-state transitions (harmless no-ops).<br>
+                Returns <code>False</code> and logs a WARNING for invalid transitions &mdash; the caller should still apply the change since the exchange is authoritative.
+            </td>
+        </tr>
+        <tr>
+            <td><code>is_terminal</code></td>
+            <td><code>is_terminal(status: OrderStatus) -> bool</code></td>
+            <td>Returns <code>True</code> if status is FILLED, CANCELLED, REJECTED, or EXPIRED.</td>
+        </tr>
+    </table>
+
+    <h3>OrderFSM Class &mdash; Per-order lifecycle wrapper</h3>
+    <p class="desc">
+        <code>OrderFSM</code> is a thin, per-order wrapper around the <code>_VALID_TRANSITIONS</code> table.
+        It provides a clean object-oriented API for tracking a single order's lifecycle and is designed
+        as groundwork for Stop-Loss / Take-Profit order management. Operates in the same warn-mode as
+        the module-level functions: invalid transitions are logged but still applied.
+    </p>
+    <p class="file-ref">core/order_fsm.py &mdash; class OrderFSM</p>
+    <table>
+        <tr><th>Member</th><th>Type</th><th>Behaviour</th></tr>
+        <tr>
+            <td><code>transition(new_status, order_id)</code></td>
+            <td>method &rarr; bool</td>
+            <td>Validates and applies the transition. Logs a warning on invalid transitions but always applies. Returns <code>True</code> if valid.</td>
+        </tr>
+        <tr>
+            <td><code>is_terminal</code></td>
+            <td>property &rarr; bool</td>
+            <td>True if current status is in <code>_TERMINAL</code> (FILLED, CANCELLED, REJECTED, EXPIRED).</td>
+        </tr>
+        <tr>
+            <td><code>is_active</code></td>
+            <td>property &rarr; bool</td>
+            <td>True if the order is still live. Delegates to <code>OrderStatus.is_active()</code>. Includes TRIGGERED.</td>
+        </tr>
+        <tr>
+            <td><code>can_fill</code></td>
+            <td>property &rarr; bool</td>
+            <td>True when fill events are expected: status is OPEN, PARTIALLY_FILLED, or TRIGGERED.</td>
+        </tr>
+        <tr>
+            <td><code>is_conditional</code></td>
+            <td>property &rarr; bool</td>
+            <td>True if <code>order_type</code> is in <code>_CONDITIONAL_ORDER_TYPES</code> (STOP_MARKET, TAKE_PROFIT_MARKET).</td>
+        </tr>
+    </table>
+    <div class="note-box">
+        <strong>SL/TP Order Lifecycle:</strong>
+        <code>PENDING &rarr; OPEN &rarr; TRIGGERED &rarr; [PARTIALLY_FILLED*] &rarr; FILLED</code><br><br>
+        When a conditional order's trigger price is hit, the exchange moves it to <code>TRIGGERED</code>.
+        The child order then executes like a normal order: it may rest on the book (<code>OPEN</code>),
+        receive partial fills (<code>PARTIALLY_FILLED</code>), and eventually reach <code>FILLED</code>
+        or be cancelled/expired.<br><br>
+        <strong>Conditional Order Types:</strong> <code>_CONDITIONAL_ORDER_TYPES = {STOP_MARKET, TAKE_PROFIT_MARKET}</code>
+    </div>
+
+    <h3>Integration with <code>Order</code> class</h3>
+    <div class="note-box">
+        <strong>Order.transition_to(new_status):</strong> Calls <code>validate_order_transition(self.status, new_status, self.id)</code>
+        before applying. Even if validation returns False, the status is updated because the exchange is the source of truth.<br><br>
+        <strong>Order.update_fill(filled_qty, fill_price):</strong> Updates <code>avg_fill_price</code> using weighted average,
+        updates <code>filled_qty</code>, and auto-transitions to <code>FILLED</code> if <code>filled_qty >= quantity</code>,
+        or <code>PARTIALLY_FILLED</code> otherwise.<br><br>
+        <strong>Order.strategy_id:</strong> <code>Optional[int]</code> field set by <code>ExecutionEngine</code> at placement time.
+        Used by <code>ShadowBook._on_order_update()</code> (via <code>_order_strategy_map</code>) to route each fill to the
+        correct per-strategy virtual ledger. Defaults to <code>None</code> for orders placed outside the pipeline.
+    </div>
+
+    <h3>Binance Status Mapping</h3>
+    <table>
+        <tr><th>Binance Status String</th><th>Elysian <code>OrderStatus</code></th></tr>
+        <tr><td><code>"NEW"</code></td><td><code>OrderStatus.OPEN</code></td></tr>
+        <tr><td><code>"PARTIALLY_FILLED"</code></td><td><code>OrderStatus.PARTIALLY_FILLED</code></td></tr>
+        <tr><td><code>"FILLED"</code></td><td><code>OrderStatus.FILLED</code></td></tr>
+        <tr><td><code>"CANCELED"</code></td><td><code>OrderStatus.CANCELLED</code></td></tr>
+        <tr><td><code>"PENDING_CANCEL"</code></td><td><code>OrderStatus.PENDING</code></td></tr>
+        <tr><td><code>"REJECTED"</code></td><td><code>OrderStatus.REJECTED</code></td></tr>
+        <tr><td><code>"EXPIRED"</code></td><td><code>OrderStatus.EXPIRED</code></td></tr>
+    </table>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 4: StrategyState -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>4. StrategyState &mdash; SpotStrategy Lifecycle <span>6-state linear progression</span></h2>
+    <p class="desc">
+        The <code>SpotStrategy</code> base class tracks its lifecycle via the <code>StrategyState</code> enum.
+        Transitions are managed implicitly (not via BaseFSM) through guard clauses in
+        <code>start()</code>, <code>stop()</code>, and <code>_mark_running()</code>. The state prevents
+        double-start, out-of-order operations, and misuse of the pipeline.
+    </p>
+    <p class="file-ref">core/enums.py &mdash; class StrategyState &bull; strategy/base_strategy.py &mdash; class SpotStrategy</p>
+
+    <h3>State Enum: <code>StrategyState</code></h3>
+    <table>
+        <tr><th>State</th><th>Description</th><th>Set By</th></tr>
+        <tr><td><code>CREATED</code></td><td>Strategy instance constructed. Not yet wired to EventBus or exchanges.</td><td><code>SpotStrategy.__init__()</code></td></tr>
+        <tr><td><code>STARTING</code></td><td>In the process of subscribing to EventBus and calling <code>on_start()</code>.</td><td><code>SpotStrategy.start()</code> entry</td></tr>
+        <tr><td><code>READY</code></td><td>All hooks subscribed, <code>on_start()</code> complete. Waiting for first event.</td><td><code>SpotStrategy.start()</code> exit</td></tr>
+        <tr><td><code>RUNNING</code></td><td>First event dispatched. Strategy is actively processing market data.</td><td><code>SpotStrategy._mark_running()</code></td></tr>
+        <tr><td><code>STOPPING</code></td><td>In the process of unsubscribing from EventBus and calling <code>on_stop()</code>.</td><td><code>SpotStrategy.stop()</code> entry</td></tr>
+        <tr><td><code>STOPPED</code></td><td>All hooks unsubscribed, executor shut down, <code>on_stop()</code> complete.</td><td><code>SpotStrategy.stop()</code> exit</td></tr>
+        <tr><td><code>FAILED</code></td><td>Reserved for fatal errors (not currently auto-set by base class).</td><td>Subclass or external</td></tr>
+    </table>
+
+    <h3>State Diagram</h3>
+    <div class="mermaid">
+        stateDiagram-v2
+            [*] --> CREATED
+
+            CREATED --> STARTING : start() called
+            STARTING --> READY : on_start() complete, hooks subscribed
+
+            READY --> RUNNING : first event dispatched (_mark_running)
+
+            RUNNING --> STOPPING : stop() called
+            READY --> STOPPING : stop() called (no events received)
+
+            STOPPING --> STOPPED : on_stop() complete, unsubscribed
+
+            CREATED --> FAILED : fatal error
+            STARTING --> FAILED : on_start() exception
+            READY --> FAILED : fatal error
+            RUNNING --> FAILED : fatal error
+
+            STOPPED --> [*]
+            FAILED --> [*]
+    </div>
+
+    <h3>Transition Details</h3>
+    <table>
+        <tr><th>Transition</th><th>Guard / Trigger</th><th>What Happens</th></tr>
+        <tr>
+            <td>CREATED &rarr; STARTING</td>
+            <td><code>start()</code> called; guard: <code>state != CREATED</code> &rarr; log warning and return</td>
+            <td>Sets <code>_state = STARTING</code>, gets event loop, subscribes to 5 EventType callbacks</td>
+        </tr>
+        <tr>
+            <td>STARTING &rarr; READY</td>
+            <td>End of <code>start()</code></td>
+            <td>Initializes <code>RebalanceFSM</code> if optimizer + engine both set. Calls <code>await on_start()</code>. Sets <code>_state = READY</code>.</td>
+        </tr>
+        <tr>
+            <td>READY &rarr; RUNNING</td>
+            <td><code>_mark_running()</code> on first event dispatch</td>
+            <td>Called from <code>_dispatch_kline()</code>. Transitions only if currently READY &mdash; single-shot.</td>
+        </tr>
+        <tr>
+            <td>RUNNING/READY &rarr; STOPPING</td>
+            <td><code>stop()</code> called; guard: <code>state == STOPPED</code> &rarr; return</td>
+            <td>Sets <code>_state = STOPPING</code>. Stops RebalanceFSM timer. Unsubscribes from all 5 EventTypes.</td>
+        </tr>
+        <tr>
+            <td>STOPPING &rarr; STOPPED</td>
+            <td>End of <code>stop()</code></td>
+            <td>Shuts down ProcessPoolExecutor. Calls <code>await on_stop()</code>. Sets <code>_state = STOPPED</code>.</td>
+        </tr>
+    </table>
+
+    <h3>State-Dependent Behavior</h3>
+    <table>
+        <tr><th>Operation</th><th>Required State</th><th>Behavior if Wrong State</th></tr>
+        <tr><td><code>start()</code></td><td>CREATED</td><td>Logs warning, returns immediately (no-op)</td></tr>
+        <tr><td><code>stop()</code></td><td>Any except STOPPED</td><td>Returns immediately if already STOPPED</td></tr>
+        <tr><td><code>submit_weights()</code></td><td>READY or RUNNING</td><td>Logs warning, returns <code>None</code></td></tr>
+        <tr><td><code>request_rebalance()</code></td><td>Any (delegates to FSM)</td><td>Returns <code>False</code> if no FSM configured</td></tr>
+    </table>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 5: RunnerState -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>5. RunnerState &mdash; StrategyRunner Lifecycle <span>8-state orchestration progression</span></h2>
+    <p class="desc">
+        The <code>StrategyRunner</code> tracks its lifecycle via <code>RunnerState</code>, progressing through
+        a strict initialization order. Each state corresponds to a phase in the <code>run()</code> method.
+        Transitions are imperative assignments (not FSM-driven), with error handling routing to FAILED.
+    </p>
+    <p class="file-ref">core/enums.py &mdash; class RunnerState &bull; run_strategy.py &mdash; class StrategyRunner</p>
+
+    <h3>State Enum: <code>RunnerState</code></h3>
+    <table>
+        <tr><th>State</th><th>Description</th><th>Phase in <code>run()</code></th></tr>
+        <tr><td><code>CREATED</code></td><td>Runner constructed, configs loaded, 8 client managers instantiated.</td><td><code>__init__()</code></td></tr>
+        <tr><td><code>CONFIGURING</code></td><td>Loading trading pairs from config.json, creating EventBus.</td><td><code>_setup_config()</code></td></tr>
+        <tr><td><code>CONNECTING</code></td><td>Creating exchange instances, injecting EventBus into client managers.</td><td><code>_setup_exchanges()</code></td></tr>
+        <tr><td><code>SYNCING</code></td><td>Full pipeline setup: Portfolio sync, Optimizer creation, ExecutionEngine wiring.</td><td><code>_setup_pipeline()</code></td></tr>
+        <tr><td><code>RUNNING</code></td><td>Main event loop active: data feeds + strategy.run_forever() via asyncio.gather.</td><td><code>asyncio.gather()</code></td></tr>
+        <tr><td><code>STOPPING</code></td><td>Shutting down: exchange cleanup, portfolio stop, strategy stop.</td><td><code>finally</code> block</td></tr>
+        <tr><td><code>STOPPED</code></td><td>All components shut down cleanly.</td><td>After <code>_cleanup()</code></td></tr>
+        <tr><td><code>FAILED</code></td><td>Unrecoverable error during any phase.</td><td><code>except Exception</code></td></tr>
+    </table>
+
+    <h3>State Diagram</h3>
+    <div class="mermaid">
+        stateDiagram-v2
+            [*] --> CREATED
+
+            CREATED --> CONFIGURING : run() called
+            CONFIGURING --> CONNECTING : _setup_config() done, EventBus created
+            CONNECTING --> SYNCING : exchanges created, strategy wired and started
+
+            note right of SYNCING
+                _setup_pipeline():
+                1. portfolio.sync_from_exchange()
+                2. portfolio.start(event_bus)
+                3. Create PortfolioOptimizer
+                4. Create ExecutionEngine
+                5. RebalanceFSM auto-created
+            end note
+
+            SYNCING --> RUNNING : pipeline wired, asyncio.gather() entered
+
+            RUNNING --> STOPPING : gather() returns or CancelledError
+            STOPPING --> STOPPED : cleanup complete
+
+            CREATED --> FAILED : exception
+            CONFIGURING --> FAILED : exception
+            CONNECTING --> FAILED : exception
+            SYNCING --> FAILED : exception
+            RUNNING --> FAILED : exception
+
+            STOPPED --> [*]
+            FAILED --> [*]
+    </div>
+
+    <h3>Transition Details</h3>
+    <table>
+        <tr><th>Transition</th><th>Trigger</th><th>Key Actions</th></tr>
+        <tr>
+            <td>CREATED &rarr; CONFIGURING</td>
+            <td><code>run(strategy)</code> entry</td>
+            <td><code>_setup_config()</code>: loads token pairs from config.json. Creates <code>EventBus()</code>.</td>
+        </tr>
+        <tr>
+            <td>CONFIGURING &rarr; CONNECTING</td>
+            <td>Config complete</td>
+            <td><code>_setup_exchanges()</code>: creates BinanceSpotExchange with API keys, kline/OB managers. Injects EventBus into managers. Wires strategy's <code>_event_bus</code>, <code>_exchanges</code>, <code>args</code>, <code>config_json</code>. Calls <code>strategy.start()</code>.</td>
+        </tr>
+        <tr>
+            <td>CONNECTING &rarr; SYNCING</td>
+            <td>Exchange <code>run()</code> complete</td>
+            <td><code>exchange.run()</code>: creates AsyncClient, calls <code>get_exchange_info()</code>, <code>refresh_balances()</code>, starts user data stream. Then <code>_setup_pipeline()</code> begins.</td>
+        </tr>
+        <tr>
+            <td>SYNCING &rarr; RUNNING</td>
+            <td>Pipeline wired</td>
+            <td><code>asyncio.gather()</code> with <code>_setup_binance_data_feeds()</code>, <code>strategy.run_forever()</code>, and optional snapshot task.</td>
+        </tr>
+        <tr>
+            <td>RUNNING &rarr; STOPPING</td>
+            <td><code>finally</code> block in <code>run()</code></td>
+            <td>Stops snapshot task, calls <code>exchange.cleanup()</code>, <code>portfolio.stop()</code>, <code>strategy.stop()</code>.</td>
+        </tr>
+        <tr>
+            <td>STOPPING &rarr; STOPPED</td>
+            <td>Cleanup complete</td>
+            <td><code>_cleanup([])</code>: stops all 8 client managers, cancels remaining tasks.</td>
+        </tr>
+        <tr>
+            <td>Any &rarr; FAILED</td>
+            <td>Unhandled exception</td>
+            <td>Logs fatal error with traceback. Re-raises exception. <code>_cleanup()</code> still runs in finally.</td>
+        </tr>
+    </table>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 6: Portfolio Lifecycle -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>6. Portfolio Lifecycle <span>Sync &rarr; event-driven &rarr; stopped</span></h2>
+    <p class="desc">
+        The Portfolio does not use a formal state enum but follows a clear lifecycle:
+        empty &rarr; synced from exchange &rarr; event-driven (auto-updating) &rarr; stopped.
+        It tracks positions, cash, risk metrics, and trade history.
+    </p>
+    <p class="file-ref">core/portfolio.py &mdash; class Portfolio &bull; core/position.py &mdash; class Position</p>
+
+    <h3>Lifecycle Flow</h3>
+    <div class="mermaid">
+        graph TD
+            A["Portfolio#40;initial_cash=0#41;\nEmpty state"] -->|"sync_from_exchange#40;exchange, venue, feeds#41;"| B
+
+            B["Synced\n1. _cash_dict from USDT/USDC/BUSD balances\n2. _cash = sum#40;_cash_dict#41;\n3. _positions from non-stable balances\n   entry_price from feed.latest_price\n4. _mark_prices from feeds\n5. _nav recomputed"]
+
+            B -->|"start#40;event_bus, feeds#41;\nsubscribe KLINE + BALANCE_UPDATE"| C
+
+            C["Event-Driven\nAuto-updating via EventBus"]
+
+            C -->|"KlineEvent received"| D["_on_kline#40;event#41;\n1. _mark_prices#91;symbol#93; = kline.close\n2. _nav = _cash + sum#40;pos.qty * mark_price#41;\n3. _weights#91;sym#93; = #40;pos.qty * price#41; / _nav\n4. if _nav gt _peak_equity:\n     _peak_equity = _nav\n5. dd = #40;_peak_equity - _nav#41; / _peak_equity\n   if dd gt _max_drawdown:\n     _max_drawdown = dd"]
+            D --> C
+
+            C -->|"BalanceUpdateEvent received"| E["_on_balance#40;event#41;\nif event.asset in STABLECOINS:\n  _cash_dict#91;asset#93; += event.delta\n  _cash = sum#40;_cash_dict.values#40;#41;#41;\nelse #40;non-stablecoin#41;:\n  map base asset#40;e.g. ETH#41; -> symbol#40;e.g. ETHUSDT#41;\n  via exchange._token_infos\n  upsert _positions#91;symbol#93;"]
+            E --> C
+
+            C -->|"update_position#40;symbol, qty_delta, price, ...#41;"| F
+
+            F["update_position\nif same direction as existing:\n  VWAP: new_avg = #40;old_qty*old_price + delta*price#41;\n                  / #40;old_qty + delta#41;\nif opposite direction:\n  closed_qty = min#40;abs#40;delta#41;, abs#40;pos.qty#41;#41;\n  pnl = closed_qty * #40;price - entry#41;\n  _total_realized_pnl += pnl\nRecord Fill to _fills deque\nRefresh _nav + _weights"]
+            F --> C
+
+            C -->|"stop#40;#41;"| G["Stopped\nunsubscribe KLINE + BALANCE_UPDATE\n_event_bus = None"]
+
+            style A fill:#f3f4f6,stroke:#9ca3af,color:#4b5563
+            style B fill:#ecfeff,stroke:#0891b2,color:#155e75
+            style C fill:#f0fdf4,stroke:#16a34a,color:#166534
+            style D fill:#fefce8,stroke:#ca8a04,color:#713f12
+            style E fill:#fefce8,stroke:#ca8a04,color:#713f12
+            style F fill:#fefce8,stroke:#ca8a04,color:#713f12
+            style G fill:#fef2f2,stroke:#ef4444,color:#991b1b
+    </div>
+
+    <h3>Order Lifecycle in Portfolio (<code>_on_order_update</code>)</h3>
+    <p class="desc">
+        The Portfolio maintains <code>_outstanding_orders</code> (all live orders) and processes fill events
+        with incremental delta tracking to prevent double-counting partial fills.
+    </p>
+    <table>
+        <tr><th>Component</th><th>Type</th><th>Purpose</th></tr>
+        <tr>
+            <td><code>_fill_tracker</code></td>
+            <td><code>Dict[str, float]</code></td>
+            <td>Maps <code>order_id</code> to the last-seen cumulative <code>filled_qty</code>. Each ORDER_UPDATE event applies only the <em>incremental</em> delta (<code>order.filled_qty - prev_filled</code>) to prevent double-counting partial fills.</td>
+        </tr>
+        <tr>
+            <td><code>_completed_order_ids</code></td>
+            <td><code>Set[str]</code> (unbounded)</td>
+            <td>Deduplication guard against duplicate terminal events for the same order. An order_id is added when its terminal status is first processed. The set is unbounded — no eviction occurs during the session lifetime.</td>
+        </tr>
+        <tr>
+            <td><code>_update_order(order)</code></td>
+            <td>method</td>
+            <td>Upserts order into <code>_outstanding_orders</code> using FSM-validated transitions. New orders are stored unless already terminal; existing orders apply <code>update_fill()</code> for fill statuses or <code>transition_to()</code> for others. Terminal orders are removed from the dict.</td>
+        </tr>
+    </table>
+
+    <h3>Locked Balance Mechanics (LIMIT Order Reservations)</h3>
+    <p class="desc">
+        When a LIMIT order is submitted, the Portfolio reserves the required balance so that
+        subsequent NAV and free-balance calculations remain accurate while the order rests on the book.
+    </p>
+    <table>
+        <tr><th>Method</th><th>Trigger</th><th>What Happens</th></tr>
+        <tr>
+            <td><code>lock_for_order(order_id, intent)</code></td>
+            <td>Called from <code>RebalanceFSM._on_enter_executing()</code> after order submission</td>
+            <td>
+                LIMIT BUY: locks <code>intent.quantity * intent.price</code> quote (USDT) in <code>_locked_cash</code> and <code>_locked_cash_per_order[order_id]</code>.<br>
+                LIMIT SELL: locks <code>intent.quantity</code> base in <code>_locked_quantities[symbol]</code> and <code>_locked_qty_per_order[order_id]</code>.<br>
+                Idempotent: no-op if order_id already tracked. No-op for MARKET orders.
+            </td>
+        </tr>
+        <tr>
+            <td><code>_partial_release_lock(order_id, delta_filled)</code></td>
+            <td>Called from <code>_on_order_update()</code> on each fill increment</td>
+            <td>
+                BUY: releases <code>delta_filled * intent.price</code> from <code>_locked_cash</code> proportionally.<br>
+                SELL: releases <code>delta_filled</code> base from <code>_locked_quantities</code>.
+            </td>
+        </tr>
+        <tr>
+            <td><code>release_order_lock(order_id)</code></td>
+            <td>Called from <code>_on_order_update()</code> when order reaches terminal status</td>
+            <td>Releases any remaining locked balance (unfilled portion of cancelled/expired orders). Pops from all lock dicts.</td>
+        </tr>
+        <tr>
+            <td><code>free_cash</code></td>
+            <td>Property</td>
+            <td><code>max(0.0, _cash - _locked_cash)</code> — cash available for new LIMIT BUY orders.</td>
+        </tr>
+        <tr>
+            <td><code>free_quantity(symbol)</code></td>
+            <td>Method</td>
+            <td><code>max(0.0, position(symbol).quantity - _locked_quantities.get(symbol, 0.0))</code> — base available for new LIMIT SELL orders.</td>
+        </tr>
+    </table>
+
+    <h3>Position State</h3>
+    <table>
+        <tr><th>Property</th><th>Type</th><th>Computed From</th></tr>
+        <tr><td><code>is_flat()</code></td><td><code>bool</code></td><td><code>quantity == 0</code></td></tr>
+        <tr><td><code>is_long()</code></td><td><code>bool</code></td><td><code>quantity > 0</code></td></tr>
+        <tr><td><code>is_short()</code></td><td><code>bool</code></td><td><code>quantity < 0</code></td></tr>
+        <tr><td><code>unrealized_pnl(mark_price)</code></td><td><code>float</code></td><td><code>quantity * (mark_price - avg_entry_price)</code></td></tr>
+        <tr><td><code>total_pnl(mark_price)</code></td><td><code>float</code></td><td><code>realized_pnl + unrealized_pnl</code></td></tr>
+        <tr><td><code>net_pnl(mark_price)</code></td><td><code>float</code></td><td><code>total_pnl - total_commission</code></td></tr>
+    </table>
+
+    <h3>Portfolio Risk Metrics</h3>
+    <table>
+        <tr><th>Metric</th><th>Field</th><th>Updated By</th></tr>
+        <tr><td>Net Asset Value</td><td><code>_nav</code></td><td><code>_on_kline()</code> &mdash; cash + sum(qty * mark_price)</td></tr>
+        <tr><td>Peak Equity</td><td><code>_peak_equity</code></td><td><code>_on_kline()</code> &mdash; max(_peak_equity, _nav)</td></tr>
+        <tr><td>Maximum Drawdown</td><td><code>_max_drawdown</code></td><td><code>_on_kline()</code> &mdash; max(_max_drawdown, (peak - nav) / peak)</td></tr>
+        <tr><td>Total Realized PnL</td><td><code>_total_realized_pnl</code></td><td><code>update_position()</code> on opposite-direction fills</td></tr>
+        <tr><td>Total Commission</td><td><code>_total_commission</code></td><td><code>update_position()</code> accumulates per-fill commission</td></tr>
+        <tr><td>Cash Weight</td><td>Computed</td><td><code>_cash / _nav</code></td></tr>
+        <tr><td>Gross Exposure</td><td>Computed</td><td><code>sum(abs(weight) for weight in _weights.values())</code></td></tr>
+    </table>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 7: Data Feed Lifecycle -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>7. Data Feed &amp; Client Manager Lifecycle <span>WebSocket multiplex architecture</span></h2>
+    <p class="desc">
+        Each <code>AbstractClientManager</code> manages a single multiplexed WebSocket connection for all
+        symbols of one data type (kline or orderbook) on one venue. The lifecycle involves
+        creating feeds, registering them, starting the WebSocket, then running reader + worker tasks.
+    </p>
+    <p class="file-ref">connectors/base.py &mdash; AbstractClientManager, AbstractDataFeed</p>
+
+    <h3>Client Manager Lifecycle</h3>
+    <div class="mermaid">
+        graph TD
+            A["ClientManager#40;#41;\nEmpty, no feeds"] -->|"register_feed#40;feed#41;\nfor each symbol"| B["Feeds Registered\n_active_feeds populated"]
+            B -->|"set_event_bus#40;bus#41;"| C["EventBus Injected"]
+            C -->|"start#40;#41;\nCreate WebSocket connection"| D["WebSocket Connected\nBuffering events"]
+            D -->|"run_multiplex_feeds#40;#41;\nSpawn reader + 4 workers"| E["Running\nReader: WS -> Queue\nWorkers: Queue -> Feed + EventBus"]
+            E -->|"stop#40;#41;"| F["Stopped\nTasks cancelled"]
+
+            style A fill:#f3f4f6,stroke:#9ca3af,color:#4b5563
+            style E fill:#f0fdf4,stroke:#16a34a,color:#166534
+            style F fill:#fef2f2,stroke:#ef4444,color:#991b1b
+    </div>
+
+    <h3>Feed Internal State</h3>
+    <table>
+        <tr><th>State</th><th>Field</th><th>Description</th></tr>
+        <tr><td>Current Data</td><td><code>_data: OrderBook</code></td><td>Latest orderbook state (SortedDict bids/asks)</td></tr>
+        <tr><td>Volatility</td><td><code>_vol: float</code></td><td>60-second rolling annualized volatility</td></tr>
+        <tr><td>Price History</td><td><code>_historical: deque(maxlen=60)</code></td><td>Last 60 mid-price samples (1/sec via <code>update_current_stats()</code>)</td></tr>
+        <tr><td>OB History</td><td><code>_historical_ob: deque(maxlen=60)</code></td><td>Last 60 OrderBook snapshots</td></tr>
+    </table>
+
+    <h3>All 8 Market-Data Client Managers in the System</h3>
+    <table>
+        <tr><th>Manager</th><th>Venue</th><th>Data Type</th><th>Feed Class</th><th>WS Interval</th></tr>
+        <tr><td><code>BinanceKlineClientManager</code></td><td>Binance Spot</td><td>Kline</td><td><code>BinanceKlineFeed</code></td><td>1s</td></tr>
+        <tr><td><code>BinanceOrderBookClientManager</code></td><td>Binance Spot</td><td>Order Book</td><td><code>BinanceOrderBookFeed</code></td><td>100ms</td></tr>
+        <tr><td><code>BinanceFuturesKlineClientManager</code></td><td>Binance Futures</td><td>Kline</td><td><code>BinanceFuturesKlineFeed</code></td><td>1m</td></tr>
+        <tr><td><code>BinanceFuturesOrderBookClientManager</code></td><td>Binance Futures</td><td>Order Book</td><td><code>BinanceFuturesOrderBookFeed</code></td><td>100ms</td></tr>
+        <tr><td><code>AsterKlineClientManager</code></td><td>Aster Spot</td><td>Kline</td><td><code>AsterKlineFeed</code></td><td>1s</td></tr>
+        <tr><td><code>AsterOrderBookClientManager</code></td><td>Aster Spot</td><td>Order Book</td><td><code>AsterOrderBookFeed</code></td><td>100ms</td></tr>
+        <tr><td><code>AsterPerpKlineClientManager</code></td><td>Aster Perp</td><td>Kline</td><td><code>AsterPerpKlineFeed</code></td><td>1s</td></tr>
+        <tr><td><code>AsterPerpOrderBookClientManager</code></td><td>Aster Perp</td><td>Order Book</td><td><code>AsterPerpOrderBookFeed</code></td><td>100ms</td></tr>
+    </table>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 7b: BinanceUserDataClientManager Connection FSM -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>7b. BinanceUserDataClientManager &mdash; Spot User Data Connection FSM <span>New WS API, HMAC-SHA256</span></h2>
+    <p class="desc">
+        Manages the single Binance Spot user-data WebSocket connection. The old listenKey approach
+        (<code>/api/v3/userDataStream</code>, retired 2026-02-20) has been completely replaced with the
+        new <strong>WebSocket API</strong>: <code>wss://ws-api.binance.com:443/ws-api/v3</code>.
+        Authentication uses HMAC-SHA256 signing via <code>userDataStream.subscribe.signature</code>
+        (no <code>session.logon</code> required). Dispatches <code>OrderUpdateEvent</code> and
+        <code>BalanceUpdateEvent</code> to the shared EventBus for strategy hooks.
+    </p>
+    <p class="file-ref">connectors/BinanceDataConnectors.py &mdash; class BinanceUserDataClientManager</p>
+
+    <h3>Connection State Diagram</h3>
+    <div class="mermaid">
+        stateDiagram-v2
+            [*] --> STOPPED
+
+            STOPPED --> CONNECTING : start() — asyncio.create_task(_reader_loop)
+
+            CONNECTING --> SUBSCRIBING : websockets.connect() succeeded\nX-MBX-APIKEY header sent
+
+            SUBSCRIBING --> CONNECTED : userDataStream.subscribe.signature\nreturns status=200
+
+            SUBSCRIBING --> RECONNECTING : status != 200 (auth failure)\n_running=True: loop continues
+
+            CONNECTED --> RECONNECTING : connection error / exception\nor ws.recv() fails
+
+            RECONNECTING --> CONNECTING : sleep(reconnect_delay)\ndelay = min(delay*2, 60s)
+
+            CONNECTED --> STOPPED : stop() called\n_running = False\ntask.cancel()
+
+            RECONNECTING --> STOPPED : stop() called\n_running = False
+    </div>
+
+    <h3>Connection State Details</h3>
+    <table>
+        <tr><th>State</th><th>Description</th><th>Action</th></tr>
+        <tr>
+            <td><code>STOPPED</code></td>
+            <td>No active connection. <code>_running = False</code>.</td>
+            <td>Initial state and final state after <code>stop()</code>.</td>
+        </tr>
+        <tr>
+            <td><code>CONNECTING</code></td>
+            <td>Attempting <code>websockets.connect(WS_API_URL)</code> with <code>ping_interval=180</code>.</td>
+            <td><code>WS_API_URL = "wss://ws-api.binance.com:443/ws-api/v3"</code>. Header: <code>X-MBX-APIKEY</code>.</td>
+        </tr>
+        <tr>
+            <td><code>SUBSCRIBING</code></td>
+            <td>Connected. Sends <code>userDataStream.subscribe.signature</code> JSON request.</td>
+            <td>Params sorted alphabetically: <code>apiKey=...&amp;timestamp=...</code>. Signed with HMAC-SHA256. Awaits <code>status=200</code> response.</td>
+        </tr>
+        <tr>
+            <td><code>CONNECTED</code></td>
+            <td>Subscription confirmed. Dispatching live events.</td>
+            <td>
+                Envelope: <code>{"subscriptionId": ..., "event": {"e": ..., ...}}</code>.<br>
+                <code>e == "executionReport"</code> &rarr; parses to <code>Order</code>, publishes <code>OrderUpdateEvent</code>.<br>
+                <code>e == "balanceUpdate"</code> &rarr; publishes <code>BalanceUpdateEvent(asset, delta)</code>.<br>
+                Also calls sync callbacks in <code>_subscribers</code> (e.g. <code>BinanceSpotExchange._handle_user_data</code>).
+            </td>
+        </tr>
+        <tr>
+            <td><code>RECONNECTING</code></td>
+            <td>Connection lost or auth failed. Exponential backoff.</td>
+            <td>Delay starts at 1 s, doubles on each failure, capped at 60 s. Reset to 1 s on successful CONNECTED entry.</td>
+        </tr>
+    </table>
+
+    <div class="note-box">
+        <strong>Authentication detail:</strong> The new WS API uses <code>userDataStream.subscribe.signature</code>
+        which works with HMAC-SHA256 API keys and does NOT require <code>session.logon</code> (Ed25519-only).
+        The payload signed is <code>apiKey=&lt;key&gt;&amp;timestamp=&lt;ms&gt;</code> — params must be sorted
+        alphabetically before signing per Binance spec.<br><br>
+        <strong>Old approach (RETIRED 2026-02-20):</strong> <code>POST /api/v3/userDataStream</code> to obtain a
+        <code>listenKey</code>, then connect to <code>wss://stream.binance.com:9443/ws/&lt;listenKey&gt;</code>,
+        with periodic PUT keepalives. This endpoint is no longer available for Spot.
+    </div>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 7c: BinanceFuturesUserDataClientManager Connection FSM -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>7c. BinanceFuturesUserDataClientManager &mdash; Futures User Data Connection FSM <span>listenKey approach, keepalive 30 min</span></h2>
+    <p class="desc">
+        Manages the Binance USDS-M Futures user-data WebSocket connection. Unlike the Spot connector,
+        futures still use the <strong>listenKey approach</strong>: obtain a key via
+        <code>POST /fapi/v1/listenKey</code>, connect to
+        <code>wss://fstream.binance.com/ws/&lt;listenKey&gt;</code>, and send PUT keepalives every 30 minutes.
+        All blocking HTTP calls are wrapped in <code>asyncio.to_thread()</code> to avoid blocking the event loop.
+        Dispatches raw event dicts to registered callbacks (futures exchange handler for
+        <code>ACCOUNT_UPDATE</code> and <code>ORDER_TRADE_UPDATE</code> events).
+    </p>
+    <p class="file-ref">connectors/BinanceFuturesDataConnectors.py &mdash; class BinanceFuturesUserDataClientManager</p>
+
+    <h3>Connection State Diagram</h3>
+    <div class="mermaid">
+        stateDiagram-v2
+            [*] --> STOPPED
+
+            STOPPED --> OBTAINING_KEY : start() — asyncio.create_task(_reader_loop)\nPOST /fapi/v1/listenKey via asyncio.to_thread
+
+            OBTAINING_KEY --> CONNECTING : listenKey obtained\nws_url = wss://fstream.binance.com/ws/{listenKey}
+
+            CONNECTING --> CONNECTED : websockets.connect() succeeded\nkeepalive task spawned
+
+            CONNECTED --> RECONNECTING : connection error / ws.recv() fails\nkeepalive task cancelled
+
+            RECONNECTING --> OBTAINING_KEY : sleep(reconnect_delay)\nnew listenKey obtained\ndelay = min(delay*2, 60s)
+
+            CONNECTED --> STOPPING : stop() called\n_running = False
+
+            STOPPING --> STOPPED : keepalive task cancelled\nreader task cancelled\nDELETE /fapi/v1/listenKey\n_ws closed
+    </div>
+
+    <h3>Keepalive Loop</h3>
+    <table>
+        <tr><th>Component</th><th>Detail</th></tr>
+        <tr>
+            <td>Keepalive interval</td>
+            <td>30 minutes (<code>KEEPALIVE_INTERVAL = 30 * 60</code>)</td>
+        </tr>
+        <tr>
+            <td>Keepalive method</td>
+            <td><code>PUT /fapi/v1/listenKey</code> via <code>asyncio.to_thread(_sync)</code> — wraps blocking <code>requests.put()</code></td>
+        </tr>
+        <tr>
+            <td>listenKey obtain</td>
+            <td><code>POST /fapi/v1/listenKey</code> via <code>asyncio.to_thread(_sync)</code> — called on each (re)connect attempt</td>
+        </tr>
+        <tr>
+            <td>listenKey close</td>
+            <td><code>DELETE /fapi/v1/listenKey</code> via <code>asyncio.to_thread(_sync)</code> — called in <code>stop()</code></td>
+        </tr>
+        <tr>
+            <td>Keepalive task lifecycle</td>
+            <td>Started when CONNECTED, cancelled on disconnect or stop(). A new keepalive task is spawned on each reconnect.</td>
+        </tr>
+    </table>
+
+    <h3>Event Types Dispatched</h3>
+    <table>
+        <tr><th>Futures Event Type</th><th>Action</th></tr>
+        <tr><td><code>ACCOUNT_UPDATE</code></td><td>Balance and position changes. Dispatched to registered sync callbacks (futures exchange handler).</td></tr>
+        <tr><td><code>ORDER_TRADE_UPDATE</code></td><td>Order status changes and fills. Dispatched to registered sync callbacks.</td></tr>
+        <tr><td><code>MARGIN_CALL</code></td><td>Margin call warning. Dispatched to registered sync callbacks.</td></tr>
+        <tr><td><code>ACCOUNT_CONFIG_UPDATE</code></td><td>Leverage or multi-asset mode changes. Dispatched to registered sync callbacks.</td></tr>
+    </table>
+
+    <div class="note-box">
+        <strong>Spot vs Futures user data approach:</strong> The Spot connector uses the new WebSocket API
+        (<code>wss://ws-api.binance.com:443/ws-api/v3</code>, HMAC-SHA256 signed subscription, retired
+        listenKey approach). The Futures connector retains the listenKey approach
+        (<code>wss://fstream.binance.com/ws/&lt;listenKey&gt;</code>) which is still valid for USDS-M Futures.
+        Both use identical reconnect backoff logic (1s → 60s cap).
+    </div>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 7d: ShadowBook — Sub-Account Fill Attribution -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>7d. ShadowBook &mdash; Per-Strategy Virtual Ledger <span>Shared-account vs sub-account modes</span></h2>
+    <p class="desc">
+        Each strategy has a <code>ShadowBook</code> that tracks the slice of the shared Portfolio
+        attributable to it. The ShadowBook mirrors Portfolio's order lifecycle (fill tracker,
+        locked balance, completed_order_ids guard) but operates on a virtual position slice.
+        A key behavioral switch is <code>sub_account_mode</code>, which controls how cash is adjusted on fills.
+    </p>
+    <p class="file-ref">core/shadow_book.py &mdash; class ShadowBook</p>
+
+    <h3>Mode Comparison</h3>
+    <table>
+        <tr><th>Aspect</th><th>Shared-Account Mode (<code>sub_account_mode=False</code>)</th><th>Sub-Account Mode (<code>sub_account_mode=True</code>)</th></tr>
+        <tr>
+            <td>ORDER_UPDATE source</td>
+            <td>Shared EventBus; filtered by <code>order.strategy_id == self._strategy_id</code></td>
+            <td>Private EventBus (scoped to this strategy's sub-account); venue check only</td>
+        </tr>
+        <tr>
+            <td>BALANCE_UPDATE source</td>
+            <td>Not subscribed (cash managed by <code>apply_fill()</code>)</td>
+            <td>Private EventBus; <code>_on_balance_update()</code> maps raw asset &rarr; trading pair &rarr; position</td>
+        </tr>
+        <tr>
+            <td>KLINE source</td>
+            <td>Not subscribed (mark prices via strategy dispatch)</td>
+            <td>Shared EventBus; <code>_on_kline()</code> updates <code>_mark_prices</code> and refreshes NAV</td>
+        </tr>
+        <tr>
+            <td>Cash adjustment on fill</td>
+            <td><code>apply_fill()</code> adjusts <code>_cash -= qty_delta * price + commission</code></td>
+            <td><code>apply_fill()</code> does <strong>NOT</strong> adjust cash — handled exclusively by <code>_on_balance_update()</code> to prevent double-counting (Binance emits both ORDER_UPDATE and BALANCE_UPDATE for the same fill)</td>
+        </tr>
+        <tr>
+            <td>Position updates</td>
+            <td>Via <code>apply_fill()</code> called from <code>_on_order_update()</code></td>
+            <td>Via both <code>apply_fill()</code> (ORDER_UPDATE path) and <code>_on_balance_update()</code> (BALANCE_UPDATE path for non-stablecoin assets)</td>
+        </tr>
+    </table>
+
+    <div class="note-box">
+        <strong>Cash double-count prevention in sub-account mode:</strong>
+        When <code>sub_account_mode=True</code>, <code>apply_fill()</code> deliberately skips the
+        <code>self._cash -= qty_delta * price</code> adjustment. Cash is instead maintained exclusively
+        through <code>_on_balance_update()</code> which processes Binance <code>BALANCE_UPDATE</code>
+        events. This is because Binance emits <em>both</em> an <code>executionReport</code> (ORDER_UPDATE)
+        and a <code>balanceUpdate</code> (BALANCE_UPDATE) for the same fill event — double-adjusting cash
+        would cause the ledger to drift from the actual exchange balance.<br><br>
+        <strong><code>_completed_order_ids</code>:</strong> A plain <code>set()</code> (unbounded, no eviction).
+        Used as a deduplication guard to prevent processing the same terminal order event twice.
+        Mirrors identical logic in <code>Portfolio._completed_order_ids</code>.
+    </div>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 8: Complete State Interaction Map -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>8. Complete State Interaction Map <span>How all state machines interact</span></h2>
+    <p class="desc">
+        This diagram shows how the four major state systems interact through the EventBus
+        and direct method calls. The StrategyRunner orchestrates initialization; the RebalanceFSM
+        drives the pipeline; the Portfolio and Order FSMs react to market events.
+    </p>
+    <div class="mermaid">
+        graph TB
+            subgraph Runner["StrategyRunner (RunnerState)"]
+                RS1["CREATED"]
+                RS2["CONFIGURING"]
+                RS3["CONNECTING"]
+                RS4["SYNCING"]
+                RS5["RUNNING"]
+                RS6["STOPPING"]
+                RS7["STOPPED"]
+                RS1 --> RS2 --> RS3 --> RS4 --> RS5 --> RS6 --> RS7
+            end
+
+            subgraph Strategy["SpotStrategy (StrategyState)"]
+                SS1["CREATED"]
+                SS2["STARTING"]
+                SS3["READY"]
+                SS4["RUNNING"]
+                SS5["STOPPING"]
+                SS6["STOPPED"]
+                SS1 --> SS2 --> SS3 --> SS4 --> SS5 --> SS6
+            end
+
+            subgraph Rebalance["RebalanceFSM (RebalanceState)"]
+                RB1["IDLE"]
+                RB2["COMPUTING"]
+                RB3["VALIDATING"]
+                RB4["EXECUTING"]
+                RB5["COOLDOWN"]
+                RB6["ERROR"]
+                RB7["SUSPENDED"]
+                RB1 --> RB2 --> RB3 --> RB4 --> RB5 --> RB1
+                RB4 --> RB6 --> RB1
+            end
+
+            subgraph Orders["Order FSM (OrderStatus)"]
+                OS1["PENDING"]
+                OS2["OPEN"]
+                OS3["PARTIALLY_FILLED"]
+                OS4["FILLED"]
+                OS5["CANCELLED"]
+                OS6["EXPIRED"]
+                OS7["TRIGGERED"]
+                OS1 --> OS2 --> OS3 --> OS4
+                OS2 --> OS6
+                OS2 --> OS7
+                OS7 --> OS3
+            end
+
+            RS3 -->|"strategy.start#40;#41;"| SS1
+            RS4 -->|"creates RebalanceFSM"| RB1
+            SS4 -->|"request_rebalance#40;#41;\nor timer_tick"| RB1
+            RB4 -->|"engine.execute#40;#41;\nplace_market_order"| OS1
+            RB4 -->|"RebalanceCompleteEvent"| SS4
+            OS4 -->|"OrderUpdateEvent"| SS4
+
+            style Runner fill:#eff6ff,stroke:#2563eb,color:#1e40af
+            style Strategy fill:#f0fdf4,stroke:#16a34a,color:#166534
+            style Rebalance fill:#fefce8,stroke:#ca8a04,color:#713f12
+            style Orders fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
+    </div>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 9: PeriodicTask -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>9. PeriodicTask <span>Utility for recurring background work</span></h2>
+    <p class="desc">
+        <code>PeriodicTask</code> is a lightweight utility that replaces bare <code>while True + asyncio.sleep()</code>
+        loops. It runs a callback (sync or async) at a fixed interval as a background asyncio task.
+        Used for portfolio snapshots and balance monitoring.
+    </p>
+    <p class="file-ref">core/fsm.py &mdash; class PeriodicTask (line 182+)</p>
+    <div class="note-box">
+        <strong>Known deprecation &mdash; fsm.py line 215:</strong>
+        <code>PeriodicTask.start()</code> creates its background task using
+        <code>asyncio.get_event_loop().create_task(...)</code>, which is deprecated in Python 3.10+
+        and will raise a <code>DeprecationWarning</code> when called from a coroutine (where
+        <code>asyncio.get_running_loop()</code> should be used instead).
+        This call is in <code>PeriodicTask</code>, <strong>not</strong> in <code>RebalanceFSM</code>
+        — the RebalanceFSM correctly uses <code>asyncio.get_running_loop()</code> in its
+        <code>_on_enter_cooldown()</code> and <code>_on_enter_error()</code> callbacks.
+    </div>
+
+    <h3>Lifecycle</h3>
+    <div class="mermaid">
+        graph LR
+            A["PeriodicTask#40;callback, interval_s#41;"] -->|"start#40;#41;\nasyncio.get_event_loop#40;#41;.create_task#40;#41;\n#91;deprecated in Python 3.10+#93;"| B["Running\nbackground asyncio.Task\nwhile True:\n  sleep#40;interval#41;\n  callback#40;#41;"]
+            B -->|"stop#40;#41;\ntask.cancel#40;#41;"| C["Stopped\n_task = None"]
+            B -->|"exception in callback"| D["Error logged\nloop continues"]
+            D --> B
+
+            style B fill:#f0fdf4,stroke:#16a34a,color:#166534
+            style C fill:#fef2f2,stroke:#ef4444,color:#991b1b
+    </div>
+
+    <table>
+        <tr><th>Method</th><th>Signature</th><th>Purpose</th></tr>
+        <tr><td><code>start</code></td><td><code>start() -> None</code></td><td>Creates background <code>asyncio.Task</code> running the loop. No-op if already running.</td></tr>
+        <tr><td><code>stop</code></td><td><code>stop() -> None</code></td><td>Cancels the background task. Sets <code>_task = None</code>.</td></tr>
+        <tr><td><code>running</code></td><td><code>@property -> bool</code></td><td><code>True</code> if task exists and is not done.</td></tr>
+    </table>
+
+    <h3>Usage Instances in the System</h3>
+    <table>
+        <tr><th>Instance</th><th>Callback</th><th>Interval</th><th>Created By</th></tr>
+        <tr><td>Portfolio Snapshot</td><td><code>portfolio.save_snapshot()</code></td><td><code>args.portfolio.snapshot_interval_s</code></td><td><code>StrategyRunner._start_snapshot_task()</code></td></tr>
+        <tr><td>Balance Monitor</td><td><code>exchange.refresh_balances()</code></td><td>Configurable</td><td><code>SpotExchangeConnector.monitor_balances()</code></td></tr>
+        <tr><td>Feed Stats</td><td><code>feed.update_current_stats()</code></td><td>1s</td><td><code>AbstractDataFeed</code> (internal)</td></tr>
+    </table>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SECTION 10: Summary Matrix -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <h2>10. Summary Matrix <span>All state machines at a glance</span></h2>
+
+    <table>
+        <tr><th>FSM</th><th>Enum / States</th><th>States</th><th>Terminal States</th><th>Mechanism</th><th>File</th></tr>
+        <tr>
+            <td><strong>RebalanceFSM</strong></td>
+            <td><code>RebalanceState</code></td>
+            <td>7: IDLE, COMPUTING, VALIDATING, EXECUTING, COOLDOWN, SUSPENDED, ERROR</td>
+            <td>None (all states can transition)</td>
+            <td><code>BaseFSM</code> subclass with transition table + callbacks. Wildcard <code>"suspend"</code> from any state.</td>
+            <td><code>core/rebalance_fsm.py</code></td>
+        </tr>
+        <tr>
+            <td><strong>Order FSM</strong></td>
+            <td><code>OrderStatus</code></td>
+            <td>8: PENDING, OPEN, PARTIALLY_FILLED, FILLED, CANCELLED, REJECTED, EXPIRED, TRIGGERED</td>
+            <td>FILLED, CANCELLED, REJECTED, EXPIRED</td>
+            <td>Dict-based validation (warn-mode) + <code>OrderFSM</code> class; standalone functions for backwards compatibility</td>
+            <td><code>core/order_fsm.py</code></td>
+        </tr>
+        <tr>
+            <td><strong>Strategy Lifecycle</strong></td>
+            <td><code>StrategyState</code></td>
+            <td>7: CREATED, STARTING, READY, RUNNING, STOPPING, STOPPED, FAILED</td>
+            <td>STOPPED, FAILED</td>
+            <td>Imperative assignments with guard clauses</td>
+            <td><code>strategy/base_strategy.py</code></td>
+        </tr>
+        <tr>
+            <td><strong>Runner Lifecycle</strong></td>
+            <td><code>RunnerState</code></td>
+            <td>8: CREATED, CONFIGURING, CONNECTING, SYNCING, RUNNING, STOPPING, STOPPED, FAILED</td>
+            <td>STOPPED, FAILED</td>
+            <td>Imperative assignments in <code>run()</code></td>
+            <td><code>run_strategy.py</code></td>
+        </tr>
+        <tr>
+            <td><strong>Spot User Data Connection</strong></td>
+            <td>(conceptual)</td>
+            <td>5: STOPPED, CONNECTING, SUBSCRIBING, CONNECTED, RECONNECTING</td>
+            <td>STOPPED</td>
+            <td>Implicit states in <code>_reader_loop()</code>. New WS API (<code>wss://ws-api.binance.com:443/ws-api/v3</code>), HMAC-SHA256. Exponential backoff 1s &rarr; 60s cap.</td>
+            <td><code>connectors/BinanceDataConnectors.py</code> &mdash; <code>BinanceUserDataClientManager</code></td>
+        </tr>
+        <tr>
+            <td><strong>Futures User Data Connection</strong></td>
+            <td>(conceptual)</td>
+            <td>6: STOPPED, OBTAINING_KEY, CONNECTING, CONNECTED, RECONNECTING, STOPPING</td>
+            <td>STOPPED</td>
+            <td>Implicit states in <code>_reader_loop()</code>. listenKey approach (<code>wss://fstream.binance.com/ws/&lt;key&gt;</code>). PUT keepalive every 30 min via <code>asyncio.to_thread</code>. Exponential backoff 1s &rarr; 60s cap.</td>
+            <td><code>connectors/BinanceFuturesDataConnectors.py</code> &mdash; <code>BinanceFuturesUserDataClientManager</code></td>
+        </tr>
+    </table>
+
+    <h3>Cancel-All-Orders Implementations</h3>
+    <p class="desc">
+        The two exchange connector base classes implement <code>cancel_all_orders(symbol)</code> differently,
+        which is relevant when iterating open orders that may be modified during cancellation.
+    </p>
+    <table>
+        <tr><th>Connector</th><th>Implementation</th><th>Why</th></tr>
+        <tr>
+            <td><code>SpotExchangeConnector</code></td>
+            <td><code>list(self._open_orders.get(symbol, {}).keys())</code> &mdash; iterates order IDs (keys), then cancels each</td>
+            <td>Snapshot of keys prevents mutation-during-iteration. Each <code>cancel_order(symbol, oid)</code> call may remove entries from the dict.</td>
+        </tr>
+        <tr>
+            <td><code>FuturesExchangeConnector</code></td>
+            <td><code>list(self._open_orders.get(symbol, {}).values())</code> &mdash; iterates Order objects (values), then cancels using <code>order.id</code></td>
+            <td>Snapshot of Order objects; uses <code>order.id</code> rather than dict key for cancellation. Futures <code>_open_orders</code> uses <code>OrderedDict</code>.</td>
+        </tr>
+    </table>
+
 </div>
-
-<!-- Transition table -->
-<h3>RebalanceFSM Transition Table</h3>
-<table>
-<tr><th>From state</th><th>Trigger</th><th>To state</th><th>Callback</th><th>Guard / condition</th></tr>
-<tr><td>IDLE</td><td><code>signal</code></td><td>COMPUTING</td><td><code>_on_enter_computing()</code></td><td>state == IDLE (request() guard)</td></tr>
-<tr><td>COMPUTING</td><td><code>weights_ready</code></td><td>VALIDATING</td><td><code>_on_enter_validating()</code></td><td>compute_weights() returned non-empty dict</td></tr>
-<tr><td>COMPUTING</td><td><code>no_signal</code></td><td>IDLE</td><td>—</td><td>weights empty or compute_weights() raised exception</td></tr>
-<tr><td>VALIDATING</td><td><code>accepted</code></td><td>EXECUTING</td><td><code>_on_enter_executing()</code></td><td>ValidatedWeights.rejected == False</td></tr>
-<tr><td>VALIDATING</td><td><code>rejected</code></td><td>COOLDOWN</td><td><code>_on_enter_cooldown()</code></td><td>ValidatedWeights.rejected == True or exception</td></tr>
-<tr><td>EXECUTING</td><td><code>complete</code></td><td>COOLDOWN</td><td><code>_on_enter_cooldown()</code></td><td>execute() returned without exception</td></tr>
-<tr><td>EXECUTING</td><td><code>failed</code></td><td>ERROR</td><td><code>_on_enter_error()</code></td><td>execute() raised exception</td></tr>
-<tr><td>COOLDOWN</td><td><code>cooldown_done</code></td><td>IDLE</td><td>—</td><td>call_later(cooldown_s) fired</td></tr>
-<tr><td>ERROR</td><td><code>retry</code></td><td>IDLE</td><td>—</td><td>call_later(cooldown_s) fired; immediate if cooldown_s == 0</td></tr>
-<tr><td>* (any)</td><td><code>suspend</code></td><td>SUSPENDED</td><td><code>_on_enter_suspended()</code></td><td>wildcard — any non-terminal state</td></tr>
-<tr><td>SUSPENDED</td><td><code>resume</code></td><td>IDLE</td><td><code>_on_resume()</code></td><td>—</td></tr>
-</table>
-
-<div class="note">
-  <strong>BaseFSM re-entrancy:</strong> If a callback fires another <code>trigger()</code> while
-  a transition is in progress, it is queued in <code>_pending</code> and drained sequentially
-  after the current callback returns. This prevents deadlocks from callbacks that publish events.
-</div>
-
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     SECTION 2 — Order Lifecycle FSM
-     ═══════════════════════════════════════════════════════════════════════════ -->
-<h2>2. Order Lifecycle FSM <span>core/portfolio.py · core/shadow_book.py · core/order.py</span></h2>
-<p class="desc">
-  Each submitted order moves through a lifecycle tracked by both Portfolio and ShadowBook
-  via <code>_update_order()</code>. The FSM uses <code>Order.transition_to()</code> and
-  <code>Order.update_fill()</code> for fills. Partial fills accumulate via
-  <code>_fill_tracker</code> (order_id → last known cumulative filled_qty) so each
-  ORDER_UPDATE event applies only the incremental delta.
-</p>
-<div class="file-ref">Source: elysian_core/core/portfolio.py · elysian_core/core/shadow_book.py · elysian_core/core/order.py</div>
-
-<div class="diagram-wrap">
-<svg viewBox="0 0 1060 460" width="1060" height="460" xmlns="http://www.w3.org/2000/svg">
-<defs>
-  <marker id="bo" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-    <polygon points="0 0, 8 3, 0 6" fill="#58a6ff"/>
-  </marker>
-  <marker id="bog" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-    <polygon points="0 0, 8 3, 0 6" fill="#3fb950"/>
-  </marker>
-  <marker id="bor" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-    <polygon points="0 0, 8 3, 0 6" fill="#f85149"/>
-  </marker>
-  <marker id="boy" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-    <polygon points="0 0, 8 3, 0 6" fill="#d29922"/>
-  </marker>
-</defs>
-
-<!-- [*] → PENDING_NEW -->
-<circle cx="50" cy="180" r="16" fill="#58a6ff"/>
-<text x="50" y="185" font-size="10" fill="#0d1117" text-anchor="middle" font-weight="700">[*]</text>
-
-<!-- PENDING_NEW -->
-<rect x="100" y="155" width="145" height="50" rx="6" fill="#1f2d50" stroke="#3b82f6" stroke-width="2"/>
-<text x="172" y="178" font-size="11" font-weight="700" fill="#93c5fd" text-anchor="middle">PENDING_NEW</text>
-<text x="172" y="195" font-size="9" fill="#6e7681" text-anchor="middle">submitted, ack awaited</text>
-
-<!-- OPEN -->
-<rect x="310" y="155" width="120" height="50" rx="6" fill="#1a3020" stroke="#3fb950" stroke-width="2"/>
-<text x="370" y="178" font-size="11" font-weight="700" fill="#86efac" text-anchor="middle">OPEN</text>
-<text x="370" y="195" font-size="9" fill="#6e7681" text-anchor="middle">working on exchange</text>
-
-<!-- PARTIALLY_FILLED -->
-<rect x="310" y="280" width="145" height="50" rx="6" fill="#1e2a10" stroke="#84cc16" stroke-width="2"/>
-<text x="382" y="303" font-size="11" font-weight="700" fill="#bef264" text-anchor="middle">PARTIALLY_FILLED</text>
-<text x="382" y="320" font-size="9" fill="#6e7681" text-anchor="middle">incremental fills tracked</text>
-
-<!-- FILLED -->
-<rect x="560" y="155" width="120" height="50" rx="6" fill="#052e10" stroke="#4ade80" stroke-width="2.5"/>
-<text x="620" y="178" font-size="12" font-weight="700" fill="#4ade80" text-anchor="middle">FILLED</text>
-<text x="620" y="195" font-size="9" fill="#6e7681" text-anchor="middle">terminal · full fill</text>
-
-<!-- CANCELLED -->
-<rect x="560" y="280" width="120" height="50" rx="6" fill="#2d1010" stroke="#f85149" stroke-width="2.5"/>
-<text x="620" y="303" font-size="12" font-weight="700" fill="#fca5a5" text-anchor="middle">CANCELLED</text>
-<text x="620" y="320" font-size="9" fill="#6e7681" text-anchor="middle">terminal · no fill</text>
-
-<!-- REJECTED -->
-<rect x="100" y="280" width="120" height="50" rx="6" fill="#2d1010" stroke="#f85149" stroke-width="2"/>
-<text x="160" y="303" font-size="12" font-weight="700" fill="#fca5a5" text-anchor="middle">REJECTED</text>
-<text x="160" y="320" font-size="9" fill="#6e7681" text-anchor="middle">terminal · not placed</text>
-
-<!-- EXPIRED -->
-<rect x="760" y="210" width="110" height="50" rx="6" fill="#2d2010" stroke="#d29922" stroke-width="1.5"/>
-<text x="815" y="233" font-size="11" font-weight="700" fill="#fde68a" text-anchor="middle">EXPIRED</text>
-<text x="815" y="249" font-size="9" fill="#6e7681" text-anchor="middle">terminal · GTT/FOK</text>
-
-<!-- ── Arrows ─────────────────────────────────────────────────────── -->
-
-<!-- [*] → PENDING_NEW -->
-<line x1="66" y1="180" x2="100" y2="180" stroke="#58a6ff" stroke-width="2" marker-end="url(#bo)"/>
-
-<!-- PENDING_NEW → OPEN -->
-<line x1="245" y1="180" x2="310" y2="180" stroke="#3fb950" stroke-width="2" marker-end="url(#bog)"/>
-<text x="278" y="173" font-size="9.5" fill="#3fb950" text-anchor="middle">NEW/OPEN</text>
-<text x="278" y="195" font-size="8.5" fill="#6e7681" text-anchor="middle">[executionReport e=NEW]</text>
-
-<!-- PENDING_NEW → REJECTED -->
-<line x1="172" y1="205" x2="172" y2="280" stroke="#f85149" stroke-width="1.5" marker-end="url(#bor)"/>
-<text x="150" y="248" font-size="9.5" fill="#f85149" text-anchor="middle">REJECTED</text>
-
-<!-- OPEN → FILLED (full fill) -->
-<line x1="430" y1="180" x2="560" y2="180" stroke="#4ade80" stroke-width="2" marker-end="url(#bog)"/>
-<text x="495" y="173" font-size="9.5" fill="#4ade80" text-anchor="middle">FILLED</text>
-<text x="495" y="195" font-size="8.5" fill="#6e7681" text-anchor="middle">[filled_qty == orig_qty]</text>
-
-<!-- OPEN → PARTIALLY_FILLED -->
-<path d="M 370 205 Q 370 242 370 280" stroke="#84cc16" stroke-width="1.8" fill="none" marker-end="url(#bog)"/>
-<text x="405" y="248" font-size="9.5" fill="#84cc16" text-anchor="start">PARTIAL</text>
-<text x="405" y="262" font-size="8.5" fill="#6e7681" text-anchor="start">fill delta applied</text>
-
-<!-- OPEN → CANCELLED -->
-<path d="M 430 195 Q 530 195 530 305 Q 530 305 560 305" stroke="#f85149" stroke-width="1.5" fill="none" stroke-dasharray="5,3" marker-end="url(#bor)"/>
-<text x="510" y="255" font-size="9.5" fill="#f85149" text-anchor="middle">CANCELLED</text>
-
-<!-- PARTIALLY_FILLED → FILLED -->
-<path d="M 455 295 Q 510 255 560 185" stroke="#4ade80" stroke-width="1.8" fill="none" marker-end="url(#bog)"/>
-<text x="530" y="238" font-size="9.5" fill="#4ade80">FILLED</text>
-
-<!-- PARTIALLY_FILLED → CANCELLED -->
-<line x1="455" y1="305" x2="560" y2="305" stroke="#f85149" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#bor)"/>
-<text x="508" y="298" font-size="9.5" fill="#f85149" text-anchor="middle">CANCELLED</text>
-<text x="508" y="320" font-size="8.5" fill="#6e7681" text-anchor="middle">[partial then cancelled]</text>
-
-<!-- OPEN → EXPIRED -->
-<path d="M 430 185 Q 700 185 760 235" stroke="#d29922" stroke-width="1.2" fill="none" stroke-dasharray="4,3" marker-end="url(#boy)"/>
-<text x="620" y="176" font-size="9.5" fill="#d29922" text-anchor="middle">EXPIRED</text>
-
-<!-- ── Fill loop-back side effects ─────────────────────────────────── -->
-<rect x="760" y="340" width="280" height="100" rx="6" fill="#12192b" stroke="#374151" stroke-width="1"/>
-<text x="770" y="360" font-size="10" font-weight="600" fill="#93c5fd">On every FILLED / PARTIAL_FILLED:</text>
-<text x="770" y="376" font-size="9" fill="#6e7681">1. fill_delta = filled_qty - fill_tracker[order_id]</text>
-<text x="770" y="390" font-size="9" fill="#6e7681">2. _partial_release_lock(order_id, fill_delta)</text>
-<text x="770" y="404" font-size="9" fill="#6e7681">3. update_position(symbol, ±qty_delta, price)</text>
-<text x="770" y="418" font-size="9" fill="#6e7681">4. _refresh_derived() → NAV / weights / drawdown</text>
-<text x="770" y="432" font-size="9" fill="#6e7681">On terminal: release_order_lock(order_id)</text>
-
-<!-- ── Lock mechanics note ─────────────────────────────────────────── -->
-<rect x="30" y="360" width="310" height="80" rx="6" fill="#12192b" stroke="#374151" stroke-width="1"/>
-<text x="40" y="380" font-size="10" font-weight="600" fill="#fde68a">Locked balance (LIMIT orders only)</text>
-<text x="40" y="396" font-size="9" fill="#6e7681">BUY: lock quote = qty * price  (_locked_cash)</text>
-<text x="40" y="410" font-size="9" fill="#6e7681">SELL: lock base qty (_locked_quantities[symbol])</text>
-<text x="40" y="424" font-size="9" fill="#6e7681">Released proportionally per partial fill delta</text>
-<text x="40" y="438" font-size="9" fill="#6e7681">free_cash = _cash - _locked_cash</text>
-</svg>
-</div>
-
-<h3>Order Status Transition Rules</h3>
-<table>
-<tr><th>From status</th><th>Exchange event</th><th>To status</th><th>Terminal?</th><th>Side effects</th></tr>
-<tr><td>—</td><td>Order submitted</td><td><code>PENDING_NEW</code></td><td>No</td><td>Stored in _outstanding_orders; lock_for_order() if LIMIT</td></tr>
-<tr><td>PENDING_NEW</td><td>executionReport: NEW</td><td><code>OPEN</code></td><td>No</td><td>transition_to(OPEN)</td></tr>
-<tr><td>PENDING_NEW</td><td>executionReport: REJECTED</td><td><code>REJECTED</code></td><td>Yes</td><td>release_order_lock(); removed from _outstanding_orders</td></tr>
-<tr><td>OPEN</td><td>executionReport: PARTIALLY_FILLED</td><td><code>PARTIALLY_FILLED</code></td><td>No</td><td>update_fill(); incremental delta applied via fill_tracker; _partial_release_lock()</td></tr>
-<tr><td>OPEN / PARTIALLY_FILLED</td><td>executionReport: FILLED</td><td><code>FILLED</code></td><td>Yes</td><td>update_position(delta); release_order_lock(); _fill_tracker cleanup</td></tr>
-<tr><td>OPEN / PARTIALLY_FILLED</td><td>executionReport: CANCELED</td><td><code>CANCELLED</code></td><td>Yes</td><td>release_order_lock() releases remaining locked balance</td></tr>
-<tr><td>OPEN</td><td>executionReport: EXPIRED</td><td><code>EXPIRED</code></td><td>Yes</td><td>release_order_lock()</td></tr>
-</table>
-
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     SECTION 3 — BinanceUserDataClientManager connection FSM
-     ═══════════════════════════════════════════════════════════════════════════ -->
-<h2>3. BinanceUserDataClientManager — Connection States <span>connectors/BinanceDataConnectors.py</span></h2>
-<p class="desc">
-  The user-data WebSocket connection manager implements an implicit connection FSM
-  inside <code>_reader_loop()</code>. It uses the new Binance WebSocket API
-  (<code>wss://ws-api.binance.com:443/ws-api/v3</code>) with HMAC-SHA256 signing via
-  <code>userDataStream.subscribe.signature</code>, replacing the deprecated listenKey approach
-  retired 2026-02-20. On any connection error it reconnects with exponential backoff capped at 60s.
-</p>
-<div class="file-ref">Source: elysian_core/connectors/BinanceDataConnectors.py — class BinanceUserDataClientManager</div>
-
-<div class="diagram-wrap">
-<svg viewBox="0 0 1060 380" width="1060" height="380" xmlns="http://www.w3.org/2000/svg">
-<defs>
-  <marker id="cu" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-    <polygon points="0 0, 8 3, 0 6" fill="#58a6ff"/>
-  </marker>
-  <marker id="cug" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-    <polygon points="0 0, 8 3, 0 6" fill="#3fb950"/>
-  </marker>
-  <marker id="cur" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-    <polygon points="0 0, 8 3, 0 6" fill="#f85149"/>
-  </marker>
-  <marker id="cuy" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-    <polygon points="0 0, 8 3, 0 6" fill="#d29922"/>
-  </marker>
-</defs>
-
-<!-- STOPPED -->
-<rect x="30" y="150" width="120" height="50" rx="25" fill="#1f2937" stroke="#6e7681" stroke-width="2"/>
-<text x="90" y="172" font-size="11" font-weight="700" fill="#8b949e" text-anchor="middle">STOPPED</text>
-<text x="90" y="190" font-size="9" fill="#6e7681" text-anchor="middle">initial</text>
-
-<!-- CONNECTING -->
-<rect x="220" y="150" width="140" height="50" rx="6" fill="#1c2040" stroke="#58a6ff" stroke-width="2"/>
-<text x="290" y="172" font-size="11" font-weight="700" fill="#93c5fd" text-anchor="middle">CONNECTING</text>
-<text x="290" y="190" font-size="9" fill="#6e7681" text-anchor="middle">websockets.connect(WS_API_URL)</text>
-
-<!-- SUBSCRIBING -->
-<rect x="430" y="150" width="150" height="50" rx="6" fill="#1c2040" stroke="#58a6ff" stroke-width="2"/>
-<text x="505" y="172" font-size="11" font-weight="700" fill="#93c5fd" text-anchor="middle">SUBSCRIBING</text>
-<text x="505" y="190" font-size="9" fill="#6e7681" text-anchor="middle">userDataStream.subscribe.signature</text>
-
-<!-- CONNECTED -->
-<rect x="650" y="150" width="130" height="50" rx="6" fill="#0f2d20" stroke="#3fb950" stroke-width="2.5"/>
-<text x="715" y="172" font-size="12" font-weight="700" fill="#4ade80" text-anchor="middle">CONNECTED</text>
-<text x="715" y="190" font-size="9" fill="#6e7681" text-anchor="middle">async for raw in ws</text>
-
-<!-- RECONNECTING -->
-<rect x="430" y="280" width="160" height="60" rx="6" fill="#2d2010" stroke="#d29922" stroke-width="2"/>
-<text x="510" y="305" font-size="11" font-weight="700" fill="#fde68a" text-anchor="middle">RECONNECTING</text>
-<text x="510" y="322" font-size="9" fill="#6e7681" text-anchor="middle">await asyncio.sleep(delay)</text>
-<text x="510" y="336" font-size="9" fill="#d29922" text-anchor="middle">delay = min(delay*2, 60s)</text>
-
-<!-- FATAL_STOPPED -->
-<rect x="650" y="280" width="130" height="50" rx="6" fill="#2d1010" stroke="#f85149" stroke-width="2"/>
-<text x="715" y="303" font-size="11" font-weight="700" fill="#fca5a5" text-anchor="middle">FATAL STOP</text>
-<text x="715" y="320" font-size="9" fill="#6e7681" text-anchor="middle">subscribe failed, stop()</text>
-
-<!-- INTENTIONAL_STOP -->
-<rect x="850" y="150" width="170" height="50" rx="6" fill="#1c1c20" stroke="#6e7681" stroke-width="1.5"/>
-<text x="935" y="172" font-size="11" font-weight="700" fill="#8b949e" text-anchor="middle">INTENTIONALLY</text>
-<text x="935" y="188" font-size="11" font-weight="700" fill="#8b949e" text-anchor="middle">STOPPED</text>
-
-<!-- ── Arrows ─────────────────────────────────────────────────────── -->
-
-<!-- STOPPED → CONNECTING (start()) -->
-<line x1="150" y1="175" x2="220" y2="175" stroke="#58a6ff" stroke-width="2" marker-end="url(#cu)"/>
-<text x="185" y="168" font-size="9.5" fill="#58a6ff" text-anchor="middle">start()</text>
-<text x="185" y="190" font-size="8.5" fill="#6e7681" text-anchor="middle">_running=True</text>
-
-<!-- CONNECTING → SUBSCRIBING -->
-<line x1="360" y1="175" x2="430" y2="175" stroke="#58a6ff" stroke-width="2" marker-end="url(#cu)"/>
-<text x="395" y="168" font-size="9.5" fill="#58a6ff" text-anchor="middle">connected</text>
-<text x="395" y="190" font-size="8.5" fill="#6e7681" text-anchor="middle">WS handshake OK</text>
-
-<!-- SUBSCRIBING → CONNECTED -->
-<line x1="580" y1="175" x2="650" y2="175" stroke="#3fb950" stroke-width="2" marker-end="url(#cug)"/>
-<text x="615" y="168" font-size="9.5" fill="#3fb950" text-anchor="middle">status==200</text>
-<text x="615" y="190" font-size="8.5" fill="#6e7681" text-anchor="middle">reconnect_delay reset=1</text>
-
-<!-- SUBSCRIBING → FATAL_STOPPED (status != 200) -->
-<path d="M 505 200 Q 505 250 715 280" stroke="#f85149" stroke-width="1.5" fill="none" stroke-dasharray="5,3" marker-end="url(#cur)"/>
-<text x="580" y="245" font-size="9.5" fill="#f85149" text-anchor="middle">status != 200</text>
-
-<!-- CONNECTED → INTENTIONALLY_STOPPED (stop()) -->
-<line x1="780" y1="175" x2="850" y2="175" stroke="#6e7681" stroke-width="1.5" marker-end="url(#cu)"/>
-<text x="815" y="168" font-size="9.5" fill="#6e7681" text-anchor="middle">stop()</text>
-<text x="815" y="190" font-size="8.5" fill="#6e7681" text-anchor="middle">_running=False</text>
-
-<!-- CONNECTED → RECONNECTING (exception) -->
-<path d="M 715 200 Q 715 260 590 280" stroke="#d29922" stroke-width="1.8" fill="none" marker-end="url(#cuy)"/>
-<text x="690" y="245" font-size="9.5" fill="#d29922" text-anchor="middle">exception</text>
-<text x="690" y="259" font-size="8.5" fill="#6e7681" text-anchor="middle">connection error</text>
-
-<!-- CONNECTING → RECONNECTING (exception) -->
-<path d="M 290 200 Q 290 280 430 310" stroke="#d29922" stroke-width="1.5" fill="none" stroke-dasharray="5,3" marker-end="url(#cuy)"/>
-<text x="300" y="258" font-size="9.5" fill="#d29922" text-anchor="middle">exception</text>
-
-<!-- RECONNECTING → CONNECTING (loop back) -->
-<path d="M 430 295 Q 290 355 290 240 Q 290 210 290 200" stroke="#d29922" stroke-width="1.8" fill="none" marker-end="url(#cu)"/>
-<text x="210" y="340" font-size="9.5" fill="#d29922" text-anchor="middle">sleep done, retry</text>
-<text x="210" y="356" font-size="8.5" fill="#6e7681" text-anchor="middle">[_running == True]</text>
-
-<!-- ── Dispatch box ─────────────────────────────────────────────────── -->
-<rect x="760" y="270" width="280" height="90" rx="6" fill="#12192b" stroke="#374151" stroke-width="1"/>
-<text x="770" y="290" font-size="10" font-weight="600" fill="#4ade80">Events dispatched when CONNECTED:</text>
-<text x="770" y="308" font-size="9" fill="#6e7681">executionReport  →  OrderUpdateEvent (via EventBus)</text>
-<text x="770" y="322" font-size="9" fill="#6e7681">balanceUpdate   →  BalanceUpdateEvent (via EventBus)</text>
-<text x="770" y="336" font-size="9" fill="#6e7681">Raw dict also sent to all _subscribers (sync callbacks)</text>
-<text x="770" y="350" font-size="9" fill="#6e7681">Envelope format: {"subscriptionId":0, "event":{...}}</text>
-</svg>
-</div>
-
-<h3>Connection State Details</h3>
-<table>
-<tr><th>State</th><th>Trigger</th><th>To state</th><th>Notes</th></tr>
-<tr><td>STOPPED</td><td><code>start()</code> called</td><td>CONNECTING</td><td><code>_running=True</code>; <code>_reader_task</code> created as asyncio.Task</td></tr>
-<tr><td>CONNECTING</td><td>websockets.connect() succeeds</td><td>SUBSCRIBING</td><td>Sends <code>userDataStream.subscribe.signature</code> with HMAC-SHA256 signed params</td></tr>
-<tr><td>CONNECTING</td><td>Any exception</td><td>RECONNECTING</td><td>Exponential backoff; initial delay = 1s</td></tr>
-<tr><td>SUBSCRIBING</td><td>Response status == 200</td><td>CONNECTED</td><td>Backoff reset to 1s; begins <code>async for raw in ws</code></td></tr>
-<tr><td>SUBSCRIBING</td><td>Response status != 200</td><td>FATAL STOP</td><td>Logs error; breaks loop; task exits</td></tr>
-<tr><td>CONNECTED</td><td>Any exception</td><td>RECONNECTING</td><td><code>delay = min(delay * 2, 60)</code> — max 60s backoff</td></tr>
-<tr><td>CONNECTED</td><td><code>stop()</code> called</td><td>INTENTIONALLY STOPPED</td><td><code>_running=False</code>; CancelledError breaks loop cleanly</td></tr>
-<tr><td>RECONNECTING</td><td>sleep() completes &amp; <code>_running==True</code></td><td>CONNECTING</td><td>Loops back to next <code>async with websockets.connect()</code></td></tr>
-</table>
-
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     SECTION 4 — Combined event flow
-     ═══════════════════════════════════════════════════════════════════════════ -->
-<h2>4. Full Event Flow — OrderUpdateEvent lifecycle <span>how all FSMs interact</span></h2>
-<p class="desc">
-  The diagram below shows how a single OrderUpdateEvent touches all three FSMs and both ledgers.
-</p>
-
-<div class="diagram-wrap">
-<svg viewBox="0 0 1060 300" width="1060" height="300" xmlns="http://www.w3.org/2000/svg">
-<defs>
-  <marker id="ef" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-    <polygon points="0 0, 8 3, 0 6" fill="#58a6ff"/>
-  </marker>
-</defs>
-
-<!-- Swimlane labels -->
-<rect x="0" y="0" width="1060" height="28" rx="0" fill="#1f2937"/>
-<text x="90" y="18" font-size="10" fill="#6e7681" text-anchor="middle">Binance Exchange</text>
-<text x="280" y="18" font-size="10" fill="#6e7681" text-anchor="middle">UserDataMgr</text>
-<text x="450" y="18" font-size="10" fill="#6e7681" text-anchor="middle">EventBus</text>
-<text x="620" y="18" font-size="10" fill="#6e7681" text-anchor="middle">Portfolio</text>
-<text x="790" y="18" font-size="10" fill="#6e7681" text-anchor="middle">ShadowBook</text>
-<text x="960" y="18" font-size="10" fill="#6e7681" text-anchor="middle">RebalanceFSM</text>
-
-<!-- Swimlane separators -->
-<line x1="180" y1="0" x2="180" y2="300" stroke="#21262d" stroke-width="1"/>
-<line x1="370" y1="0" x2="370" y2="300" stroke="#21262d" stroke-width="1"/>
-<line x1="540" y1="0" x2="540" y2="300" stroke="#21262d" stroke-width="1"/>
-<line x1="710" y1="0" x2="710" y2="300" stroke="#21262d" stroke-width="1"/>
-<line x1="880" y1="0" x2="880" y2="300" stroke="#21262d" stroke-width="1"/>
-
-<!-- Step 1: exchange → UserDataMgr -->
-<rect x="30" y="50" width="120" height="36" rx="4" fill="#1c2040" stroke="#3b82f6" stroke-width="1"/>
-<text x="90" y="70" font-size="9.5" fill="#93c5fd" text-anchor="middle">executionReport</text>
-<text x="90" y="84" font-size="9" fill="#6e7681" text-anchor="middle">via WS API</text>
-
-<line x1="150" y1="68" x2="196" y2="68" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#ef)"/>
-
-<!-- Step 2: UserDataMgr → EventBus -->
-<rect x="196" y="50" width="140" height="36" rx="4" fill="#1c2040" stroke="#3b82f6" stroke-width="1"/>
-<text x="266" y="70" font-size="9.5" fill="#93c5fd" text-anchor="middle">_parse_execution_to_order()</text>
-<text x="266" y="84" font-size="9" fill="#6e7681" text-anchor="middle">OrderUpdateEvent built</text>
-
-<line x1="336" y1="68" x2="380" y2="68" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#ef)"/>
-
-<!-- Step 3: EventBus → Portfolio -->
-<rect x="380" y="50" width="130" height="36" rx="4" fill="#1c2040" stroke="#58a6ff" stroke-width="1"/>
-<text x="445" y="70" font-size="9.5" fill="#93c5fd" text-anchor="middle">publish(OrderUpdateEvent)</text>
-<text x="445" y="84" font-size="9" fill="#6e7681" text-anchor="middle">fan-out to subscribers</text>
-
-<line x1="510" y1="68" x2="556" y2="68" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#ef)"/>
-
-<!-- Step 4: Portfolio._on_order_update -->
-<rect x="556" y="50" width="120" height="36" rx="4" fill="#1f3050" stroke="#58a6ff" stroke-width="1.5"/>
-<text x="616" y="70" font-size="9.5" fill="#93c5fd" text-anchor="middle">_on_order_update()</text>
-<text x="616" y="84" font-size="9" fill="#6e7681" text-anchor="middle">_update_order()</text>
-
-<line x1="620" y1="86" x2="620" y2="130" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#ef)"/>
-
-<!-- Step 5: fill_delta + update_position -->
-<rect x="556" y="130" width="120" height="50" rx="4" fill="#1a3020" stroke="#3fb950" stroke-width="1"/>
-<text x="616" y="150" font-size="9" fill="#4ade80" text-anchor="middle">fill_delta computed</text>
-<text x="616" y="164" font-size="9" fill="#6e7681" text-anchor="middle">_partial_release_lock()</text>
-<text x="616" y="178" font-size="9" fill="#6e7681" text-anchor="middle">update_position()</text>
-
-<!-- Step 5b: ShadowBook._on_order_update (also subscribes) -->
-<line x1="510" y1="90" x2="730" y2="100" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#ef)"/>
-<rect x="726" y="50" width="120" height="36" rx="4" fill="#1f1435" stroke="#a855f7" stroke-width="1.5"/>
-<text x="786" y="70" font-size="9.5" fill="#d8b4fe" text-anchor="middle">_on_order_update()</text>
-<text x="786" y="84" font-size="9" fill="#6e7681" text-anchor="middle">routes by strategy_id</text>
-
-<line x1="786" y1="86" x2="786" y2="130" stroke="#a855f7" stroke-width="1.5" marker-end="url(#ef)"/>
-
-<rect x="726" y="130" width="120" height="50" rx="4" fill="#1a1228" stroke="#a855f7" stroke-width="1"/>
-<text x="786" y="150" font-size="9" fill="#d8b4fe" text-anchor="middle">fill_delta computed</text>
-<text x="786" y="164" font-size="9" fill="#6e7681" text-anchor="middle">_partial_release_lock()</text>
-<text x="786" y="178" font-size="9" fill="#6e7681" text-anchor="middle">update_position()</text>
-
-<!-- RebalanceFSM subscribes to RebalanceCompleteEvent only, not OrderUpdate -->
-<rect x="896" y="50" width="140" height="36" rx="4" fill="#1f1435" stroke="#6e7681" stroke-width="1" stroke-dasharray="4,2"/>
-<text x="966" y="70" font-size="9.5" fill="#8b949e" text-anchor="middle">RebalanceFSM</text>
-<text x="966" y="84" font-size="9" fill="#6e7681" text-anchor="middle">not subscribed to OrderUpdate</text>
-
-<!-- Note at bottom -->
-<rect x="30" y="220" width="1000" height="60" rx="6" fill="#12192b" stroke="#374151" stroke-width="1"/>
-<text x="40" y="240" font-size="10" font-weight="600" fill="#fde68a">Key design invariant:</text>
-<text x="40" y="256" font-size="9" fill="#6e7681">Both Portfolio and ShadowBook subscribe independently to ORDER_UPDATE. ShadowBook filters by _order_strategy_map[order_id] == strategy_id.</text>
-<text x="40" y="270" font-size="9" fill="#6e7681">fill_tracker prevents double-counting: each event applies only the incremental delta (new_filled_qty - last_known_filled_qty).</text>
-</svg>
-</div>
-
 </body>
 </html>

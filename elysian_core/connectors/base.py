@@ -210,10 +210,6 @@ class AbstractDataFeed(ABC):
         """Configure the feed for a specific asset and interval."""
         ...
 
-    @abstractmethod
-    async def __call__(self):
-        """Open the connection and run the feed until cancelled."""
-        ...
 
     def __str__(self) -> str:
         return f"{self.__class__.__name__}({self._name})"
@@ -309,7 +305,29 @@ class AbstractClientManager(ABC):
     async def start(self):
         """Bring the manager online (open socket, etc.)."""
         ...
+        
+    @abstractmethod
+    async def stop(self):
+        """Shut down the manager and all associated tasks."""
+        ...
 
+
+    @abstractmethod
+    async def run_multiplex_feeds(self):
+        """Reader/worker pool entry point."""
+        ...
+        
+
+
+class OrderBookClientManager(AbstractClientManager):
+    """Specialised manager for order-book feeds."""
+    
+    pass
+
+
+class KlineClientManager(AbstractClientManager):
+    """Specialised manager for kline feeds."""
+    
     @abstractmethod
     def register_feed(self, feed: Any):
         ...
@@ -317,21 +335,17 @@ class AbstractClientManager(ABC):
     @abstractmethod
     def unregister_feed(self, symbol: str):
         ...
-
+        
     @abstractmethod
-    async def run_multiplex_feeds(self):
-        """Reader/worker pool entry point."""
+    def get_feed(self, symbol: str) -> Optional[Any]:
         ...
-
-
-class OrderBookClientManager(AbstractClientManager):
-    """Specialised manager for order-book feeds."""
+    
+    def set_event_bus(self, event_bus):
+        """Inject an EventBus so order book updates can be published."""
+        self._event_bus = event_bus
+    
     pass
 
-
-class KlineClientManager(AbstractClientManager):
-    """Specialised manager for kline feeds."""
-    pass
 
 
 
@@ -467,7 +481,7 @@ class SpotExchangeConnector(ABC):
         
         
     @abstractmethod
-    async def cancel_order(self, symbol: str, order_id: str):
+    async def cancel_order(self, symbol: str, order_id: int):
         """Cancel an existing order"""
         ...
         

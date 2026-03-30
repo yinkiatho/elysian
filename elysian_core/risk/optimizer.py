@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional, Tuple, Union, TYPE_CHECKING
 from elysian_core.core.portfolio import Portfolio
 from elysian_core.core.signals import TargetWeights, ValidatedWeights
 from elysian_core.risk.risk_config import RiskConfig
+from elysian_core.core.enums import Venue
 import elysian_core.utils.logger as log
 
 if TYPE_CHECKING:
@@ -22,19 +23,38 @@ logger = log.setup_custom_logger("root")
 
 
 class PortfolioOptimizer:
+    '''
+    Portfolio risk optimizer that validates and adjusts strategy weight signals
+    against risk constraints defined in a RiskConfig.  It applies a series of
+    transformations to project target weights onto the risk-feasible set, including:    
+        1. Symbol whitelist / blacklist filtering
+        2. Per-asset weight clipping
+        3. Total-exposure scaling
+        4. Cash-floor enforcement
+        5. Turnover capping (best-effort without mark prices)
+        
+        
+    This Optimizer is on the Strategy/ShadowBook Level
+    
+    '''
 
-    def __init__(self, risk_config: RiskConfig, portfolio: Union[Portfolio, "ShadowBook"],
-                 cfg: Optional[Any] = None):
+    def __init__(self, risk_config: RiskConfig,
+                        portfolio: 'ShadowBook',
+                        cfg: Optional[Any] = None):
         self._config = risk_config
         self._portfolio = portfolio
         self.cfg = cfg
-        self._last_rebalance_ts: Dict[int, int] = {}  # per-strategy rate limiting
+        self._last_rebalance_ts: int = None  # per-strategy rate limiting
 
     # ── Public ───────────────────────────────────────────────────────────────
 
     @property
     def config(self) -> RiskConfig:
         return self._config
+    
+    @property
+    def venue(self) -> Optional[Venue]:
+        return self._portfolio._venue
 
     @config.setter
     def config(self, new_config: RiskConfig):
@@ -60,53 +80,32 @@ class PortfolioOptimizer:
             f"sum={sum(target.weights.values()):.4f} ({target.weights})"
         )
 
-        # 1. Rate limit (per-strategy via ctx["strategy_id"])
-        strategy_id = ctx.get("strategy_id", 0)
-        last_ts = self._last_rebalance_ts.get(strategy_id, 0)
-        if last_ts > 0:
-            elapsed = now_ms - last_ts
-            if elapsed < cfg.min_rebalance_interval_ms:
-                logger.warning(
-                    f"[Optimizer] REJECTED — rate limit for strategy {strategy_id}: "
-                    f"{elapsed}ms < {cfg.min_rebalance_interval_ms}ms"
-                )
-                return ValidatedWeights(
-                    original=target,
-                    weights={},
-                    clipped={},
-                    rejected=True,
-                    rejection_reason=(
-                        f"Rate limit: {elapsed}ms since last rebalance "
-                        f"(min {cfg.min_rebalance_interval_ms}ms)"
-                    ),
-                    timestamp=now_ms,
-                )
-
+        
         weights = dict(target.weights)  # mutable copy
         clips: Dict[str, float] = {}
 
-        # 2. Symbol filter
+        # 1. Symbol filter
         pre_filter = len(weights)
         weights = self._filter_symbols(weights)
         if len(weights) < pre_filter:
             logger.info(f"[Optimizer] Symbol filter: {pre_filter} -> {len(weights)} symbols")
 
-        # 3. Per-asset clip
+        # 2. Per-asset clip
         weights, clips = self._clip_per_asset(weights)
         if clips:
             logger.info(f"[Optimizer] Clipped {len(clips)} symbols: {clips}")
 
-        # 4. Total exposure scaling
+        # 3. Total exposure scaling
         weights = self._scale_exposure(weights)
 
-        # 5. Cash floor
-        weights = self._enforce_cash_floor(weights)
+        # 4. Cash floor
+        #weights = self._enforce_cash_floor(weights)
 
-        # 6. Turnover cap (best-effort without mark prices;
+        # 5. Turnover cap (best-effort without mark prices;
         #    uses raw weight delta as proxy)
-        weights = self._cap_turnover(weights, target.weights)
+        weights = self._cap_turnover(weights, original=self._portfolio.current_weights())
 
-        self._last_rebalance_ts[strategy_id] = now_ms
+        self._last_rebalance_ts = now_ms
 
         logger.info(
             f"[Optimizer] Validated: {len(weights)} symbols, "
