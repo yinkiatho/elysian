@@ -1,1149 +1,682 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Elysian Trading System — Architecture Diagrams</title>
-    <script type="module">
-        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-        mermaid.initialize({
-            startOnLoad: true,
-            theme: 'default',
-            flowchart: { curve: 'basis', padding: 20 },
-            sequence: { mirrorActors: false },
-            themeVariables: {
-                primaryColor: '#dbeafe',
-                primaryTextColor: '#1e3a5f',
-                primaryBorderColor: '#2563eb',
-                lineColor: '#2563eb',
-                secondaryColor: '#eff6ff',
-                tertiaryColor: '#bfdbfe',
-                fontSize: '14px'
-            }
-        });
-    </script>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-            background: #f8f9fa;
-            color: #1a1a2e;
-            padding: 40px 20px;
-            line-height: 1.6;
-        }
-        h1 {
-            text-align: center;
-            font-size: 2.2rem;
-            font-weight: 300;
-            margin-bottom: 8px;
-            color: #1a1a2e;
-            letter-spacing: 2px;
-        }
-        h1 span { color: #2563eb; font-weight: 600; }
-        .subtitle {
-            text-align: center;
-            color: #6b7280;
-            margin-bottom: 50px;
-            font-size: 1rem;
-        }
-        h2 {
-            font-size: 1.5rem;
-            font-weight: 400;
-            margin: 50px 0 10px;
-            padding-bottom: 8px;
-            border-bottom: 1px solid #dee2e6;
-            color: #2563eb;
-        }
-        h2 span { color: #6b7280; font-size: 0.9rem; font-weight: 300; margin-left: 12px; }
-        h3 { color: #374151; font-size: 1.1rem; margin: 24px 0 10px; font-weight: 500; }
-        p.desc {
-            color: #4b5563;
-            margin-bottom: 20px;
-            max-width: 900px;
-            font-size: 0.95rem;
-        }
-        .mermaid {
-            background: #ffffff;
-            border: 1px solid #dee2e6;
-            border-radius: 12px;
-            padding: 30px 20px;
-            margin: 20px 0 40px;
-            overflow-x: auto;
-        }
-        .mermaid svg { max-width: 100%; }
-        .legend {
-            display: flex;
-            gap: 24px;
-            flex-wrap: wrap;
-            margin: 10px 0 20px;
-            font-size: 0.85rem;
-            color: #6b7280;
-        }
-        .legend-item {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .legend-color {
-            width: 14px;
-            height: 14px;
-            border-radius: 3px;
-            border: 1px solid #dee2e6;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 15px 0 30px;
-            font-size: 0.9rem;
-        }
-        th {
-            background: #e8f0fe;
-            color: #1d4ed8;
-            text-align: left;
-            padding: 10px 14px;
-            border-bottom: 2px solid #c7d7fd;
-        }
-        td {
-            padding: 8px 14px;
-            border-bottom: 1px solid #e5e7eb;
-            color: #374151;
-        }
-        tr:nth-child(odd) td { background: #f9fafb; }
-        tr:hover td { background: #f0f4ff; }
-        code {
-            background: #e8f0fe;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 0.88em;
-            color: #1d4ed8;
-        }
-        .container { max-width: 1400px; margin: 0 auto; }
-        .file-ref {
-            color: #6b7280;
-            font-size: 0.82rem;
-            font-style: italic;
-            margin-top: -12px;
-            margin-bottom: 16px;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Elysian Trading System — Architecture Diagram</title>
+<style>
+/* ── Reset & base ─────────────────────────────────────────────────────── */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #0d1117;
+  color: #c9d1d9;
+  padding: 40px 24px 80px;
+  line-height: 1.6;
+  min-width: 900px;
+}
+h1 {
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 300;
+  letter-spacing: 3px;
+  color: #e6edf3;
+  margin-bottom: 6px;
+}
+h1 span { color: #58a6ff; font-weight: 600; }
+.subtitle {
+  text-align: center;
+  color: #6e7681;
+  font-size: 0.9rem;
+  margin-bottom: 60px;
+}
+h2 {
+  font-size: 1.3rem;
+  font-weight: 400;
+  margin: 56px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #21262d;
+  color: #58a6ff;
+}
+h2 span { color: #6e7681; font-size: 0.85rem; font-weight: 300; margin-left: 12px; }
+p.desc {
+  color: #8b949e;
+  font-size: 0.9rem;
+  max-width: 860px;
+  margin-bottom: 24px;
+}
+/* ── Diagram canvas ────────────────────────────────────────────────────── */
+.diagram-wrap {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  padding: 32px 24px;
+  margin: 0 0 40px;
+  overflow-x: auto;
+}
+svg { font-family: 'Segoe UI', system-ui, sans-serif; display: block; margin: 0 auto; }
+/* ── Tables ────────────────────────────────────────────────────────────── */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  margin: 12px 0 32px;
+}
+th {
+  background: #1f2937;
+  color: #93c5fd;
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 2px solid #374151;
+}
+td {
+  padding: 8px 14px;
+  border-bottom: 1px solid #21262d;
+  color: #c9d1d9;
+  vertical-align: top;
+}
+tr:hover td { background: #161b22; }
+code {
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 0.82rem;
+  background: #1f2937;
+  color: #79c0ff;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 20px;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+.tag-blue { background: #1d4ed8; color: #bfdbfe; }
+.tag-green { background: #065f46; color: #a7f3d0; }
+.tag-amber { background: #92400e; color: #fde68a; }
+.tag-purple { background: #5b21b6; color: #ddd6fe; }
+.tag-red { background: #7f1d1d; color: #fecaca; }
+.tag-teal { background: #134e4a; color: #99f6e4; }
+</style>
 </head>
 <body>
-<div class="container">
-
-    <h1><span>ELYSIAN</span> Trading System</h1>
-    <p class="subtitle">Event-driven, multi-venue quantitative trading infrastructure</p>
-
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>1. High-Level 6-Stage Pipeline <span>End-to-end data flow</span></h2>
-    <p class="desc">
-        Market data enters from the left (Stage 1), flows through feature computation, alpha
-        generation, risk validation, and execution, then exits as exchange orders on the right.
-        The return path (fills, balance updates) feeds back through the EventBus.
-        The RebalanceFSM autonomously drives Stages 3-5 on a timer or signal basis.
-    </p>
-    <div class="mermaid">
-        graph LR
-            subgraph S1["Stage 1: Market Data"]
-                WS["WebSocket Streams\nKline @1s / OB @100ms"]
-                UD["User Data Stream\nfills + balances"]
-            end
-
-            subgraph S2["Stage 2: Feature Compute"]
-                KF["KlineFeed\nOHLCV + rolling vol\n60-sample history"]
-                OBF["OrderBookFeed\nL2 SortedDict depth\nbid/ask/mid/spread"]
-                PF["Portfolio\nmark prices + weights\nNAV + drawdown + fills\nKLINE + BALANCE + ORDER_UPDATE"]
-                SBF["ShadowBook (per-strategy)\nvirtual positions + cash\nNAV + PnL\nORDER_UPDATE (filtered by strategy_id)"]
-            end
-
-            subgraph S3["Stage 3: Strategy / Alpha"]
-                SS["SpotStrategy\non_kline / on_orderbook_update\ncompute_weights / run_forever"]
-                RFSM["RebalanceFSM\ntimer_tick / signal\nIDLE -> COMPUTING -> VALIDATING\n-> EXECUTING -> COOLDOWN -> IDLE"]
-            end
-
-            subgraph S4["Stage 4: Risk"]
-                OP["PortfolioOptimizer\nvalidate"]
-                RC["RiskConfig\nper-asset / exposure\ncash floor / turnover"]
-            end
-
-            subgraph S5["Stage 5: Execution"]
-                EE["ExecutionEngine\nexecute"]
-                OI["OrderIntents\nsells first then buys\nstep_size rounding"]
-            end
-
-            subgraph S6["Stage 6: Exchange"]
-                EX["SpotExchangeConnector\nplace_market_order\nplace_limit_order"]
-            end
-
-            WS --> KF
-            WS --> OBF
-            UD --> PF
-            UD -.->|"OrderUpdateEvent"| SBF
-            KF -->|"KlineEvent"| SS
-            OBF -->|"OBUpdateEvent"| SS
-            PF -.->|"weights + NAV"| SS
-            SS -->|"request_rebalance\nor timer_tick"| RFSM
-            RFSM -->|"compute_weights"| SS
-            RFSM -->|"TargetWeights"| OP
-            RC -.-> OP
-            OP -->|"ValidatedWeights"| EE
-            EE --> OI
-            OI --> EX
-            EX -.->|"OrderUpdateEvent"| SS
-            EX -.->|"BalanceUpdateEvent"| PF
-            RFSM -->|"RebalanceCompleteEvent"| SS
-
-            style S1 fill:#fef2f2,stroke:#ef4444,color:#991b1b
-            style S2 fill:#fefce8,stroke:#ca8a04,color:#713f12
-            style S3 fill:#f0fdf4,stroke:#16a34a,color:#166534
-            style S4 fill:#eff6ff,stroke:#2563eb,color:#1e40af
-            style S5 fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
-            style S6 fill:#ecfeff,stroke:#0891b2,color:#155e75
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>2. EventBus Architecture <span>Pub/sub wiring</span></h2>
-    <p class="desc">
-        All market data events flow through a single in-process EventBus. Publishers (client manager
-        workers, user data stream, RebalanceFSM) emit typed frozen events. Subscribers (strategy hooks,
-        portfolio) receive them sequentially with natural backpressure. Error isolation via try/except
-        at each dispatch wrapper ensures one failed subscriber cannot block others.
-    </p>
-    <p class="file-ref">core/event_bus.py &mdash; EventBus &bull; core/events.py &mdash; 7 EventType variants</p>
-    <div class="mermaid">
-        graph TB
-            subgraph Publishers["Event Publishers"]
-                KW["Kline Workers\n4 async workers per manager"]
-                OBW["OB Workers\n4 async workers per manager"]
-                UDM["UserData Manager\nreader loop\nexecutionReport + balanceUpdate"]
-                RFSM2["RebalanceFSM\nRebalanceCycleEvent\nRebalanceCompleteEvent"]
-            end
-
-            EB["EventBus\nsubscribe#40;event_type, callback#41;\npublish#40;event#41;\nSequential dispatch\nBackpressure-aware"]
-
-            subgraph Subscribers["Event Subscribers"]
-                DK["strategy._dispatch_kline"]
-                DOB["strategy._dispatch_ob"]
-                DO["strategy._dispatch_order"]
-                DB["strategy._dispatch_balance"]
-                DR["strategy._dispatch_rebalance"]
-                PK["portfolio._on_kline"]
-                PB["portfolio._on_balance"]
-                PO["portfolio._on_order_update"]
-                SBO["shadow_book._on_order_update\n(per-strategy fill attribution)"]
-            end
-
-            subgraph Hooks["Strategy Hooks - user overrides"]
-                OK["on_kline#40;KlineEvent#41;"]
-                OOB["on_orderbook_update#40;OrderBookUpdateEvent#41;"]
-                OO["on_order_update#40;OrderUpdateEvent#41;"]
-                OBU["on_balance_update#40;BalanceUpdateEvent#41;"]
-                ORC["on_rebalance_complete#40;RebalanceCompleteEvent#41;"]
-            end
-
-            KW -->|"KlineEvent"| EB
-            OBW -->|"OBUpdateEvent"| EB
-            UDM -->|"OrderUpdateEvent\nBalanceUpdateEvent"| EB
-            RFSM2 -->|"RebalanceCycleEvent\nRebalanceCompleteEvent"| EB
-
-            EB --> DK
-            EB --> DOB
-            EB --> DO
-            EB --> DB
-            EB --> DR
-            EB --> PK
-            EB --> PB
-            EB --> PO
-            EB --> SBO
-
-            DK -->|"try/except"| OK
-            DOB -->|"try/except"| OOB
-            DO -->|"try/except"| OO
-            DB -->|"try/except"| OBU
-            DR -->|"try/except"| ORC
-
-            style EB fill:#dbeafe,stroke:#2563eb,stroke-width:3px,color:#1e3a5f
-            style Publishers fill:#fef2f2,stroke:#ef4444,color:#991b1b
-            style Subscribers fill:#ecfeff,stroke:#0891b2,color:#155e75
-            style Hooks fill:#f0fdf4,stroke:#16a34a,color:#166534
-    </div>
-
-    <h3>Event Types Reference</h3>
-    <table>
-        <tr><th>EventType</th><th>Dataclass</th><th>Key Fields</th><th>Published By</th></tr>
-        <tr><td><code>KLINE</code></td><td><code>KlineEvent</code></td><td>symbol, venue, kline (Kline), timestamp</td><td>KlineClientManager workers</td></tr>
-        <tr><td><code>ORDERBOOK_UPDATE</code></td><td><code>OrderBookUpdateEvent</code></td><td>symbol, venue, orderbook (OrderBook), timestamp</td><td>OrderBookClientManager workers</td></tr>
-        <tr><td><code>ORDER_UPDATE</code></td><td><code>OrderUpdateEvent</code></td><td>symbol, venue, order (Order), timestamp</td><td>UserData stream (executionReport) &mdash; consumed by Portfolio <code>_on_order_update</code> (aggregate fills) and ShadowBook <code>_on_order_update</code> (per-strategy attribution via <code>_order_strategy_map</code>)</td></tr>
-        <tr><td><code>BALANCE_UPDATE</code></td><td><code>BalanceUpdateEvent</code></td><td>asset, venue, delta, new_balance, timestamp</td><td>UserData stream (balanceUpdate)</td></tr>
-        <tr><td><code>REBALANCE_COMPLETE</code></td><td><code>RebalanceCompleteEvent</code></td><td>result (RebalanceResult), validated_weights, timestamp</td><td>RebalanceFSM._on_enter_executing</td></tr>
-        <tr><td><code>LIFECYCLE</code></td><td><code>LifecycleEvent</code></td><td>component, old_state, new_state, timestamp</td><td>Strategy/Runner state changes</td></tr>
-        <tr><td><code>REBALANCE_CYCLE</code></td><td><code>RebalanceCycleEvent</code></td><td>old_state, new_state, trigger, timestamp, metadata</td><td>RebalanceFSM on every transition</td></tr>
-    </table>
-
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>3. RebalanceFSM-Driven Pipeline <span>Stages 3-5 via compute -> validate -> execute -> cooldown</span></h2>
-    <p class="desc">
-        The RebalanceFSM replaces direct <code>submit_weights()</code> calls with an explicit state machine.
-        On each timer tick or <code>request_rebalance()</code> signal, it drives the full cycle:
-        <code>compute_weights()</code> &rarr; <code>optimizer.validate()</code> &rarr; <code>execution_engine.execute()</code> &rarr; cooldown.
-        Each stage has a dedicated callback; failures and empty signals route to appropriate recovery states.
-    </p>
-    <p class="file-ref">core/rebalance_fsm.py &mdash; RebalanceFSM &bull; core/fsm.py &mdash; BaseFSM</p>
-    <div class="mermaid">
-        graph TD
-            IDLE["IDLE\nAwaiting timer_tick or signal"] -->|"timer_tick / signal"| COMP
-            COMP["COMPUTING\n_on_enter_computing\nCalls strategy.compute_weights#40;#41;"]
-            COMP -->|"weights_ready\nweights dict is non-empty"| VAL
-            COMP -->|"no_signal\nempty/None/exception"| IDLE
-
-            VAL["VALIDATING\n_on_enter_validating\nCalls optimizer.validate#40;TargetWeights#41;"]
-            VAL -->|"accepted\nvalidated.rejected == False"| EXEC
-            VAL -->|"rejected\nvalidated.rejected == True\nor exception"| COOL
-
-            EXEC["EXECUTING\n_on_enter_executing\nCalls execution_engine.execute#40;validated#41;\nPublishes RebalanceCompleteEvent"]
-            EXEC -->|"complete\nRebalanceResult returned"| COOL
-            EXEC -->|"failed\nexception raised"| ERR
-
-            COOL["COOLDOWN\n_on_enter_cooldown\ncall_later#40;cooldown_s#41;"]
-            COOL -->|"cooldown_done\ntimer fires _fire_cooldown_done"| IDLE
-
-            ERR["ERROR\n_on_enter_error\nLogs error, auto-retries"]
-            ERR -->|"retry\ncall_later#40;cooldown_s#41;"| IDLE
-
-            SUSP["SUSPENDED\n_on_enter_suspended\nTimer cancelled, pending cleared"]
-            IDLE -.->|"suspend #40;wildcard#41;"| SUSP
-            COMP -.->|"suspend"| SUSP
-            VAL -.->|"suspend"| SUSP
-            EXEC -.->|"suspend"| SUSP
-            COOL -.->|"suspend"| SUSP
-            ERR -.->|"suspend"| SUSP
-            SUSP -->|"resume\n_on_resume\nReschedules timer"| IDLE
-
-            style IDLE fill:#f0fdf4,stroke:#16a34a,color:#166534
-            style COMP fill:#fefce8,stroke:#ca8a04,color:#713f12
-            style VAL fill:#eff6ff,stroke:#2563eb,color:#1e40af
-            style EXEC fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
-            style COOL fill:#ecfeff,stroke:#0891b2,color:#155e75
-            style ERR fill:#fef2f2,stroke:#dc2626,color:#991b1b
-            style SUSP fill:#f3f4f6,stroke:#9ca3af,color:#4b5563
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>4. Risk Constraint Pipeline <span>PortfolioOptimizer.validate() flow</span></h2>
-    <p class="desc">
-        Each constraint step projects the weight vector onto a feasible set. Steps execute
-        sequentially &mdash; the output of one feeds into the next. The optimizer is a stateless
-        constraint projector, not a Markowitz optimizer. RiskConfig is intentionally mutable
-        so limits can be tightened at runtime (e.g. during volatility spikes).
-    </p>
-    <p class="file-ref">risk/optimizer.py &mdash; PortfolioOptimizer &bull; risk/risk_config.py &mdash; RiskConfig</p>
-    <div class="mermaid">
-        graph TD
-            IN["Input: TargetWeights\nETHUSDT=0.50  BTCUSDT=0.40  SOLUSDT=0.20"]
-
-            R1["1. Rate Limit\nmin_rebalance_interval_ms: 60000\nelapsed since _last_rebalance_ts"]
-            R1F{{"Elapsed lt 60s?"}}
-            R1R["REJECTED\nValidatedWeights#40;rejected=True#41;\nRate limit: 45000ms lt 60000ms"]
-
-            R2["2. Symbol Filter\n_filter_symbols#40;#41;\nallowed_symbols whitelist\nblocked_symbols blacklist"]
-            R3["3. Per-Asset Clip\n_clip_per_asset#40;#41;\nmax_weight_per_asset: 0.25\nmin_weight / max_short_weight floor"]
-            R3E["ETHUSDT: 0.50 clipped to 0.25\nBTCUSDT: 0.40 clipped to 0.25\nSOLUSDT: 0.20 unchanged"]
-
-            R4["4. Exposure Scaling\n_scale_exposure#40;#41;\nmax_total_exposure: 1.0\ngross = sum#40;abs#40;w#41;#41;\nScale proportionally if exceeded"]
-            R5["5. Cash Floor\n_enforce_cash_floor#40;#41;\nmin_cash_weight: 0.05\nsum_long lte 1 - min_cash\nScale longs proportionally"]
-            R6["6. Turnover Cap\n_cap_turnover#40;#41;\nmax_turnover_per_rebalance: 0.5\nScale delta, not absolute weight\norig + #40;target - orig#41; * scale"]
-
-            OUT["Output: ValidatedWeights\nweights + clipped dict\nrejected=False"]
-
-            IN --> R1
-            R1 --> R1F
-            R1F -->|"Yes"| R1R
-            R1F -->|"No"| R2
-            R2 --> R3
-            R3 --> R3E
-            R3E --> R4
-            R4 --> R5
-            R5 --> R6
-            R6 --> OUT
-
-            style IN fill:#f0fdf4,stroke:#16a34a,color:#166534
-            style OUT fill:#eff6ff,stroke:#2563eb,color:#1e40af
-            style R1R fill:#fef2f2,stroke:#dc2626,color:#991b1b
-            style R3E fill:#fefce8,stroke:#ca8a04,color:#713f12
-    </div>
-
-    <h3>RiskConfig Defaults</h3>
-    <table>
-        <tr><th>Parameter</th><th>Default</th><th>Purpose</th></tr>
-        <tr><td><code>max_weight_per_asset</code></td><td>0.25</td><td>No single asset exceeds 25% of portfolio</td></tr>
-        <tr><td><code>min_weight_per_asset</code></td><td>0.0</td><td>Long-only floor (0 = no shorts)</td></tr>
-        <tr><td><code>max_total_exposure</code></td><td>1.0</td><td>Sum of abs(weights); 1.0 = unlevered</td></tr>
-        <tr><td><code>min_cash_weight</code></td><td>0.05</td><td>Always keep &ge;5% in cash</td></tr>
-        <tr><td><code>max_turnover_per_rebalance</code></td><td>0.5</td><td>Max sum of abs(delta_w) per cycle</td></tr>
-        <tr><td><code>max_leverage</code></td><td>1.0</td><td>Leverage cap (futures)</td></tr>
-        <tr><td><code>max_short_weight</code></td><td>0.0</td><td>Max short weight (0 = no shorts)</td></tr>
-        <tr><td><code>min_order_notional</code></td><td>10.0</td><td>Skip orders below $10</td></tr>
-        <tr><td><code>max_order_notional</code></td><td>100,000.0</td><td>Cap single-order size</td></tr>
-        <tr><td><code>min_weight_delta</code></td><td>0.005</td><td>Skip rebalance legs &lt; 0.5% weight change</td></tr>
-        <tr><td><code>min_rebalance_interval_ms</code></td><td>60,000</td><td>1 minute between rebalances</td></tr>
-    </table>
-
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>5. Execution Engine Detail <span>Weights to exchange orders</span></h2>
-    <p class="desc">
-        The ExecutionEngine converts validated weights into concrete order intents, then submits
-        them to exchange connectors. Sells execute before buys to free capital. Each order is
-        submitted independently with error isolation &mdash; one failure does not block others.
-    </p>
-    <p class="file-ref">execution/engine.py &mdash; ExecutionEngine</p>
-    <div class="mermaid">
-        graph TD
-            V["ValidatedWeights\nfrom Stage 4"]
-            MP["_get_mark_prices#40;#41;\nSnapshot latest_price\nfrom all feeds"]
-            TV["portfolio.total_value#40;mark_prices#41;\nNAV = cash + sum#40;pos * price#41;"]
-            COI["compute_order_intents#40;#41;\nFor each symbol in validated.weights:"]
-
-            STEP1["1. Get mark price + venue + exchange\nSkip if no price"]
-            STEP2["2. Compute free quantity\nfree_qty = free_quantity#40;symbol#41;\n= pos.qty - locked_qty\ncurrent_w = #40;free_qty * price#41; / NAV"]
-            STEP3["3. Compute target qty\ntarget_qty = target_w * NAV / price\ndelta = target_qty - free_qty\nAvoids duplicate orders on pending LIMIT"]
-            STEP4["4. Round to step_size\nabs_qty = floor#40;abs#40;delta#41; / step#41; * step\nSkip if rounded qty lte 0"]
-            STEP5["5. Create OrderIntent\nside = BUY if delta gt 0 else SELL"]
-
-            PART["Partition:\nSELLS first #40;free capital#41;\nthen BUYS"]
-            SUB["_submit_order per intent\nplace_market_order or place_limit_order\nOn success: lock_for_order#40;order_id, intent#41;\nError isolated: try/except per order"]
-            RR["RebalanceResult\nintents + submitted + failed + errors\nsubmitted_orders: Dict#91;order_id, OrderIntent#93;"]
-
-            V --> MP
-            MP --> TV
-            TV --> COI
-            COI --> STEP1
-            STEP1 --> STEP2
-            STEP2 --> STEP3
-            STEP3 --> STEP4
-            STEP4 --> STEP5
-            STEP5 --> PART
-            PART --> SUB
-            SUB --> RR
-
-            style V fill:#eff6ff,stroke:#2563eb,color:#1e40af
-            style RR fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>6. Portfolio State Machine <span>Lifecycle and event handlers</span></h2>
-    <p class="desc">
-        The Portfolio starts with a full exchange sync, then transitions to event-driven mode.
-        Kline events update mark prices and risk metrics; balance events sync cash.
-        Position updates use VWAP for same-direction trades and realize PnL on opposite-direction trades.
-    </p>
-    <p class="file-ref">core/portfolio.py &mdash; Portfolio &bull; core/position.py &mdash; Position</p>
-    <div class="mermaid">
-        graph TD
-            START(( )) -->|"Portfolio#40;initial_cash=0#41;"| Empty["Empty\ncash=0, no positions"]
-            Empty -->|"sync_from_exchange#40;exchange, venue, feeds#41;"| Synced
-
-            Synced["Synced\n1. Cash from stablecoins #40;USDT/USDC/BUSD#41;\n2. Positions from non-stable balances\n    entry price seeded from feeds\n3. Mark prices from feeds\n4. NAV + weights recomputed"]
-
-            Synced -->|"start#40;event_bus, feeds#41;\nsubscribe KLINE + BALANCE_UPDATE"| ED["Event-Driven\nAuto-updating"]
-
-            ED -->|"KlineEvent"| KH["_on_kline handler\n1. Update _mark_prices#91;symbol#93;\n2. Recompute _nav = cash + positions\n3. Recompute _weights per symbol\n4. Track _peak_equity\n5. Update _max_drawdown"]
-            KH --> ED
-
-            ED -->|"BalanceUpdateEvent"| BH["_on_balance handler\nIf asset in STABLECOINS:\n  _cash_dict#91;asset#93; += delta\n  _cash = sum#40;_cash_dict#41;"]
-            BH --> ED
-
-            ED -->|"update_position#40;#41; call"| UH["update_position handler\nSame direction: VWAP avg entry\nOpposite direction:\n  realize PnL on closed portion\n  _total_realized_pnl += pnl\nRecord Fill to _fills deque\nRefresh NAV + weights"]
-            UH --> ED
-
-            ED -->|"stop#40;#41;"| Stopped["Stopped\nUnsubscribed from EventBus"]
-            Stopped --> END(( ))
-
-            style Empty fill:#f3f4f6,stroke:#9ca3af,color:#4b5563
-            style Synced fill:#ecfeff,stroke:#0891b2,color:#155e75
-            style ED fill:#f0fdf4,stroke:#16a34a,color:#166534
-            style KH fill:#fefce8,stroke:#ca8a04,color:#713f12
-            style BH fill:#fefce8,stroke:#ca8a04,color:#713f12
-            style UH fill:#fefce8,stroke:#ca8a04,color:#713f12
-            style Stopped fill:#fef2f2,stroke:#ef4444,color:#991b1b
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>7. Multi-Venue Multiplex Socket Architecture <span>Market data ingestion</span></h2>
-    <p class="desc">
-        Each venue uses a single WebSocket per data type (kline/OB), carrying all symbols on one
-        TCP connection. Messages are queued and processed by async worker pools.
-        The system supports 4 venue x data-type combinations: Binance Spot, Binance Futures,
-        Aster Spot, and Aster Futures &mdash; each with a kline and OB client manager (8 total).
-    </p>
-    <p class="file-ref">connectors/base.py &mdash; AbstractClientManager &bull; connectors/BinanceDataConnectors.py &bull; connectors/AsterDataConnectors.py</p>
-    <div class="mermaid">
-        graph LR
-            subgraph Exchange["Exchange WebSocket APIs"]
-                BK["Binance Spot Kline\nethusdt@kline_1s ..."]
-                BOB["Binance Spot Depth\nethusdt@depth@100ms ..."]
-                BUD["Binance User Data\nexecutionReport\nbalanceUpdate"]
-                BFK["Binance Futures Kline\nethusdt@kline_1m ..."]
-                BFOB["Binance Futures Depth\nethusdt@depth@100ms ..."]
-                AK["Aster Spot Kline"]
-                AOB["Aster Spot Depth"]
-                AFK["Aster Perp Kline"]
-                AFOB["Aster Perp Depth"]
-            end
-
-            subgraph Managers["Client Managers (8 total)"]
-                BKM["BinanceKline\nClientManager"]
-                BOBM["BinanceOrderBook\nClientManager"]
-                BFKM["BinanceFutures\nKlineClientManager"]
-                BFOBM["BinanceFutures\nOBClientManager"]
-                AKM["AsterKline\nClientManager"]
-                AOBM["AsterOrderBook\nClientManager"]
-                AFKM["AsterPerpKline\nClientManager"]
-                AFOBM["AsterPerpOB\nClientManager"]
-            end
-
-            subgraph Internal["Per-Manager Internals"]
-                Q["asyncio.Queue\nmaxsize=10000"]
-                R["Reader Task\n1 coroutine"]
-                W["Worker Pool\n4 async workers"]
-            end
-
-            subgraph Feeds["Feed Objects (per symbol)"]
-                F1["BinanceKlineFeed\nETHUSDT / BTCUSDT / ..."]
-                F2["BinanceOrderBookFeed\nETHUSDT / BTCUSDT / ..."]
-                F3["AsterKlineFeed / AsterOrderBookFeed"]
-                F4["BinanceFuturesKlineFeed / OBFeed"]
-            end
-
-            EB2["EventBus"]
-
-            BK -->|"Single TCP"| BKM
-            BOB -->|"Single TCP"| BOBM
-            BFK --> BFKM
-            BFOB --> BFOBM
-            AK --> AKM
-            AOB --> AOBM
-            AFK --> AFKM
-            AFOB --> AFOBM
-
-            BKM --> Q
-            Q --> R
-            R --> W
-            W --> F1
-            W -->|"KlineEvent / OBUpdateEvent"| EB2
-
-            BUD -->|"executionReport\nbalanceUpdate"| EB2
-
-            style Exchange fill:#fef2f2,stroke:#ef4444,color:#991b1b
-            style Managers fill:#fefce8,stroke:#ca8a04,color:#713f12
-            style Internal fill:#ecfeff,stroke:#0891b2,color:#155e75
-            style Feeds fill:#f0fdf4,stroke:#16a34a,color:#166534
-            style EB2 fill:#dbeafe,stroke:#2563eb,stroke-width:3px,color:#1e3a5f
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>8. Multi-Strategy: WeightAggregator + ShadowBook <span>Capital allocation and per-strategy attribution</span></h2>
-    <p class="desc">
-        When multiple strategies share one portfolio, a <code>WeightAggregator</code> merges their weight
-        vectors — each scaled by its capital allocation fraction — into a single combined vector for the
-        optimizer. Each strategy owns a <code>ShadowBook</code> (virtual position ledger) so strategies
-        can read their own isolated positions, cash, weights, and PnL without touching the aggregate Portfolio.
-        ShadowBooks are updated in real time via event-driven fill attribution: each <code>ORDER_UPDATE</code>
-        event is routed to the correct ShadowBook using <code>ExecutionEngine._order_strategy_map</code>.
-        After order submission, <code>lock_for_order(order_id, intent)</code> is called on the ShadowBook to reserve locked cash/qty for pending LIMIT orders. Locks are released incrementally on each partial fill and fully on terminal status via <code>_partial_release_lock()</code> and <code>release_order_lock()</code>.
-    </p>
-    <p class="file-ref">core/weight_aggregator.py &mdash; WeightAggregator &bull; core/shadow_book.py &mdash; ShadowBook</p>
-    <div class="mermaid">
-        graph TD
-            subgraph Strategies["Strategies (each with own ShadowBook)"]
-                SA["Strategy A\nalloc=0.60\nETHUSDT=0.5, BTCUSDT=0.5"]
-                SB["Strategy B\nalloc=0.40\nSOLUSDT=1.0"]
-                SBOA["ShadowBook A\npositions, cash, weights\nNAV, realized PnL"]
-                SBOB["ShadowBook B\npositions, cash, weights\nNAV, realized PnL"]
-            end
-
-            WA["WeightAggregator\nregister_strategy#40;id, alloc, symbols, shadow_book#41;\nupdate_weights#40;id, weights#41;\nget_merged_weights#40;#41; → merged\nattribute_fills#40;mark_prices, nav#41;"]
-
-            MERGED["Merged Weights\nETHUSDT = 0.5 * 0.6 = 0.30\nBTCUSDT = 0.5 * 0.6 = 0.30\nSOLUSDT = 1.0 * 0.4 = 0.40"]
-
-            OPT2["PortfolioOptimizer\nvalidate#40;merged#41;"]
-            EE2["ExecutionEngine\nexecute#40;validated#41;"]
-            LOCK["lock_for_order#40;order_id, intent#41;\nLIMIT BUY: lock USDT = qty * limit_price\nLIMIT SELL: lock base qty\nReleased on fill via _partial_release_lock"]
-            ROUTE["_order_strategy_map\norder_id → strategy_id\nRoutes ORDER_UPDATE events\nto correct ShadowBook via _on_order_update"]
-
-            SA -->|"update_weights"| WA
-            SB -->|"update_weights"| WA
-            SA --- SBOA
-            SB --- SBOB
-            WA -->|"get_merged_weights"| MERGED
-            MERGED --> OPT2
-            OPT2 --> EE2
-            EE2 -->|"for each submitted order"| LOCK
-            LOCK --> SBOA
-            LOCK --> SBOB
-            EE2 --> ROUTE
-            ROUTE -.->|"event-driven fill attribution"| SBOA
-            ROUTE -.->|"event-driven fill attribution"| SBOB
-
-            style Strategies fill:#f0fdf4,stroke:#16a34a,color:#166534
-            style WA fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
-            style MERGED fill:#fefce8,stroke:#ca8a04,color:#713f12
-            style OPT2 fill:#eff6ff,stroke:#2563eb,color:#1e40af
-            style EE2 fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
-            style LOCK fill:#fef9c3,stroke:#ca8a04,color:#713f12
-            style ROUTE fill:#ecfeff,stroke:#0891b2,color:#155e75
-    </div>
-
-    <h3>WeightAggregator: Merging Formula</h3>
-    <table>
-        <tr><th>Strategy</th><th>Allocation</th><th>Raw Weights</th><th>Contribution to Merged</th></tr>
-        <tr><td>Strategy A (id=1)</td><td>0.60</td><td>ETHUSDT=0.50, BTCUSDT=0.50</td><td>ETHUSDT+=0.30, BTCUSDT+=0.30</td></tr>
-        <tr><td>Strategy B (id=2)</td><td>0.40</td><td>SOLUSDT=1.00</td><td>SOLUSDT+=0.40</td></tr>
-        <tr><td colspan="3"><strong>Merged (sum of contributions)</strong></td><td>ETHUSDT=0.30, BTCUSDT=0.30, SOLUSDT=0.40</td></tr>
-    </table>
-
-    <h3>ShadowBook vs Portfolio</h3>
-    <table>
-        <tr><th>Property</th><th>Portfolio (aggregate)</th><th>ShadowBook (per-strategy)</th></tr>
-        <tr><td>Scope</td><td>All strategies combined</td><td>One strategy's virtual slice</td></tr>
-        <tr><td>Positions</td><td>Real exchange positions</td><td>Attributed virtual positions</td></tr>
-        <tr><td>Cash</td><td>Total stablecoin balance</td><td>Strategy's allocated cash fraction</td></tr>
-        <tr><td>Updated by</td><td>Exchange fills + EventBus (ORDER_UPDATE, BALANCE_UPDATE, KLINE)</td><td>Event-driven via <code>_on_order_update()</code> filtered by <code>_order_strategy_map</code>; <code>lock_for_order()</code> called after each order submission; <code>_completed_order_ids</code> guard ensures terminal cleanup runs exactly once</td></tr>
-        <tr><td>Strategy reads</td><td>Only StrategyRunner reads this</td><td>Strategy reads its own shadow_book</td></tr>
-    </table>
-
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>9. StrategyRunner Startup Sequence <span>Initialization order</span></h2>
-    <p class="desc">
-        The StrategyRunner orchestrates all component initialization in a strict dependency order.
-        It progresses through RunnerState: CREATED &rarr; CONFIGURING &rarr; CONNECTING &rarr; SYNCING &rarr; RUNNING &rarr; STOPPING &rarr; STOPPED.
-        The pipeline (Portfolio &rarr; Optimizer &rarr; ExecutionEngine) is set up in the SYNCING phase,
-        after the exchange is authenticated and balances are fetched.
-    </p>
-    <p class="file-ref">run_strategy.py &mdash; StrategyRunner</p>
-    <div class="mermaid">
-        sequenceDiagram
-            participant U as User
-            participant SR as StrategyRunner
-            participant EB as EventBus
-            participant EX as BinanceSpotExchange
-            participant KM as KlineClientManager
-            participant OBM as OBClientManager
-            participant S as SpotStrategy
-            participant P as Portfolio
-            participant POpt as PortfolioOptimizer
-            participant EE as ExecutionEngine
-            participant RFSM as RebalanceFSM
-
-            U->>SR: run strategy
-
-            rect rgb(220,235,255)
-                Note over SR: CONFIGURING
-                SR->>SR: _setup_config
-                SR->>EB: create EventBus
-            end
-
-            rect rgb(255,235,235)
-                Note over SR,EX: CONNECTING
-                SR->>EX: create BinanceSpotExchange
-                SR->>KM: set_event_bus
-                SR->>OBM: set_event_bus
-            end
-
-            rect rgb(235,255,235)
-                Note over SR,S: Strategy Wiring
-                SR->>S: "inject event_bus + exchanges + args"
-                S->>EB: subscribe to 5 EventTypes
-                S->>S: on_start
-                Note over S: CREATED then STARTING then READY
-            end
-
-            rect rgb(255,248,220)
-                Note over SR,EX: Exchange Init
-                SR->>EX: run
-                EX->>EX: create AsyncClient
-                EX->>EX: refresh_balances
-                EX->>EX: start user_data_stream
-            end
-
-            rect rgb(235,235,255)
-                Note over SR,RFSM: SYNCING Pipeline Setup
-                SR->>P: sync_from_exchange
-                P->>P: "sync cash + positions + mark_prices"
-                SR->>P: "start with event_bus + feeds"
-                P->>EB: "subscribe KLINE + BALANCE_UPDATE + ORDER_UPDATE"
-
-                SR->>POpt: create PortfolioOptimizer
-                SR->>S: inject optimizer
-
-                SR->>EE: create ExecutionEngine
-                SR->>S: inject execution_engine
-
-                Note over S,RFSM: RebalanceFSM auto-created
-                S->>RFSM: create RebalanceFSM
-                SR->>S: "shadow_book.start(event_bus, EE._order_strategy_map)"
-            end
-
-            rect rgb(245,245,245)
-                Note over SR: RUNNING Main Loop
-                SR->>SR: "asyncio.gather feeds + run_forever"
-            end
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>10. Data Contracts <span>Frozen dataclasses between pipeline stages</span></h2>
-    <p class="desc">
-        All inter-stage contracts are frozen (immutable) dataclasses. This prevents strategies
-        from accidentally mutating shared data and provides a clear audit trail.
-    </p>
-    <p class="file-ref">core/signals.py &bull; core/market_data.py &bull; core/order.py</p>
-    <div class="mermaid">
-        classDiagram
-            class TargetWeights {
-                &lt;&lt;frozen&gt;&gt;
-                +Dict weights
-                +int timestamp
-                +str strategy_id
-                +Venue venue
-                +Dict metadata
-            }
-
-            class ValidatedWeights {
-                &lt;&lt;frozen&gt;&gt;
-                +TargetWeights original
-                +Dict weights
-                +Dict clipped
-                +bool rejected
-                +str rejection_reason
-                +int timestamp
-            }
-
-            class OrderIntent {
-                &lt;&lt;frozen&gt;&gt;
-                +str symbol
-                +Venue venue
-                +Side side
-                +float quantity
-                +OrderType order_type
-                +float price
-                +int strategy_id
-            }
-
-            class RebalanceResult {
-                &lt;&lt;frozen&gt;&gt;
-                +Tuple intents
-                +int submitted
-                +int failed
-                +int timestamp
-                +Tuple errors
-                +Dict submitted_orders
-            }
-
-            class Kline {
-                &lt;&lt;frozen&gt;&gt;
-                +str ticker
-                +str interval
-                +int start_time
-                +int end_time
-                +float open
-                +float high
-                +float low
-                +float close
-                +float volume
-            }
-
-            class OrderBook {
-                +SortedDict bid_orders
-                +SortedDict ask_orders
-                +int last_update_id
-                +best_bid_price()
-                +best_ask_price()
-                +mid_price()
-                +spread_bps()
-            }
-
-            class Order {
-                +str id
-                +str symbol
-                +Side side
-                +OrderType order_type
-                +float quantity
-                +float price
-                +float avg_fill_price
-                +float filled_qty
-                +OrderStatus status
-                +Optional~int~ strategy_id
-                +transition_to(new_status)
-                +update_fill(filled_qty, fill_price)
-            }
-
-            TargetWeights --> ValidatedWeights : optimizer.validate
-            ValidatedWeights --> OrderIntent : engine.compute_order_intents
-            OrderIntent --> RebalanceResult : engine.execute
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>11. Class Hierarchy <span>Core abstractions and implementations</span></h2>
-    <p class="file-ref">Full inheritance tree across all modules</p>
-    <div class="mermaid">
-        classDiagram
-            class BaseFSM {
-                -Enum _state
-                -bool _transitioning
-                -Deque _pending
-                -Set _terminal_states
-                +state() Enum
-                +is_terminal() bool
-                +trigger(event) Enum
-                -_do_transition(event) Enum
-            }
-
-            class RebalanceFSM {
-                -_strategy
-                -_optimizer
-                -_execution_engine
-                -float _cooldown_s
-                -TimerHandle _timer_handle
-                +request() bool
-                +start_timer(interval_s)
-                +stop_timer()
-                +wait()
-                -_on_enter_computing()
-                -_on_enter_validating()
-                -_on_enter_executing()
-                -_on_enter_cooldown()
-                -_on_enter_error()
-                -_on_enter_suspended()
-                -_on_resume()
-            }
-
-            class SpotStrategy {
-                -Dict _exchanges
-                -EventBus _event_bus
-                -Dict _feeds
-                -PortfolioOptimizer _optimizer
-                -ExecutionEngine _execution_engine
-                -RebalanceFSM _rebalance_fsm
-                -StrategyState _state
-                +Portfolio portfolio
-                +start()
-                +stop()
-                +run_forever()
-                +compute_weights() Dict
-                +request_rebalance() bool
-                +suspend_rebalancing()
-                +resume_rebalancing()
-                +on_kline(event)
-                +on_orderbook_update(event)
-                +on_order_update(event)
-                +on_balance_update(event)
-                +on_rebalance_complete(event)
-                +run_heavy(fn) Any
-            }
-
-            class Portfolio {
-                -Dict _positions
-                -float _cash
-                -Dict _cash_dict
-                -Dict _mark_prices
-                -Dict _weights
-                -float _nav
-                -float _peak_equity
-                -float _max_drawdown
-                -Deque _fills
-                +sync_from_exchange(exchange)
-                +start(event_bus)
-                +stop()
-                +update_position(symbol)
-                +save_snapshot(venue)
-                +total_value() float
-                +current_weights() dict
-                +active_positions() list
-            }
-
-            class PortfolioOptimizer {
-                -RiskConfig _config
-                -Portfolio _portfolio
-                -int _last_rebalance_ts
-                +validate(target) ValidatedWeights
-                +current_weights() dict
-                +update_portfolio(portfolio)
-            }
-
-            class ExecutionEngine {
-                -Dict _exchanges
-                -Portfolio _portfolio
-                -Dict _feeds
-                -RiskConfig _risk_config
-                -Venue _default_venue
-                -OrderType _default_order_type
-                +execute(validated) RebalanceResult
-                +compute_order_intents(validated) List
-                -_submit_order(intent) bool
-                -_get_mark_prices() Dict
-            }
-
-            class Position {
-                +str symbol
-                +Venue venue
-                +float quantity
-                +float avg_entry_price
-                +float realized_pnl
-                +float total_commission
-                +unrealized_pnl(mark) float
-                +is_flat() bool
-                +is_long() bool
-                +is_short() bool
-            }
-
-            class RiskConfig {
-                +float max_weight_per_asset
-                +float min_weight_per_asset
-                +float max_total_exposure
-                +float min_cash_weight
-                +float max_turnover_per_rebalance
-                +float min_weight_delta
-                +int min_rebalance_interval_ms
-                +FrozenSet allowed_symbols
-                +FrozenSet blocked_symbols
-            }
-
-            class EventBus {
-                -Dict _subscribers
-                +subscribe(event_type, callback)
-                +unsubscribe(event_type, callback)
-                +publish(event)
-            }
-
-            class SpotExchangeConnector {
-                &lt;&lt;abstract&gt;&gt;
-                -Dict _balances
-                -Dict _open_orders
-                -Dict _token_infos
-                +initialize()
-                +place_market_order()
-                +place_limit_order()
-                +cancel_order()
-                +refresh_balances()
-                +get_balance(asset) float
-            }
-
-            class BinanceSpotExchange {
-                -AsyncClient _client
-                -BinanceUserDataClientManager _user_data_mgr
-                +run()
-                +cleanup()
-                +_handle_user_data(msg)
-            }
-
-            class AbstractDataFeed {
-                -str _name
-                -OrderBook _data
-                -float _vol
-                -Deque _historical
-                +latest_price() float
-                +volatility() float
-                +update_current_stats()
-                +executed_buy_price(amount)
-                +executed_sell_price(amount)
-            }
-
-            class AbstractClientManager {
-                -Dict _active_feeds
-                -Queue _queue
-                -EventBus _event_bus
-                +register_feed(feed)
-                +start()
-                +stop()
-                +run_multiplex_feeds()
-                +set_event_bus(bus)
-            }
-
-            class PeriodicTask {
-                -callback
-                -float _interval
-                -Task _task
-                +start()
-                +stop()
-                +running() bool
-            }
-
-            class StrategyRunner {
-                -RunnerState _state
-                -8 ClientManagers
-                +run(strategy)
-                -_setup_config()
-                -_setup_exchanges()
-                -_setup_pipeline()
-            }
-
-            BaseFSM <|-- RebalanceFSM
-            SpotStrategy --> RebalanceFSM : owns
-            SpotStrategy --> EventBus : subscribes to
-            SpotStrategy --> PortfolioOptimizer : Stage 4
-            SpotStrategy --> ExecutionEngine : Stage 5
-            SpotStrategy --> Portfolio : owns
-            SpotStrategy --> SpotExchangeConnector : exchange access
-            PortfolioOptimizer --> RiskConfig : configured by
-            PortfolioOptimizer --> Portfolio : reads from
-            ExecutionEngine --> Portfolio : reads from
-            ExecutionEngine --> SpotExchangeConnector : submits to
-            ExecutionEngine --> RiskConfig : weight-delta filter
-            Portfolio --> Position : manages many
-            Portfolio --> EventBus : subscribes to
-            SpotExchangeConnector <|-- BinanceSpotExchange
-            AbstractClientManager --> AbstractDataFeed : manages
-            StrategyRunner --> SpotStrategy : orchestrates
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>11. Data Persistence <span>Database schema and ORM</span></h2>
-    <p class="file-ref">db/database.py &mdash; ReconnectPooledPostgresqlDatabase &bull; db/models.py &mdash; Peewee ORM models</p>
-    <div class="mermaid">
-        erDiagram
-            portfolio_snapshots {
-                int id PK
-                datetime datetime
-                int strategy_id
-                varchar venue
-                float nav
-                float cash
-                float unrealized_pnl
-                float realized_pnl
-                float total_commission
-                float peak_equity
-                float max_drawdown
-                float current_drawdown
-                float gross_exposure
-                float net_exposure
-                json positions
-                json weights
-                json mark_prices
-                int num_fills
-            }
-
-            cex_trades {
-                int id PK
-                datetime datetime
-                int strategy_id
-                text strategy_name
-                varchar venue
-                text symbol
-                varchar asset_type
-                varchar side
-                float base_amount
-                float quote_amount
-                float price
-                text commission_asset
-                float total_commission
-                float total_commission_quote
-                text order_id
-                varchar status
-                varchar order_side
-                varchar order_type
-            }
-
-            dex_trades {
-                text tx_digest PK
-                datetime datetime
-                varchar venue
-                bool a_to_b
-                text sender
-                text pool_address
-                text token_a
-                text token_b
-                float amount_a
-                float amount_b
-                varchar type
-            }
-
-            account_snapshots {
-                datetime datetime PK
-                varchar venue
-                json balances
-                float total_usd_value
-                int total_open_orders
-            }
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>12. Concurrency Model <span>Single event loop, everything async</span></h2>
-    <p class="desc">
-        All I/O, event processing, and pipeline execution share a single asyncio event loop.
-        Natural backpressure comes from <code>EventBus.publish()</code> awaiting callbacks sequentially.
-        CPU-heavy work is offloaded to a ProcessPoolExecutor via <code>strategy.run_heavy(fn)</code>.
-        PeriodicTask replaces bare <code>while True + sleep</code> loops for recurring operations.
-    </p>
-    <div class="mermaid">
-        graph TB
-            subgraph MainThread["Main Thread - single asyncio event loop"]
-                subgraph IO["I/O Coroutines"]
-                    KR2["Kline Readers\n1 per venue"]
-                    KW_["Kline Workers\n4 per manager"]
-                    OBR2["OB Readers\n1 per venue"]
-                    OBW_["OB Workers\n4 per manager"]
-                    UDR["UserData Reader\nBinance listen key"]
-                end
-
-                subgraph Events["Event Processing"]
-                    EB3["EventBus.publish\nawaited = backpressure"]
-                    PH["Portfolio Handlers\n_on_kline + _on_balance"]
-                    SH["Strategy Hooks\non_kline + on_ob + ..."]
-                end
-
-                subgraph FSM["RebalanceFSM"]
-                    TT["Timer tick / signal"]
-                    CW["compute_weights"]
-                    OV["optimizer.validate"]
-                    EX2["engine.execute"]
-                    CD["cooldown"]
-                end
-
-                subgraph Periodic["PeriodicTask instances"]
-                    RF["strategy.run_forever"]
-                    SS["Portfolio snapshot saver"]
-                    BM["exchange.monitor_balances"]
-                end
-            end
-
-            subgraph ProcessPool["ProcessPoolExecutor"]
-                PPW1["Heavy Worker 1-4\nCPU-bound compute"]
-            end
-
-            IO --> EB3
-            EB3 --> PH
-            EB3 --> SH
-            SH -->|"request_rebalance"| TT
-            TT --> CW
-            CW --> OV
-            OV --> EX2
-            EX2 --> CD
-            SH -.->|"run_heavy#40;fn#41;"| ProcessPool
-
-            style MainThread fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
-            style ProcessPool fill:#fef2f2,stroke:#ef4444,color:#991b1b
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>13. File Structure <span>Module organization</span></h2>
-    <table>
-        <tr><th>Directory</th><th>Key Files</th><th>Purpose</th></tr>
-        <tr><td><code>core/</code></td><td>enums.py, events.py, event_bus.py, signals.py</td><td>Shared types, event system, pipeline contracts</td></tr>
-        <tr><td><code>core/</code></td><td>fsm.py, order_fsm.py, rebalance_fsm.py</td><td>State machines: BaseFSM, Order lifecycle, Rebalance cycle</td></tr>
-        <tr><td><code>core/</code></td><td>market_data.py, order.py, position.py, portfolio.py</td><td>Market data structures, order/position/portfolio tracking</td></tr>
-        <tr><td><code>connectors/</code></td><td>base.py</td><td>AbstractDataFeed, AbstractClientManager, SpotExchangeConnector ABCs</td></tr>
-        <tr><td><code>connectors/</code></td><td>BinanceExchange.py, BinanceDataConnectors.py</td><td>Binance spot: exchange connector + kline/OB feeds &amp; managers</td></tr>
-        <tr><td><code>connectors/</code></td><td>BinanceFuturesExchange.py, BinanceFuturesDataConnectors.py</td><td>Binance futures: exchange connector + feeds &amp; managers</td></tr>
-        <tr><td><code>connectors/</code></td><td>AsterExchange.py, AsterDataConnectors.py</td><td>Aster spot: exchange connector + feeds &amp; managers</td></tr>
-        <tr><td><code>connectors/</code></td><td>AsterPerpExchange.py, AsterPerpDataConnectors.py</td><td>Aster perpetuals: exchange connector + feeds &amp; managers</td></tr>
-        <tr><td><code>strategy/</code></td><td>base_strategy.py</td><td>SpotStrategy base class with event hooks and RebalanceFSM</td></tr>
-        <tr><td><code>strategy/</code></td><td>example_weight_strategy.py, test_strategy.py</td><td>EqualWeightStrategy reference impl, TestPrintStrategy debug</td></tr>
-        <tr><td><code>risk/</code></td><td>risk_config.py, optimizer.py</td><td>RiskConfig dataclass, PortfolioOptimizer constraint pipeline</td></tr>
-        <tr><td><code>execution/</code></td><td>engine.py</td><td>ExecutionEngine: weights &rarr; deltas &rarr; exchange orders</td></tr>
-        <tr><td><code>db/</code></td><td>database.py, models.py</td><td>Peewee ORM, auto-reconnect PostgreSQL, trade &amp; snapshot models</td></tr>
-        <tr><td><code>config/</code></td><td>config.yaml, config.json</td><td>Strategy params, risk limits, trading pairs</td></tr>
-        <tr><td><code>utils/</code></td><td>logger.py, utils.py</td><td>Custom logger, config loading, YAML &rarr; argparse.Namespace</td></tr>
-        <tr><td><code>.</code></td><td>run_strategy.py</td><td>StrategyRunner: main entry point, orchestrates all components</td></tr>
-    </table>
 
+<h1>ELYSIAN <span>Trading System</span> — Architecture</h1>
+<p class="subtitle">Updated 2026-03-30 &nbsp;|&nbsp; 5-Stage Quantitative Pipeline</p>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 1 — Full pipeline overview
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<h2>1. Full Pipeline Overview <span>StrategyRunner → Exchange → EventBus → RebalanceFSM</span></h2>
+<p class="desc">
+  The Elysian pipeline runs five sequential stages per rebalance cycle. Data enters through exchange
+  WebSocket feeds, propagates through the event bus to strategies, flows through weight computation,
+  risk validation, and execution, and loops back via order-update events to keep the portfolio and
+  shadow books in sync.
+</p>
+
+<div class="diagram-wrap">
+<svg viewBox="0 0 1100 900" width="1100" height="900" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+    <polygon points="0 0, 8 3, 0 6" fill="#58a6ff"/>
+  </marker>
+  <marker id="arr-g" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+    <polygon points="0 0, 8 3, 0 6" fill="#3fb950"/>
+  </marker>
+  <marker id="arr-y" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+    <polygon points="0 0, 8 3, 0 6" fill="#d29922"/>
+  </marker>
+  <marker id="arr-r" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+    <polygon points="0 0, 8 3, 0 6" fill="#f85149"/>
+  </marker>
+</defs>
+
+<!-- ── Stage labels (left sidebar) ─────────────────────────────────────── -->
+<text x="18" y="130" font-size="11" fill="#6e7681" transform="rotate(-90,18,130)">STAGE 1</text>
+<text x="18" y="290" font-size="11" fill="#6e7681" transform="rotate(-90,18,290)">STAGE 2</text>
+<text x="18" y="435" font-size="11" fill="#6e7681" transform="rotate(-90,18,435)">STAGE 3</text>
+<text x="18" y="600" font-size="11" fill="#6e7681" transform="rotate(-90,18,600)">STAGE 4</text>
+<text x="18" y="760" font-size="11" fill="#6e7681" transform="rotate(-90,18,760)">STAGE 5</text>
+
+<!-- ═══════════ STAGE 1 — Data Feeds ═══════════ -->
+<rect x="40" y="40" width="1040" height="150" rx="8" fill="#0d2136" stroke="#1d4ed8" stroke-width="1.5"/>
+<text x="56" y="64" font-size="13" font-weight="600" fill="#93c5fd">Stage 1 — Data Feeds</text>
+<text x="56" y="82" font-size="11" fill="#6e7681">WebSocket feeds managed by shared client managers → EventBus</text>
+
+<!-- Spot feeds -->
+<rect x="60" y="96" width="175" height="68" rx="6" fill="#1e3a5f" stroke="#2563eb" stroke-width="1"/>
+<text x="148" y="116" font-size="11" font-weight="600" fill="#93c5fd" text-anchor="middle">BinanceKlineFeed</text>
+<text x="148" y="131" font-size="9.5" fill="#6e7681" text-anchor="middle">BinanceKlineClientManager</text>
+<text x="148" y="148" font-size="9" fill="#4b9edb" text-anchor="middle">KlineEvent → EventBus</text>
+
+<rect x="250" y="96" width="175" height="68" rx="6" fill="#1e3a5f" stroke="#2563eb" stroke-width="1"/>
+<text x="337" y="116" font-size="11" font-weight="600" fill="#93c5fd" text-anchor="middle">BinanceOrderBookFeed</text>
+<text x="337" y="131" font-size="9.5" fill="#6e7681" text-anchor="middle">BinanceOrderBookClientManager</text>
+<text x="337" y="148" font-size="9" fill="#4b9edb" text-anchor="middle">OrderBookUpdateEvent → EventBus</text>
+
+<!-- Futures feeds -->
+<rect x="440" y="96" width="185" height="68" rx="6" fill="#1a2e42" stroke="#1d4ed8" stroke-width="1" stroke-dasharray="4,2"/>
+<text x="532" y="116" font-size="11" font-weight="600" fill="#7dd3fc" text-anchor="middle">BinanceFuturesKlineFeed</text>
+<text x="532" y="131" font-size="9.5" fill="#6e7681" text-anchor="middle">BinanceFuturesKlineClientManager</text>
+<text x="532" y="148" font-size="9" fill="#4b9edb" text-anchor="middle">KlineEvent → EventBus</text>
+
+<rect x="640" y="96" width="195" height="68" rx="6" fill="#1a2e42" stroke="#1d4ed8" stroke-width="1" stroke-dasharray="4,2"/>
+<text x="738" y="116" font-size="11" font-weight="600" fill="#7dd3fc" text-anchor="middle">BinanceFuturesOrderBookFeed</text>
+<text x="738" y="131" font-size="9.5" fill="#6e7681" text-anchor="middle">BinanceFuturesOrderBookClientManager</text>
+<text x="738" y="148" font-size="9" fill="#4b9edb" text-anchor="middle">OrderBookUpdateEvent → EventBus</text>
+
+<!-- User data manager -->
+<rect x="850" y="96" width="210" height="68" rx="6" fill="#1d2d20" stroke="#3fb950" stroke-width="1.5"/>
+<text x="955" y="112" font-size="11" font-weight="600" fill="#86efac" text-anchor="middle">BinanceUserDataClientManager</text>
+<text x="955" y="127" font-size="9.5" fill="#6e7681" text-anchor="middle">WS API v3 · HMAC-SHA256</text>
+<text x="955" y="142" font-size="9" fill="#4ade80" text-anchor="middle">OrderUpdateEvent + BalanceUpdateEvent</text>
+<text x="955" y="156" font-size="9" fill="#6e7681" text-anchor="middle">→ EventBus</text>
+
+<!-- ═══════════ EVENT BUS ═══════════ -->
+<rect x="40" y="215" width="1040" height="34" rx="6" fill="#1c1c2e" stroke="#58a6ff" stroke-width="1.5"/>
+<text x="560" y="236" font-size="12" font-weight="600" fill="#58a6ff" text-anchor="middle">EventBus   (pub/sub · async · typed events)</text>
+
+<!-- Arrows Stage 1 → EventBus -->
+<line x1="148" y1="164" x2="148" y2="215" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="337" y1="164" x2="337" y2="215" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="532" y1="164" x2="532" y2="215" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arr)"/>
+<line x1="738" y1="164" x2="738" y2="215" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arr)"/>
+<line x1="955" y1="164" x2="955" y2="215" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arr-g)"/>
+
+<!-- ═══════════ STAGE 2 — Strategy Layer ═══════════ -->
+<rect x="40" y="270" width="1040" height="120" rx="8" fill="#12232a" stroke="#0891b2" stroke-width="1.5"/>
+<text x="56" y="294" font-size="13" font-weight="600" fill="#67e8f9">Stage 2 — Strategy Layer</text>
+<text x="56" y="312" font-size="11" fill="#6e7681">SpotStrategy / EventDrivenStrategy subclasses — event hooks → weight computation</text>
+
+<rect x="60" y="322" width="215" height="55" rx="5" fill="#0f2c35" stroke="#0891b2" stroke-width="1"/>
+<text x="168" y="342" font-size="11" font-weight="600" fill="#67e8f9" text-anchor="middle">SpotStrategy (base)</text>
+<text x="168" y="357" font-size="9.5" fill="#6e7681" text-anchor="middle">on_kline / on_orderbook_update</text>
+<text x="168" y="370" font-size="9.5" fill="#6e7681" text-anchor="middle">on_order_update / on_rebalance_complete</text>
+
+<rect x="290" y="322" width="210" height="55" rx="5" fill="#0f2c35" stroke="#0891b2" stroke-width="1"/>
+<text x="395" y="342" font-size="11" font-weight="600" fill="#67e8f9" text-anchor="middle">compute_weights(**ctx)</text>
+<text x="395" y="357" font-size="9.5" fill="#6e7681" text-anchor="middle">Returns Dict[symbol, float]</text>
+<text x="395" y="370" font-size="9.5" fill="#4ade80" text-anchor="middle">→ request_rebalance()</text>
+
+<rect x="515" y="322" width="230" height="55" rx="5" fill="#0f2c35" stroke="#0891b2" stroke-width="1"/>
+<text x="630" y="342" font-size="11" font-weight="600" fill="#67e8f9" text-anchor="middle">WeightAggregator</text>
+<text x="630" y="357" font-size="9.5" fill="#6e7681" text-anchor="middle">update_weights(strategy_id, weights)</text>
+<text x="630" y="370" font-size="9.5" fill="#4ade80" text-anchor="middle">get_merged_weights() → scaled by alloc</text>
+
+<rect x="760" y="322" width="300" height="55" rx="5" fill="#0f2c35" stroke="#0891b2" stroke-width="1"/>
+<text x="910" y="342" font-size="11" font-weight="600" fill="#67e8f9" text-anchor="middle">ShadowBook (per strategy)</text>
+<text x="910" y="357" font-size="9.5" fill="#6e7681" text-anchor="middle">Virtual position ledger · positions, cash, weights</text>
+<text x="910" y="370" font-size="9.5" fill="#6e7681" text-anchor="middle">locked_cash · locked_quantities · fills</text>
+
+<!-- Arrows EventBus → Stage 2 -->
+<line x1="560" y1="249" x2="560" y2="270" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arr)"/>
+
+<!-- ═══════════ STAGE 3 — RebalanceFSM ═══════════ -->
+<rect x="40" y="415" width="1040" height="90" rx="8" fill="#1a1228" stroke="#a855f7" stroke-width="1.5"/>
+<text x="56" y="439" font-size="13" font-weight="600" fill="#d8b4fe">Stage 3 — RebalanceFSM</text>
+<text x="56" y="456" font-size="11" fill="#6e7681">BaseFSM-driven pipeline · publishes RebalanceCycleEvent + RebalanceCompleteEvent on every transition</text>
+
+<!-- FSM state boxes inline -->
+<rect x="62" y="464" width="90" height="30" rx="14" fill="#1f1435" stroke="#a855f7" stroke-width="1.5"/>
+<text x="107" y="483" font-size="10" font-weight="600" fill="#d8b4fe" text-anchor="middle">IDLE</text>
+
+<line x1="152" y1="479" x2="192" y2="479" stroke="#a855f7" stroke-width="1.5" marker-end="url(#arr)"/>
+<text x="172" y="472" font-size="8.5" fill="#9333ea" text-anchor="middle">signal</text>
+
+<rect x="192" y="464" width="100" height="30" rx="14" fill="#1f1435" stroke="#a855f7" stroke-width="1.5"/>
+<text x="242" y="483" font-size="10" font-weight="600" fill="#d8b4fe" text-anchor="middle">COMPUTING</text>
+
+<line x1="292" y1="479" x2="332" y2="479" stroke="#a855f7" stroke-width="1.5" marker-end="url(#arr)"/>
+<text x="312" y="472" font-size="8.5" fill="#9333ea" text-anchor="middle">weights_ready</text>
+
+<rect x="332" y="464" width="108" height="30" rx="14" fill="#1f1435" stroke="#a855f7" stroke-width="1.5"/>
+<text x="386" y="483" font-size="10" font-weight="600" fill="#d8b4fe" text-anchor="middle">VALIDATING</text>
+
+<line x1="440" y1="479" x2="476" y2="479" stroke="#a855f7" stroke-width="1.5" marker-end="url(#arr)"/>
+<text x="458" y="472" font-size="8.5" fill="#9333ea" text-anchor="middle">accepted</text>
+
+<rect x="476" y="464" width="100" height="30" rx="14" fill="#1f1435" stroke="#a855f7" stroke-width="1.5"/>
+<text x="526" y="483" font-size="10" font-weight="600" fill="#d8b4fe" text-anchor="middle">EXECUTING</text>
+
+<line x1="576" y1="479" x2="612" y2="479" stroke="#a855f7" stroke-width="1.5" marker-end="url(#arr)"/>
+<text x="594" y="472" font-size="8.5" fill="#9333ea" text-anchor="middle">complete</text>
+
+<rect x="612" y="464" width="100" height="30" rx="14" fill="#1f1435" stroke="#a855f7" stroke-width="1.5"/>
+<text x="662" y="483" font-size="10" font-weight="600" fill="#d8b4fe" text-anchor="middle">COOLDOWN</text>
+
+<line x1="712" y1="479" x2="748" y2="479" stroke="#a855f7" stroke-width="1.5" marker-end="url(#arr)"/>
+<text x="730" y="472" font-size="8.5" fill="#9333ea" text-anchor="middle">cooldown_done</text>
+
+<!-- Arrow back to IDLE -->
+<path d="M 748 479 Q 780 505 107 505 Q 80 505 80 494" stroke="#6d28d9" stroke-width="1" fill="none" stroke-dasharray="4,3" marker-end="url(#arr)"/>
+
+<!-- ERROR and SUSPENDED -->
+<rect x="820" y="458" width="90" height="30" rx="14" fill="#2d1010" stroke="#f85149" stroke-width="1.5"/>
+<text x="865" y="477" font-size="10" font-weight="600" fill="#fca5a5" text-anchor="middle">ERROR</text>
+<text x="820" y="448" font-size="8.5" fill="#f85149" text-anchor="middle">failed ↑</text>
+
+<rect x="930" y="458" width="110" height="30" rx="14" fill="#1a2040" stroke="#60a5fa" stroke-width="1.5"/>
+<text x="985" y="477" font-size="10" font-weight="600" fill="#93c5fd" text-anchor="middle">SUSPENDED</text>
+<text x="985" y="448" font-size="8.5" fill="#60a5fa" text-anchor="middle">suspend (any state) ↑</text>
+
+<!-- Arrow Stage 2 → Stage 3 -->
+<line x1="395" y1="377" x2="395" y2="415" stroke="#a855f7" stroke-width="1.5" marker-end="url(#arr)"/>
+<text x="420" y="399" font-size="9" fill="#9333ea">TargetWeights</text>
+
+<!-- ═══════════ STAGE 4 — PortfolioOptimizer ═══════════ -->
+<rect x="40" y="530" width="1040" height="120" rx="8" fill="#0f1f17" stroke="#22c55e" stroke-width="1.5"/>
+<text x="56" y="554" font-size="13" font-weight="600" fill="#86efac">Stage 4 — PortfolioOptimizer.validate()</text>
+<text x="56" y="572" font-size="11" fill="#6e7681">6-stage constraint projection · TargetWeights → ValidatedWeights</text>
+
+<!-- 6 pipeline steps -->
+<rect x="58" y="580" width="130" height="52" rx="5" fill="#0a2010" stroke="#22c55e" stroke-width="1"/>
+<text x="123" y="598" font-size="9.5" font-weight="600" fill="#86efac" text-anchor="middle">1. Rate-limit</text>
+<text x="123" y="612" font-size="8.5" fill="#6e7681" text-anchor="middle">per-strategy</text>
+<text x="123" y="625" font-size="8.5" fill="#6e7681" text-anchor="middle">min_rebalance_interval_ms</text>
+
+<line x1="188" y1="606" x2="202" y2="606" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arr-g)"/>
+
+<rect x="202" y="580" width="130" height="52" rx="5" fill="#0a2010" stroke="#22c55e" stroke-width="1"/>
+<text x="267" y="598" font-size="9.5" font-weight="600" fill="#86efac" text-anchor="middle">2. Symbol filter</text>
+<text x="267" y="612" font-size="8.5" fill="#6e7681" text-anchor="middle">allowed_symbols</text>
+<text x="267" y="625" font-size="8.5" fill="#6e7681" text-anchor="middle">blocked_symbols</text>
+
+<line x1="332" y1="606" x2="346" y2="606" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arr-g)"/>
+
+<rect x="346" y="580" width="135" height="52" rx="5" fill="#0a2010" stroke="#22c55e" stroke-width="1"/>
+<text x="413" y="598" font-size="9.5" font-weight="600" fill="#86efac" text-anchor="middle">3. Per-asset clip</text>
+<text x="413" y="612" font-size="8.5" fill="#6e7681" text-anchor="middle">max_weight_per_asset</text>
+<text x="413" y="625" font-size="8.5" fill="#6e7681" text-anchor="middle">max_short_weight</text>
+
+<line x1="481" y1="606" x2="495" y2="606" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arr-g)"/>
+
+<rect x="495" y="580" width="135" height="52" rx="5" fill="#0a2010" stroke="#22c55e" stroke-width="1"/>
+<text x="562" y="598" font-size="9.5" font-weight="600" fill="#86efac" text-anchor="middle">4. Scale exposure</text>
+<text x="562" y="612" font-size="8.5" fill="#6e7681" text-anchor="middle">max_total_exposure</text>
+<text x="562" y="625" font-size="8.5" fill="#6e7681" text-anchor="middle">gross weight guard</text>
+
+<line x1="630" y1="606" x2="644" y2="606" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arr-g)"/>
+
+<rect x="644" y="580" width="130" height="52" rx="5" fill="#0a2010" stroke="#22c55e" stroke-width="1"/>
+<text x="709" y="598" font-size="9.5" font-weight="600" fill="#86efac" text-anchor="middle">5. Cash floor</text>
+<text x="709" y="612" font-size="8.5" fill="#6e7681" text-anchor="middle">min_cash_weight</text>
+<text x="709" y="625" font-size="8.5" fill="#6e7681" text-anchor="middle">scales long legs down</text>
+
+<line x1="774" y1="606" x2="788" y2="606" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arr-g)"/>
+
+<rect x="788" y="580" width="135" height="52" rx="5" fill="#0a2010" stroke="#22c55e" stroke-width="1"/>
+<text x="855" y="598" font-size="9.5" font-weight="600" fill="#86efac" text-anchor="middle">6. Turnover cap</text>
+<text x="855" y="612" font-size="8.5" fill="#6e7681" text-anchor="middle">max_turnover_per_rebalance</text>
+<text x="855" y="625" font-size="8.5" fill="#6e7681" text-anchor="middle">scales weight delta</text>
+
+<line x1="923" y1="606" x2="937" y2="606" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arr-g)"/>
+
+<rect x="937" y="580" width="125" height="52" rx="5" fill="#052e10" stroke="#4ade80" stroke-width="1.5"/>
+<text x="1000" y="598" font-size="9.5" font-weight="600" fill="#4ade80" text-anchor="middle">ValidatedWeights</text>
+<text x="1000" y="612" font-size="8.5" fill="#6e7681" text-anchor="middle">weights · clipped</text>
+<text x="1000" y="625" font-size="8.5" fill="#6e7681" text-anchor="middle">rejected flag</text>
+
+<!-- Arrow Stage 3 → Stage 4 -->
+<line x1="400" y1="505" x2="400" y2="530" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arr-g)"/>
+<text x="415" y="522" font-size="9" fill="#22c55e">TargetWeights</text>
+
+<!-- ═══════════ STAGE 5 — ExecutionEngine ═══════════ -->
+<rect x="40" y="675" width="1040" height="130" rx="8" fill="#201515" stroke="#f97316" stroke-width="1.5"/>
+<text x="56" y="699" font-size="13" font-weight="600" fill="#fdba74">Stage 5 — ExecutionEngine</text>
+<text x="56" y="717" font-size="11" fill="#6e7681">compute_order_intents() · sells first · place_market_order / place_limit_order</text>
+
+<rect x="60" y="726" width="195" height="65" rx="5" fill="#1a0e0e" stroke="#f97316" stroke-width="1"/>
+<text x="157" y="745" font-size="11" font-weight="600" fill="#fdba74" text-anchor="middle">compute_order_intents()</text>
+<text x="157" y="760" font-size="9.5" fill="#6e7681" text-anchor="middle">weight delta → qty delta</text>
+<text x="157" y="774" font-size="9.5" fill="#6e7681" text-anchor="middle">step_size rounding</text>
+<text x="157" y="788" font-size="9" fill="#f97316" text-anchor="middle">→ List[OrderIntent]</text>
+
+<rect x="270" y="726" width="165" height="65" rx="5" fill="#1a0e0e" stroke="#f97316" stroke-width="1"/>
+<text x="352" y="745" font-size="11" font-weight="600" fill="#fdba74" text-anchor="middle">SELL orders first</text>
+<text x="352" y="760" font-size="9.5" fill="#6e7681" text-anchor="middle">frees capital before buys</text>
+<text x="352" y="774" font-size="9.5" fill="#6e7681" text-anchor="middle">lock_for_order() on submit</text>
+<text x="352" y="788" font-size="9" fill="#f97316" text-anchor="middle">MARKET or LIMIT</text>
+
+<rect x="450" y="726" width="165" height="65" rx="5" fill="#1a0e0e" stroke="#f97316" stroke-width="1"/>
+<text x="532" y="745" font-size="11" font-weight="600" fill="#fdba74" text-anchor="middle">BUY orders</text>
+<text x="532" y="760" font-size="9.5" fill="#6e7681" text-anchor="middle">order_id → strategy_id map</text>
+<text x="532" y="774" font-size="9.5" fill="#6e7681" text-anchor="middle">submitted_orders tracked</text>
+<text x="532" y="788" font-size="9" fill="#f97316" text-anchor="middle">RebalanceResult returned</text>
+
+<rect x="630" y="726" width="190" height="65" rx="5" fill="#1a0e0e" stroke="#f97316" stroke-width="1"/>
+<text x="725" y="745" font-size="11" font-weight="600" fill="#fdba74" text-anchor="middle">Portfolio / ShadowBook</text>
+<text x="725" y="760" font-size="9.5" fill="#6e7681" text-anchor="middle">_on_order_update(event)</text>
+<text x="725" y="774" font-size="9.5" fill="#6e7681" text-anchor="middle">fill_tracker · partial releases</text>
+<text x="725" y="788" font-size="9" fill="#f97316" text-anchor="middle">update_position() → NAV/weights</text>
+
+<rect x="835" y="726" width="225" height="65" rx="5" fill="#101a10" stroke="#3fb950" stroke-width="1.5"/>
+<text x="947" y="745" font-size="11" font-weight="600" fill="#86efac" text-anchor="middle">OrderUpdateEvent loop-back</text>
+<text x="947" y="760" font-size="9.5" fill="#6e7681" text-anchor="middle">BinanceUserDataClientManager</text>
+<text x="947" y="774" font-size="9.5" fill="#6e7681" text-anchor="middle">executionReport → OrderUpdateEvent</text>
+<text x="947" y="788" font-size="9" fill="#3fb950" text-anchor="middle">→ EventBus → Portfolio/ShadowBook</text>
+
+<!-- Arrow Stage 4 → Stage 5 -->
+<line x1="560" y1="650" x2="560" y2="675" stroke="#f97316" stroke-width="1.5" marker-end="url(#arr-y)"/>
+<text x="580" y="667" font-size="9" fill="#f97316">ValidatedWeights</text>
+
+<!-- Loop-back arrow from Stage 5 to EventBus -->
+<path d="M 947 791 Q 947 850 100 850 Q 50 850 50 232" stroke="#3fb950" stroke-width="1" fill="none" stroke-dasharray="5,4" marker-end="url(#arr-g)"/>
+<text x="460" y="862" font-size="9" fill="#3fb950" text-anchor="middle">OrderUpdateEvent / BalanceUpdateEvent loop-back</text>
+</svg>
 </div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 2 — Data contracts
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<h2>2. Key Data Contracts <span>signals.py — frozen dataclasses</span></h2>
+<p class="desc">
+  These immutable dataclasses form the typed contracts between pipeline stages.
+  Each stage reads from the previous stage's output contract and enriches it.
+</p>
+
+<table>
+<tr>
+  <th>Contract</th>
+  <th>Producer</th>
+  <th>Consumer</th>
+  <th>Key fields</th>
+</tr>
+<tr>
+  <td><code>TargetWeights</code></td>
+  <td>SpotStrategy.compute_weights()</td>
+  <td>RebalanceFSM → PortfolioOptimizer</td>
+  <td>weights: Dict[str,float] · timestamp · strategy_id · price_overrides</td>
+</tr>
+<tr>
+  <td><code>ValidatedWeights</code></td>
+  <td>PortfolioOptimizer.validate()</td>
+  <td>ExecutionEngine.execute()</td>
+  <td>original: TargetWeights · weights (adjusted) · clipped · rejected · rejection_reason</td>
+</tr>
+<tr>
+  <td><code>OrderIntent</code></td>
+  <td>ExecutionEngine.compute_order_intents()</td>
+  <td>ExecutionEngine._submit_order() · Portfolio.lock_for_order()</td>
+  <td>symbol · venue · side · quantity · order_type · price · strategy_id</td>
+</tr>
+<tr>
+  <td><code>RebalanceResult</code></td>
+  <td>ExecutionEngine.execute()</td>
+  <td>RebalanceFSM._on_enter_executing() · ShadowBook lock</td>
+  <td>intents · submitted · failed · errors · submitted_orders (order_id → intent)</td>
+</tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 3 — Portfolio & ShadowBook accounting
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<h2>3. Portfolio &amp; ShadowBook — Accounting Ledgers <span>portfolio.py · shadow_book.py</span></h2>
+<p class="desc">
+  Portfolio is the exchange-level source of truth (one per venue). ShadowBook is a per-strategy
+  virtual ledger that tracks the capital slice attributable to each strategy. Both maintain
+  identical internal state shapes and process OrderUpdateEvents identically.
+</p>
+
+<div class="diagram-wrap">
+<svg viewBox="0 0 1060 340" width="1060" height="340" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <marker id="arr2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+    <polygon points="0 0, 8 3, 0 6" fill="#58a6ff"/>
+  </marker>
+  <marker id="arr2g" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+    <polygon points="0 0, 8 3, 0 6" fill="#3fb950"/>
+  </marker>
+</defs>
+
+<!-- Portfolio box -->
+<rect x="30" y="30" width="440" height="280" rx="8" fill="#161b22" stroke="#58a6ff" stroke-width="2"/>
+<text x="250" y="56" font-size="13" font-weight="600" fill="#58a6ff" text-anchor="middle">Portfolio (shared account)</text>
+<text x="250" y="74" font-size="10" fill="#6e7681" text-anchor="middle">One per venue · exchange is source of truth</text>
+
+<rect x="50" y="86" width="190" height="90" rx="5" fill="#1f2937" stroke="#374151" stroke-width="1"/>
+<text x="145" y="104" font-size="10" font-weight="600" fill="#93c5fd" text-anchor="middle">Positions &amp; Cash</text>
+<text x="145" y="118" font-size="9" fill="#6e7681" text-anchor="middle">_positions: Dict[str, Position]</text>
+<text x="145" y="132" font-size="9" fill="#6e7681" text-anchor="middle">_cash / _cash_dict (per stablecoin)</text>
+<text x="145" y="146" font-size="9" fill="#6e7681" text-anchor="middle">_mark_prices · _weights · _nav</text>
+<text x="145" y="160" font-size="9" fill="#6e7681" text-anchor="middle">_peak_equity · _max_drawdown</text>
+
+<rect x="260" y="86" width="190" height="90" rx="5" fill="#1f2937" stroke="#374151" stroke-width="1"/>
+<text x="355" y="104" font-size="10" font-weight="600" fill="#93c5fd" text-anchor="middle">Locked Balance</text>
+<text x="355" y="118" font-size="9" fill="#6e7681" text-anchor="middle">_locked_cash (LIMIT BUY reserve)</text>
+<text x="355" y="132" font-size="9" fill="#6e7681" text-anchor="middle">_locked_quantities (LIMIT SELL)</text>
+<text x="355" y="146" font-size="9" fill="#6e7681" text-anchor="middle">_locked_cash_per_order</text>
+<text x="355" y="160" font-size="9" fill="#6e7681" text-anchor="middle">_locked_qty_per_order</text>
+
+<rect x="50" y="190" width="190" height="90" rx="5" fill="#1f2937" stroke="#374151" stroke-width="1"/>
+<text x="145" y="208" font-size="10" font-weight="600" fill="#93c5fd" text-anchor="middle">Order Tracking</text>
+<text x="145" y="222" font-size="9" fill="#6e7681" text-anchor="middle">_outstanding_orders: Dict[str,Order]</text>
+<text x="145" y="236" font-size="9" fill="#6e7681" text-anchor="middle">_fill_tracker: order_id→filled_qty</text>
+<text x="145" y="250" font-size="9" fill="#6e7681" text-anchor="middle">_completed_order_ids (terminal guard)</text>
+<text x="145" y="264" font-size="9" fill="#6e7681" text-anchor="middle">_fills ring buffer (maxlen=10000)</text>
+
+<rect x="260" y="190" width="190" height="90" rx="5" fill="#1f2937" stroke="#374151" stroke-width="1"/>
+<text x="355" y="208" font-size="10" font-weight="600" fill="#93c5fd" text-anchor="middle">Event Hooks</text>
+<text x="355" y="222" font-size="9" fill="#6e7681" text-anchor="middle">_on_kline → mark price + _refresh_derived</text>
+<text x="355" y="236" font-size="9" fill="#6e7681" text-anchor="middle">_on_balance → cash sync</text>
+<text x="355" y="250" font-size="9" fill="#6e7681" text-anchor="middle">_on_order_update → fill delta</text>
+<text x="355" y="264" font-size="9" fill="#6e7681" text-anchor="middle">update_position() + lock release</text>
+
+<!-- register_shadow_book -->
+<text x="250" y="300" font-size="9.5" fill="#6e7681" text-anchor="middle">register_shadow_book() · aggregate_nav() · aggregate_cash()</text>
+
+<!-- ShadowBook box -->
+<rect x="590" y="30" width="440" height="280" rx="8" fill="#161b22" stroke="#a855f7" stroke-width="2"/>
+<text x="810" y="56" font-size="13" font-weight="600" fill="#a855f7" text-anchor="middle">ShadowBook (per strategy)</text>
+<text x="810" y="74" font-size="10" fill="#6e7681" text-anchor="middle">strategy_id · allocation fraction · virtual ledger</text>
+
+<rect x="610" y="86" width="190" height="90" rx="5" fill="#1f2937" stroke="#374151" stroke-width="1"/>
+<text x="705" y="104" font-size="10" font-weight="600" fill="#d8b4fe" text-anchor="middle">Positions &amp; Cash</text>
+<text x="705" y="118" font-size="9" fill="#6e7681" text-anchor="middle">_positions: Dict[str, Position]</text>
+<text x="705" y="132" font-size="9" fill="#6e7681" text-anchor="middle">_cash (allocation * portfolio_cash)</text>
+<text x="705" y="146" font-size="9" fill="#6e7681" text-anchor="middle">_mark_prices · _weights · _nav</text>
+<text x="705" y="160" font-size="9" fill="#6e7681" text-anchor="middle">_peak_equity · _max_drawdown</text>
+
+<rect x="820" y="86" width="190" height="90" rx="5" fill="#1f2937" stroke="#374151" stroke-width="1"/>
+<text x="915" y="104" font-size="10" font-weight="600" fill="#d8b4fe" text-anchor="middle">Locked Balance</text>
+<text x="915" y="118" font-size="9" fill="#6e7681" text-anchor="middle">_locked_cash (LIMIT BUY reserve)</text>
+<text x="915" y="132" font-size="9" fill="#6e7681" text-anchor="middle">_locked_quantities (LIMIT SELL)</text>
+<text x="915" y="146" font-size="9" fill="#6e7681" text-anchor="middle">_locked_cash_per_order</text>
+<text x="915" y="160" font-size="9" fill="#6e7681" text-anchor="middle">_locked_qty_per_order</text>
+
+<rect x="610" y="190" width="190" height="90" rx="5" fill="#1f2937" stroke="#374151" stroke-width="1"/>
+<text x="705" y="208" font-size="10" font-weight="600" fill="#d8b4fe" text-anchor="middle">Order Routing</text>
+<text x="705" y="222" font-size="9" fill="#6e7681" text-anchor="middle">_order_strategy_map (shared)</text>
+<text x="705" y="236" font-size="9" fill="#6e7681" text-anchor="middle">only routes own strategy_id orders</text>
+<text x="705" y="250" font-size="9" fill="#6e7681" text-anchor="middle">_outstanding_orders · _fill_tracker</text>
+<text x="705" y="264" font-size="9" fill="#6e7681" text-anchor="middle">_completed_order_ids</text>
+
+<rect x="820" y="190" width="190" height="90" rx="5" fill="#1f2937" stroke="#374151" stroke-width="1"/>
+<text x="915" y="208" font-size="10" font-weight="600" fill="#d8b4fe" text-anchor="middle">Modes</text>
+<text x="915" y="222" font-size="9" fill="#6e7681" text-anchor="middle">_sub_account_mode (real acct)</text>
+<text x="915" y="236" font-size="9" fill="#6e7681" text-anchor="middle">_private_event_bus (per-strat)</text>
+<text x="915" y="250" font-size="9" fill="#6e7681" text-anchor="middle">init_from_portfolio_cash()</text>
+<text x="915" y="264" font-size="9" fill="#6e7681" text-anchor="middle">init_from_existing()</text>
+
+<text x="810" y="300" font-size="9.5" fill="#6e7681" text-anchor="middle">lock_for_order() · _partial_release_lock() · release_order_lock()</text>
+
+<!-- Arrow Portfolio → ShadowBook -->
+<line x1="470" y1="170" x2="590" y2="170" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arr2)"/>
+<text x="530" y="162" font-size="9" fill="#6e7681" text-anchor="middle">register_shadow_book()</text>
+<text x="530" y="182" font-size="9" fill="#6e7681" text-anchor="middle">aggregate_nav()</text>
+</svg>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 4 — Sub-account mode
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<h2>4. Sub-Account Mode &amp; Multi-Strategy Architecture <span>WeightAggregator · ShadowBook</span></h2>
+<p class="desc">
+  Multiple strategies share one exchange connector but maintain separate capital slices via
+  ShadowBooks. The WeightAggregator merges target weights scaled by each strategy's allocation
+  fraction. In sub-account mode each strategy may have a private event bus for routing only
+  its own user-data events.
+</p>
+
+<div class="diagram-wrap">
+<svg viewBox="0 0 1060 310" width="1060" height="310" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <marker id="arr3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+    <polygon points="0 0, 8 3, 0 6" fill="#58a6ff"/>
+  </marker>
+  <marker id="arr3g" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+    <polygon points="0 0, 8 3, 0 6" fill="#3fb950"/>
+  </marker>
+  <marker id="arr3p" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+    <polygon points="0 0, 8 3, 0 6" fill="#a855f7"/>
+  </marker>
+</defs>
+
+<!-- Shared exchange -->
+<rect x="30" y="30" width="200" height="250" rx="8" fill="#1a2030" stroke="#58a6ff" stroke-width="2"/>
+<text x="130" y="56" font-size="12" font-weight="600" fill="#58a6ff" text-anchor="middle">Shared Exchange</text>
+<text x="130" y="74" font-size="9.5" fill="#6e7681" text-anchor="middle">BinanceSpotExchange</text>
+<text x="130" y="100" font-size="9.5" fill="#93c5fd" text-anchor="middle">KlineClientManager</text>
+<text x="130" y="116" font-size="9.5" fill="#93c5fd" text-anchor="middle">OrderBookClientManager</text>
+<rect x="50" y="130" width="160" height="28" rx="4" fill="#1f2d50" stroke="#2563eb" stroke-width="1"/>
+<text x="130" y="148" font-size="9.5" fill="#93c5fd" text-anchor="middle">Portfolio (shared)</text>
+<text x="130" y="170" font-size="9" fill="#6e7681" text-anchor="middle">Shared EventBus</text>
+
+<!-- WeightAggregator -->
+<rect x="270" y="80" width="200" height="120" rx="8" fill="#1a1228" stroke="#a855f7" stroke-width="2"/>
+<text x="370" y="104" font-size="12" font-weight="600" fill="#d8b4fe" text-anchor="middle">WeightAggregator</text>
+<text x="370" y="122" font-size="9" fill="#6e7681" text-anchor="middle">register_strategy(id, alloc, symbols)</text>
+<text x="370" y="136" font-size="9" fill="#6e7681" text-anchor="middle">update_weights(id, weights)</text>
+<text x="370" y="150" font-size="9" fill="#d8b4fe" text-anchor="middle">get_merged_weights()</text>
+<text x="370" y="164" font-size="9" fill="#6e7681" text-anchor="middle">Strategy A (60%) + Strategy B (40%)</text>
+<text x="370" y="178" font-size="9" fill="#6e7681" text-anchor="middle">= merged weight vector</text>
+
+<!-- Strategy A -->
+<rect x="520" y="30" width="230" height="120" rx="8" fill="#0f2c35" stroke="#0891b2" stroke-width="1.5"/>
+<text x="635" y="54" font-size="12" font-weight="600" fill="#67e8f9" text-anchor="middle">Strategy A (alloc=60%)</text>
+<text x="635" y="72" font-size="9.5" fill="#6e7681" text-anchor="middle">RebalanceFSM · PortfolioOptimizer</text>
+<text x="635" y="88" font-size="9.5" fill="#6e7681" text-anchor="middle">ExecutionEngine</text>
+<rect x="540" y="98" width="190" height="40" rx="4" fill="#1f2d40" stroke="#0891b2" stroke-width="1"/>
+<text x="635" y="116" font-size="9.5" fill="#67e8f9" text-anchor="middle">ShadowBook (id=A)</text>
+<text x="635" y="130" font-size="9" fill="#6e7681" text-anchor="middle">_sub_account_mode · _private_event_bus</text>
+
+<!-- Strategy B -->
+<rect x="520" y="170" width="230" height="120" rx="8" fill="#0f2c35" stroke="#0891b2" stroke-width="1.5"/>
+<text x="635" y="194" font-size="12" font-weight="600" fill="#67e8f9" text-anchor="middle">Strategy B (alloc=40%)</text>
+<text x="635" y="212" font-size="9.5" fill="#6e7681" text-anchor="middle">RebalanceFSM · PortfolioOptimizer</text>
+<text x="635" y="228" font-size="9.5" fill="#6e7681" text-anchor="middle">ExecutionEngine</text>
+<rect x="540" y="238" width="190" height="40" rx="4" fill="#1f2d40" stroke="#0891b2" stroke-width="1"/>
+<text x="635" y="256" font-size="9.5" fill="#67e8f9" text-anchor="middle">ShadowBook (id=B)</text>
+<text x="635" y="270" font-size="9" fill="#6e7681" text-anchor="middle">_sub_account_mode · _private_event_bus</text>
+
+<!-- StrategyRunner -->
+<rect x="800" y="80" width="230" height="150" rx="8" fill="#1c1c20" stroke="#6e7681" stroke-width="1.5"/>
+<text x="915" y="104" font-size="12" font-weight="600" fill="#c9d1d9" text-anchor="middle">StrategyRunner</text>
+<text x="915" y="122" font-size="9.5" fill="#6e7681" text-anchor="middle">Orchestrates startup / teardown</text>
+<text x="915" y="140" font-size="9.5" fill="#6e7681" text-anchor="middle">asyncio.gather(data_feeds,</text>
+<text x="915" y="154" font-size="9.5" fill="#6e7681" text-anchor="middle">strategy.run_forever())</text>
+<text x="915" y="172" font-size="9.5" fill="#6e7681" text-anchor="middle">PeriodicTask → snapshot</text>
+<text x="915" y="188" font-size="9.5" fill="#6e7681" text-anchor="middle">State: IDLE→RUNNING→STOPPED</text>
+<text x="915" y="204" font-size="9.5" fill="#6e7681" text-anchor="middle">(RunnerState enum)</text>
+
+<!-- Arrows -->
+<line x1="230" y1="140" x2="270" y2="140" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arr3)"/>
+<line x1="470" y1="120" x2="520" y2="100" stroke="#a855f7" stroke-width="1.5" marker-end="url(#arr3p)"/>
+<line x1="470" y1="160" x2="520" y2="210" stroke="#a855f7" stroke-width="1.5" marker-end="url(#arr3p)"/>
+<line x1="750" y1="90" x2="800" y2="140" stroke="#6e7681" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arr3)"/>
+<line x1="750" y1="230" x2="800" y2="190" stroke="#6e7681" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arr3)"/>
+
+<text x="246" y="132" font-size="9" fill="#6e7681">events</text>
+<text x="480" y="108" font-size="9" fill="#a855f7">merged weights</text>
+<text x="480" y="215" font-size="9" fill="#a855f7">merged weights</text>
+</svg>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 5 — Component summary table
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<h2>5. Component Summary <span>source file reference</span></h2>
+
+<table>
+<tr>
+  <th>Component</th>
+  <th>Source file</th>
+  <th>Stage</th>
+  <th>Responsibility</th>
+</tr>
+<tr>
+  <td>BinanceKlineFeed / BinanceOrderBookFeed</td>
+  <td><code>connectors/BinanceDataConnectors.py</code></td>
+  <td><span class="tag tag-blue">1</span></td>
+  <td>WebSocket kline &amp; order-book feeds, managed by shared client managers. Emit KlineEvent / OrderBookUpdateEvent.</td>
+</tr>
+<tr>
+  <td>BinanceFuturesKlineFeed / BinanceFuturesOrderBookFeed</td>
+  <td><code>connectors/BinanceFuturesDataConnectors.py</code></td>
+  <td><span class="tag tag-blue">1</span></td>
+  <td>Futures-venue equivalents connecting to fapi.binance.com.</td>
+</tr>
+<tr>
+  <td>BinanceUserDataClientManager</td>
+  <td><code>connectors/BinanceDataConnectors.py</code></td>
+  <td><span class="tag tag-blue">1</span></td>
+  <td>New WS API (wss://ws-api.binance.com). HMAC-SHA256 via userDataStream.subscribe.signature. Emits OrderUpdateEvent + BalanceUpdateEvent. Reconnects with exponential backoff (1s→60s).</td>
+</tr>
+<tr>
+  <td>SpotStrategy / EventDrivenStrategy</td>
+  <td><code>strategy/base_strategy.py</code></td>
+  <td><span class="tag tag-green">2</span></td>
+  <td>Base class. Subscribes to EventBus hooks (on_kline, on_orderbook_update, on_order_update). Calls request_rebalance() which triggers RebalanceFSM.</td>
+</tr>
+<tr>
+  <td>WeightAggregator</td>
+  <td><code>core/weight_aggregator.py</code></td>
+  <td><span class="tag tag-green">2</span></td>
+  <td>Multi-strategy weight registry. Each strategy updates its weights; aggregator merges them scaled by allocation fraction. Thread-safe via asyncio.Lock.</td>
+</tr>
+<tr>
+  <td>RebalanceFSM</td>
+  <td><code>core/rebalance_fsm.py</code></td>
+  <td><span class="tag tag-purple">3</span></td>
+  <td>Drives IDLE→COMPUTING→VALIDATING→EXECUTING→COOLDOWN pipeline. Subclasses BaseFSM. Publishes RebalanceCycleEvent and RebalanceCompleteEvent.</td>
+</tr>
+<tr>
+  <td>PortfolioOptimizer</td>
+  <td><code>risk/optimizer.py</code></td>
+  <td><span class="tag tag-amber">4</span></td>
+  <td>6-stage stateless constraint projector: rate-limit → symbol filter → per-asset clip → exposure scale → cash floor → turnover cap. Returns ValidatedWeights.</td>
+</tr>
+<tr>
+  <td>ExecutionEngine</td>
+  <td><code>execution/engine.py</code></td>
+  <td><span class="tag tag-red">5</span></td>
+  <td>Converts ValidatedWeights to OrderIntents. Sells first, then buys. Locks balance per submitted order. Returns RebalanceResult.</td>
+</tr>
+<tr>
+  <td>Portfolio</td>
+  <td><code>core/portfolio.py</code></td>
+  <td><span class="tag tag-teal">ledger</span></td>
+  <td>Shared-account position/cash ledger. Event-driven via _on_kline / _on_balance / _on_order_update. Maintains fill_tracker for incremental fills, locked_cash for LIMIT orders.</td>
+</tr>
+<tr>
+  <td>ShadowBook</td>
+  <td><code>core/shadow_book.py</code></td>
+  <td><span class="tag tag-teal">ledger</span></td>
+  <td>Per-strategy virtual ledger. Mirrors Portfolio state shape. Routes only its own strategy's orders via _order_strategy_map. Supports sub-account mode with private event bus.</td>
+</tr>
+<tr>
+  <td>BaseFSM / PeriodicTask</td>
+  <td><code>core/fsm.py</code></td>
+  <td><span class="tag tag-blue">infra</span></td>
+  <td>Async FSM base with re-entrancy guard and queued transition draining. PeriodicTask replaces bare while-True loops.</td>
+</tr>
+<tr>
+  <td>StrategyRunner</td>
+  <td><code>run_strategy.py</code></td>
+  <td><span class="tag tag-blue">infra</span></td>
+  <td>Top-level orchestrator. Wires all components, calls asyncio.gather(data feeds, strategy.run_forever()). Manages RunnerState: IDLE→RUNNING→STOPPING→STOPPED/FAILED.</td>
+</tr>
+</table>
+
 </body>
 </html>

@@ -8,19 +8,22 @@ Markowitz-style optimizer (that logic, if desired, lives in the strategy).
 """
 
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union, TYPE_CHECKING
 
 from elysian_core.core.portfolio import Portfolio
 from elysian_core.core.signals import TargetWeights, ValidatedWeights
 from elysian_core.risk.risk_config import RiskConfig
 import elysian_core.utils.logger as log
 
+if TYPE_CHECKING:
+    from elysian_core.core.shadow_book import ShadowBook
+
 logger = log.setup_custom_logger("root")
 
 
 class PortfolioOptimizer:
 
-    def __init__(self, risk_config: RiskConfig, portfolio: Portfolio,
+    def __init__(self, risk_config: RiskConfig, portfolio: Union[Portfolio, "ShadowBook"],
                  cfg: Optional[Any] = None):
         self._config = risk_config
         self._portfolio = portfolio
@@ -234,4 +237,4 @@ class PortfolioOptimizer:
             result[sym] = orig_w + (target_w - orig_w) * scale
             
         # Drop zero weights
-        return {s: w for s, w in result.items()}
+        return {s: w for s, w in result.items() if abs(w) > 1e-12}

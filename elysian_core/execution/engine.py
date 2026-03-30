@@ -17,14 +17,17 @@ Pipeline per rebalance cycle:
 
 import asyncio
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
 from elysian_core.connectors.base import AbstractDataFeed, SpotExchangeConnector
-from elysian_core.core.enums import OrderType, Side, Venue, AssetType
+from elysian_core.core.enums import AssetType, OrderType, Side, Venue
 from elysian_core.core.portfolio import Portfolio
 from elysian_core.core.signals import OrderIntent, RebalanceResult, ValidatedWeights
 from elysian_core.risk.risk_config import RiskConfig
 import elysian_core.utils.logger as log
+
+if TYPE_CHECKING:
+    from elysian_core.core.shadow_book import ShadowBook
 
 logger = log.setup_custom_logger("root")
 
@@ -44,7 +47,7 @@ class ExecutionEngine:
     def __init__(
         self,
         exchanges: Dict[Venue, SpotExchangeConnector],
-        portfolio: Portfolio,
+        portfolio: Union[Portfolio, "ShadowBook"],
         feeds: Dict[str, AbstractDataFeed],
         risk_config: Optional[RiskConfig] = None,
         default_venue: Venue = Venue.BINANCE,
@@ -171,21 +174,13 @@ class ExecutionEngine:
                 continue
 
             # Weight-delta filter: skip legs below threshold
-            current_weight = (self._portfolio.free_quantity(symbol) * price) / total_value
+            current_qty = self._portfolio.position(symbol).quantity
+            current_weight = (current_qty * price) / total_value
             weight_delta = abs(target_weight - current_weight)
-            
-            
-            # if weight_delta < self._risk_config.min_weight_delta:    ### This should be handled in optimizer.py
-            #     logger.debug(
-            #         f"[ExecutionEngine] Skipping {symbol}: weight_delta={weight_delta:.4f} "
-            #         f"< min={self._risk_config.min_weight_delta:.4f}"
-            #     )
-            #     continue    
 
             # Target vs current quantity
             target_notional = target_weight * total_value
             target_qty = target_notional / price
-            current_qty = self._portfolio.free_quantity(symbol)
             delta_qty = target_qty - current_qty
 
             # Round to exchange step size
@@ -287,6 +282,6 @@ class ExecutionEngine:
                 if price and price > 0:
                     prices[symbol] = price
             except Exception as e:
-                logger.error(f'Unable to get mark prices from feeds')
+                logger.error(f'[ExecutionEngine] Unable to get mark price for {symbol}: {e}')
                 continue
         return prices

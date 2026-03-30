@@ -22,8 +22,6 @@ from typing import TYPE_CHECKING, Dict, Optional, Set
 
 import elysian_core.utils.logger as log
 
-from elysian_core.core.shadow_book import reconcile_shadow_books
-
 if TYPE_CHECKING:
     from elysian_core.core.shadow_book import ShadowBook
 
@@ -138,25 +136,12 @@ class WeightAggregator:
         mark_prices: Dict[str, float],
         portfolio_total_value: float,
     ) -> None:
-        """Reconcile all shadow books to target positions after a rebalance.
+        """No-op: fill attribution is now handled in real-time via ORDER_UPDATE events.
 
-        For each strategy, computes the target position based on the strategy's
-        raw weights, allocation, and portfolio total value.  The delta between
-        target and current shadow position is applied as a fill via apply_fill(),
-        preserving entry price tracking and realized PnL.
-
-        Called by RebalanceFSM after execution completes.
+        Previously this called reconcile_shadow_books() which overwrote event-driven
+        fills with mark-price approximations. Kept as a no-op for API compatibility.
         """
-        
-
-        async with self._lock:
-            reconcile_shadow_books(
-                shadow_books=self._shadow_books,
-                strategy_weights=self._weights,
-                allocations=self._allocations,
-                mark_prices=mark_prices,
-                portfolio_total_value=portfolio_total_value,
-            )
+        pass
 
     def __repr__(self) -> str:
         entries = ", ".join(

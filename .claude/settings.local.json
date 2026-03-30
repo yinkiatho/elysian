@@ -2,11 +2,17 @@
   "permissions": {
     "allow": [
       "Bash(venv/Scripts/python.exe -c \"import py_compile; py_compile.compile\\(''elysian_core/config/config.yaml'', doraise=True\\); print\\(''OK''\\)\")",
-      "Bash(venv/Scripts/python.exe -c \"import yaml; data = yaml.safe_load\\(open\\(''elysian_core/config/config.yaml''\\)\\); print\\(''YAML valid''\\); print\\(''risk keys:'', list\\(data.get\\(''risk'', {}\\).keys\\(\\)\\)\\); print\\(''portfolio keys:'', list\\(data.get\\(''portfolio'', {}\\).keys\\(\\)\\)\\); print\\(''execution keys:'', list\\(data.get\\(''execution'', {}\\).keys\\(\\)\\)\\); print\\(''strategy keys:'', list\\(data.get\\(''strategy'', {}\\).keys\\(\\)\\)\\)\")"
+      "Bash(venv/Scripts/python.exe -c \"import yaml; data = yaml.safe_load\\(open\\(''elysian_core/config/config.yaml''\\)\\); print\\(''YAML valid''\\); print\\(''risk keys:'', list\\(data.get\\(''risk'', {}\\).keys\\(\\)\\)\\); print\\(''portfolio keys:'', list\\(data.get\\(''portfolio'', {}\\).keys\\(\\)\\)\\); print\\(''execution keys:'', list\\(data.get\\(''execution'', {}\\).keys\\(\\)\\)\\); print\\(''strategy keys:'', list\\(data.get\\(''strategy'', {}\\).keys\\(\\)\\)\\)\")",
+      "mcp__claude_ai_Atlassian__getAccessibleAtlassianResources",
+      "mcp__claude_ai_Atlassian__getConfluenceSpaces",
+      "mcp__claude_ai_Atlassian__getPagesInConfluenceSpace",
+      "mcp__claude_ai_Atlassian__getConfluencePageDescendants",
+      "mcp__claude_ai_Atlassian__getConfluencePage",
+      "Bash(grep -r \"class SpotStrategy\\\\|class EventDrivenStrategy\" /c/Users/yinki/Coding Work/elysian/elysian_core --include=*.py -A 10)"
     ]
   },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "claude-flow"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }

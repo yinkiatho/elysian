@@ -133,12 +133,12 @@ def test_effective_portfolio_for(cfg):
 
 
 # ---------------------------------------------------------------------------
-# Test 5 — backward compat: old yaml_path kwarg
+# Test 5 — backward compat: yaml_path kwarg (points to trading_config.yaml)
 # ---------------------------------------------------------------------------
 def test_load_app_config_legacy_yaml_path():
     from elysian_core.config.app_config import load_app_config
 
-    cfg_legacy = load_app_config(yaml_path='elysian_core/config/config.yaml')
+    cfg_legacy = load_app_config(yaml_path='elysian_core/config/trading_config.yaml')
     assert cfg_legacy.risk.max_weight_per_asset == 0.25, (
         f"Expected 0.25, got {cfg_legacy.risk.max_weight_per_asset}"
     )
@@ -159,6 +159,13 @@ def test_load_strategy_yaml():
     )
     assert sc.risk_overrides["max_weight_per_asset"] == 0.20, (
         f"Expected 0.20, got {sc.risk_overrides['max_weight_per_asset']}"
+    )
+    # Sub-account fields default to empty (no sub-account configured in default strategy)
+    assert sc.sub_account_api_key == "", (
+        f"Expected empty sub_account_api_key, got {sc.sub_account_api_key!r}"
+    )
+    assert sc.sub_account_api_secret == "", (
+        f"Expected empty sub_account_api_secret, got {sc.sub_account_api_secret!r}"
     )
 
     print("PASS: test_load_strategy_yaml")
@@ -195,7 +202,7 @@ def test_strategy_runner_new_api():
 def test_strategy_runner_legacy_config_yaml():
     from elysian_core.run_strategy import StrategyRunner
 
-    runner_legacy = StrategyRunner(config_yaml='elysian_core/config/config.yaml')
+    runner_legacy = StrategyRunner(config_yaml='elysian_core/config/trading_config.yaml')
     assert runner_legacy.cfg.risk.max_weight_per_asset == 0.25, (
         f"Expected 0.25, got {runner_legacy.cfg.risk.max_weight_per_asset}"
     )

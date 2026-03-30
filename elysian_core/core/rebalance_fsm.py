@@ -294,7 +294,7 @@ class RebalanceFSM(BaseFSM):
         await self._publish_cycle_event("cooldown", **ctx)
 
         if self._cooldown_s > 0:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             loop.call_later(self._cooldown_s, self._fire_cooldown_done)
         else:
             # No cooldown — immediately transition back to IDLE
@@ -317,7 +317,7 @@ class RebalanceFSM(BaseFSM):
 
         # Auto-retry after cooldown
         if self._cooldown_s > 0:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             loop.call_later(self._cooldown_s, self._fire_retry)
         else:
             await self.trigger("retry")

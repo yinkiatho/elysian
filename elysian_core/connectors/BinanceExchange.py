@@ -277,11 +277,15 @@ class BinanceSpotExchange(SpotExchangeConnector):
         qs = urlencode(params)
         sig = hmac.new(self._api_secret.encode(), qs.encode(), hashlib.sha256).hexdigest()
         params["signature"] = sig
-        resp = requests.get(
-            "https://api.binance.com/sapi/v1/capital/deposit/address",
-            headers={"X-MBX-APIKEY": self._api_key},
-            params=params,
-        )
+
+        def _sync_fetch():
+            return requests.get(
+                "https://api.binance.com/sapi/v1/capital/deposit/address",
+                headers={"X-MBX-APIKEY": self._api_key},
+                params=params,
+            )
+
+        resp = await asyncio.to_thread(_sync_fetch)
         if resp.status_code == 200:
             return resp.json()["address"]
         logger.error(f"get_deposit_address failed: {resp.status_code} {resp.json()}")

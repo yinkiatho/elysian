@@ -553,8 +553,8 @@ class SpotExchangeConnector(ABC):
         
     async def cancel_all_orders(self, symbol: str):
         """Cancel all open orders for a given symbol."""
-        orders = self._open_orders.get(symbol, [])
-        asyncio.gather(*(self.cancel_order(symbol, order['order_id']) for order in orders))
+        orders = list(self._open_orders.get(symbol, {}).keys())
+        await asyncio.gather(*(self.cancel_order(symbol, oid) for oid in orders))
                 
 
 

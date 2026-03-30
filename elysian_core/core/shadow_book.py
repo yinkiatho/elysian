@@ -25,6 +25,7 @@ from typing import Deque, Dict, List, Optional, Set
 
 from elysian_core.core.enums import OrderStatus, OrderType, Side, Venue
 from elysian_core.core.events import EventType
+from elysian_core.core.order import Order
 from elysian_core.core.portfolio import Fill
 from elysian_core.core.position import Position
 from elysian_core.core.signals import OrderIntent
@@ -94,6 +95,15 @@ class ShadowBook:
         self._locked_qty_per_order: Dict[str, float] = {}
         self._pending_order_id_to_intent: Dict[str, OrderIntent] = {}
 
+        # Outstanding orders (live, maintained by _on_order_update)
+        self._outstanding_orders: Dict[str, Order] = {}  # order_id -> Order
+
+        # Sub-account mode state
+        self._exchange = None                  # set by sync_from_exchange()
+        self._sub_account_mode: bool = False   # real account vs virtual slice
+        self._cash_dict: Dict[str, float] = {}
+        self._private_event_bus = None         # per-strategy bus for user data events
+
 
     # ── Initialization ────────────────────────────────────────────────────
 
@@ -143,34 +153,199 @@ class ShadowBook:
             f"allocation={self._allocation:.0%}"
         )
 
+    def sync_from_exchange(self, exchange, feeds: Optional[Dict] = None):
+        """Initialize from real exchange state. Called once at startup for sub-account mode.
+
+        Sets up cash, positions, mark prices, and open orders from the exchange.
+        Feeds may be empty at sync time — mark prices self-correct on the first KLINE event.
+        """
+        self._exchange = exchange
+        feeds = feeds or {}
+
+        # Cash: stablecoin balances
+        for stable in _STABLECOINS:
+            bal = exchange.get_balance(stable)
+            if bal > 0:
+                self._cash_dict[stable] = bal
+        self._cash = sum(self._cash_dict.values())
+
+        # Positions: non-stablecoin balances — map base asset → trading symbol
+        base_to_symbol = {
+            info.get("base_asset"): sym
+            for sym, info in exchange._token_infos.items()
+            if info.get("base_asset")
+        }
+        for asset, qty in exchange._balances.items():
+            if asset in _STABLECOINS or qty <= 0:
+                continue
+            symbol = base_to_symbol.get(asset)
+            if symbol is None:
+                continue
+            entry_price = 0.0
+            feed = feeds.get(symbol)
+            if feed:
+                try:
+                    p = feed.latest_price
+                    if p and p > 0:
+                        entry_price = p
+                        self._mark_prices[symbol] = p
+                except Exception:
+                    logger.warning(f"[ShadowBook-{self._strategy_id}] Failed to get price for {symbol} during sync")
+            self._positions[symbol] = Position(
+                symbol=symbol, venue=self._venue, quantity=qty, avg_entry_price=entry_price
+            )
+
+        # Mark prices from all remaining feeds
+        for sym, feed in feeds.items():
+            if sym not in self._mark_prices:
+                try:
+                    p = feed.latest_price
+                    if p and p > 0:
+                        self._mark_prices[sym] = p
+                except Exception:
+                    logger.warning(f"[ShadowBook-{self._strategy_id}] Failed to get price for {sym} during sync")
+
+        # Outstanding orders + fill tracker
+        for sym, orders in exchange._open_orders.items():
+            for oid, order in orders.items():
+                self._outstanding_orders[oid] = order
+                if order.filled_qty > 0:
+                    self._fill_tracker[oid] = order.filled_qty
+
+        self._refresh_derived()
+        self._peak_equity = max(self._peak_equity, self._nav)
+        logger.info(
+            f"[ShadowBook-{self._strategy_id}] Synced from exchange: "
+            f"cash={self._cash:.2f} ({self._cash_dict}), "
+            f"{len(self._positions)} positions, "
+            f"{len(self._mark_prices)} mark prices, "
+            f"{len(self._outstanding_orders)} open orders"
+        )
+
     # ── Lifecycle — EventBus wiring ──────────────────────────────────────
 
-    def start(self, event_bus, order_strategy_map: Optional[Dict[str, int]] = None):
-        """Subscribe to ORDER_UPDATE for event-driven fill attribution.
+    def start(self, event_bus, order_strategy_map: Optional[Dict[str, int]] = None,
+              sub_account_mode: bool = False, private_event_bus=None):
+        """Subscribe to event buses for fill attribution and mark price updates.
 
         Parameters
         ----------
         event_bus:
-            Shared EventBus instance.
+            Shared EventBus instance (market data: KLINE, ORDERBOOK_UPDATE).
         order_strategy_map:
             Reference to ExecutionEngine._order_strategy_map — a shared dict
             mapping exchange order_id -> strategy_id.  Used to filter events
-            to only fills placed by this strategy.
+            to only fills placed by this strategy (shared-account mode only).
+        sub_account_mode:
+            If True, subscribes to private_event_bus for ORDER_UPDATE and
+            BALANCE_UPDATE, and to shared event_bus for KLINE.
+        private_event_bus:
+            Per-strategy EventBus for user data events (sub-account mode only).
         """
-        self._event_bus = event_bus
+        self._sub_account_mode = sub_account_mode
         self._order_strategy_map = order_strategy_map
-        event_bus.subscribe(EventType.ORDER_UPDATE, self._on_order_update)
-        logger.info(
-            f"[ShadowBook-{self._strategy_id}] started — subscribed to ORDER_UPDATE"
-        )
+        self._event_bus = event_bus
+        self._private_event_bus = private_event_bus
+
+        # ORDER_UPDATE from private bus (sub-account) or shared bus (shared-account)
+        bus_for_orders = private_event_bus if (sub_account_mode and private_event_bus) else event_bus
+        bus_for_orders.subscribe(EventType.ORDER_UPDATE, self._on_order_update)
+
+        if sub_account_mode and private_event_bus:
+            # KLINE from shared bus (market data)
+            event_bus.subscribe(EventType.KLINE, self._on_kline)
+            # BALANCE_UPDATE from private bus (account-specific)
+            private_event_bus.subscribe(EventType.BALANCE_UPDATE, self._on_balance_update)
+            logger.info(
+                f"[ShadowBook-{self._strategy_id}] started in sub-account mode — "
+                f"ORDER_UPDATE+BALANCE_UPDATE on private bus, KLINE on shared bus"
+            )
+        else:
+            logger.info(
+                f"[ShadowBook-{self._strategy_id}] started — subscribed to ORDER_UPDATE"
+            )
 
     def stop(self):
-        """Unsubscribe from EventBus."""
-        if self._event_bus is None:
-            return
-        self._event_bus.unsubscribe(EventType.ORDER_UPDATE, self._on_order_update)
-        self._event_bus = None
+        """Unsubscribe from all event buses."""
+        if self._event_bus:
+            if self._sub_account_mode:
+                self._event_bus.unsubscribe(EventType.KLINE, self._on_kline)
+            else:
+                self._event_bus.unsubscribe(EventType.ORDER_UPDATE, self._on_order_update)
+            self._event_bus = None
+        if self._private_event_bus:
+            self._private_event_bus.unsubscribe(EventType.ORDER_UPDATE, self._on_order_update)
+            self._private_event_bus.unsubscribe(EventType.BALANCE_UPDATE, self._on_balance_update)
+            self._private_event_bus = None
         logger.info(f"[ShadowBook-{self._strategy_id}] stopped")
+
+    def _update_order(self, order: Order) -> None:
+        """Upsert *order* into ``_outstanding_orders`` using FSM-validated transitions.
+
+        - New orders (not yet tracked): stored directly unless already terminal.
+        - Existing tracked orders: FSM transition applied, fill state synced.
+        - Terminal orders: removed from the dict.
+        """
+        tracked = self._outstanding_orders.get(order.id)
+
+        if tracked is None:
+            if not order.is_terminal:
+                self._outstanding_orders[order.id] = order
+            return
+
+        # Apply FSM-validated status transition
+        if order.status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
+            if order.filled_qty > tracked.filled_qty:
+                tracked.update_fill(order.filled_qty, order.avg_fill_price)
+        else:
+            tracked.transition_to(order.status)
+
+        # Sync exchange metadata
+        tracked.commission = order.commission
+        tracked.commission_asset = order.commission_asset
+        tracked.last_updated_timestamp = order.last_updated_timestamp
+
+        if tracked.is_terminal:
+            self._outstanding_orders.pop(order.id, None)
+
+    async def _on_kline(self, event):
+        """Update mark prices from kline close (sub-account mode only)."""
+        if event.venue == self._venue and event.kline.close and event.kline.close > 0:
+            self._mark_prices[event.symbol] = event.kline.close
+            self._refresh_derived()
+
+    async def _on_balance_update(self, event):
+        """Handle balance updates from the private sub-account event bus."""
+        base_to_symbol = {}
+        if self._exchange:
+            base_to_symbol = {
+                info.get("base_asset"): sym
+                for sym, info in self._exchange._token_infos.items()
+                if info.get("base_asset")
+            }
+
+        if event.asset in _STABLECOINS:
+            self._cash_dict[event.asset] = self._cash_dict.get(event.asset, 0.0) + event.delta
+            self._cash = sum(self._cash_dict.values())
+            self._refresh_derived()
+        else:
+            # Map raw asset (e.g. "ETH") to trading symbol (e.g. "ETHUSDT")
+            symbol = base_to_symbol.get(event.asset, event.asset)
+            curr = self._positions.get(symbol)
+            if curr is None:
+                self._positions[symbol] = Position(
+                    symbol=symbol, venue=self._venue, quantity=event.delta,
+                    avg_entry_price=self._mark_prices.get(symbol, 0.0),
+                )
+            else:
+                self._positions[symbol] = Position(
+                    symbol=symbol, venue=curr.venue,
+                    quantity=curr.quantity + event.delta,
+                    avg_entry_price=curr.avg_entry_price,
+                    realized_pnl=curr.realized_pnl,
+                    total_commission=curr.total_commission,
+                )
+            self._refresh_derived()
 
     async def _on_order_update(self, event):
         """Route exchange fill events into apply_fill().
@@ -182,9 +357,16 @@ class ShadowBook:
         """
         order = event.order
 
-        # Filter by strategy ownership
-        if order.strategy_id is not None and order.strategy_id != self._strategy_id:
-            return
+        # In sub-account mode: private bus scopes to this strategy, verify venue only
+        # In shared-account mode: filter by strategy_id ownership
+        if self._sub_account_mode:
+            if event.venue != self._venue:
+                return
+        else:
+            if order.strategy_id is not None and order.strategy_id != self._strategy_id:
+                return
+
+        self._update_order(order)
 
         if order.status not in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
             if order.is_terminal and order.id not in self._completed_order_ids:
@@ -233,12 +415,22 @@ class ShadowBook:
     # ── Read — Identity ───────────────────────────────────────────────────
 
     @property
+    def outstanding_orders(self) -> Dict[str, Order]:
+        """Live outstanding orders for this strategy, keyed by order_id."""
+        return dict(self._outstanding_orders)
+
+    @property
     def strategy_id(self) -> int:
         return self._strategy_id
 
     @property
     def allocation(self) -> float:
         return self._allocation
+
+    @property
+    def is_sub_account_mode(self) -> bool:
+        """True if this shadow book tracks a real sub-account (not a virtual slice)."""
+        return self._sub_account_mode
 
     # ── Read — Positions & Cash ───────────────────────────────────────────
 
@@ -350,7 +542,6 @@ class ShadowBook:
         return max(0.0, (self._peak_equity - nav) / self._peak_equity)
 
     # ── Write — Fill attribution ──────────────────────────────────────────
-
     def apply_fill(self, symbol: str, qty_delta: float, price: float,
                    commission: float = 0.0, venue: Optional[Venue] = None):
         """Attribute a fill to this shadow book.
@@ -358,6 +549,8 @@ class ShadowBook:
         Mirrors Portfolio.update_position() logic but operates on this
         strategy's virtual positions only.  Called by the fill attribution
         system after execution completes.
+        
+        Fill adjusts the Position Object, 
         """
         if abs(qty_delta) < 1e-12:
             return
@@ -394,8 +587,13 @@ class ShadowBook:
         self._positions[symbol] = pos
         if pos.is_flat():
             self._positions.pop(symbol, None)
-        self._cash -= qty_delta * price
-        self._cash -= commission
+        # In sub-account mode, cash is managed exclusively by _on_balance_update()
+        # (which derives _cash from _cash_dict). Adjusting _cash here would cause
+        # double-counting because Binance emits both ORDER_UPDATE and BALANCE_UPDATE
+        # for the same fill event.
+        if not self._sub_account_mode:
+            self._cash -= qty_delta * price
+            self._cash -= commission
 
         self._mark_prices[symbol] = price
         self._refresh_derived()
@@ -430,7 +628,10 @@ class ShadowBook:
 
         Called automatically by base_strategy._dispatch_balance() so that
         deposits and withdrawals are reflected in the shadow book.
+        In sub-account mode, returns early — handled by _on_balance_update on private bus.
         """
+        if self._sub_account_mode:
+            return  # handled by _on_balance_update on private event bus
         if event.asset in _STABLECOINS:
             self._cash += event.delta * self._allocation
             self._refresh_derived()

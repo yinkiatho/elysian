@@ -27,3 +27,6 @@ betterproto>=2.0.0b6       # protobuf dataclasses in utils/data_types.py
 pylru>=1.2.0
 loguru>=0.7.0              # used in VolatiltyFeed
 redis>=5.0.0               # used in VolatiltyFeed
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest>=9.0.0

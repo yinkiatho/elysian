@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from elysian_core.core.shadow_book import ShadowBook
 
 from elysian_core.connectors.base import SpotExchangeConnector, AbstractDataFeed
-from elysian_core.core.enums import Side, StrategyState, Venue, AssetType
+from elysian_core.core.enums import StrategyState, Venue, AssetType
 from elysian_core.core.event_bus import EventBus
 from elysian_core.core.portfolio import Portfolio
 from elysian_core.core.events import (
@@ -144,6 +144,11 @@ class SpotStrategy:
         """The rebalance cycle FSM, or None if not configured."""
         return self._rebalance_fsm
 
+    @property
+    def is_sub_account_mode(self) -> bool:
+        """True if this strategy operates in dedicated sub-account mode."""
+        return getattr(self._shadow_book, '_sub_account_mode', False)
+
     async def start(self, aggregator=None):
         """Register all hooks with the event bus and call :meth:`on_start`."""
         if self._state != StrategyState.CREATED:
@@ -249,9 +254,11 @@ class SpotStrategy:
     async def _dispatch_kline(self, event: KlineEvent):
         if event.venue not in self.venues:
             return
-        # Keep shadow book mark prices in sync with live klines
-        if self._shadow_book is not None and event.kline.close and event.kline.close > 0:
-            self._shadow_book.update_mark_prices({event.symbol: event.kline.close})
+        # Only manually update shadow book mark prices in shared-account mode.
+        # In sub-account mode, ShadowBook has its own KLINE subscription via the shared bus.
+        if self._shadow_book is not None and not self.is_sub_account_mode:
+            if event.kline.close and event.kline.close > 0:
+                self._shadow_book.update_mark_prices({event.symbol: event.kline.close})
         self._mark_running()
         try:
             await self.on_kline(event)
@@ -277,7 +284,9 @@ class SpotStrategy:
     async def _dispatch_balance(self, event: BalanceUpdateEvent):
         if event.venue not in self.venues:
             return
-        if self._shadow_book is not None:
+        # Only manually call on_balance in shared-account mode.
+        # In sub-account mode, ShadowBook handles balance updates via its private bus subscription.
+        if self._shadow_book is not None and not self.is_sub_account_mode:
             try:
                 self._shadow_book.on_balance(event)
             except Exception as e:

@@ -58,7 +58,7 @@ class BinanceKlineClientManager:
         for i in range(retries):
             try:
                 # Pre-resolve DNS to avoid async DNS issues
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 await loop.getaddrinfo("api.binance.com", 443)
                 logger.debug("BinanceKlineClientManager: DNS pre-resolved successfully")
 
@@ -115,6 +115,8 @@ class BinanceKlineClientManager:
     def register_feed(self, feed: 'BinanceKlineFeed'):
         self._active_feeds[feed._name] = feed
 
+    def get_feed(self, symbol: str):
+        return self._active_feeds.get(symbol)
 
     def unregister_feed(self, symbol: str):
         self._active_feeds.pop(symbol, None)
@@ -242,7 +244,7 @@ class BinanceOrderBookClientManager:
         for i in range(retries):
             try:
                 # Pre-resolve DNS to avoid async DNS issues
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 await loop.getaddrinfo("api.binance.com", 443)
                 logger.debug("BinanceOrderBookClientManager: DNS pre-resolved successfully")
 
@@ -298,6 +300,9 @@ class BinanceOrderBookClientManager:
 
     def register_feed(self, feed: 'BinanceOrderBookFeed'):
         self._active_feeds[feed._name] = feed
+
+    def get_feed(self, symbol: str):
+        return self._active_feeds.get(symbol)
 
     def unregister_feed(self, symbol: str):
         self._active_feeds.pop(symbol, None)
@@ -494,18 +499,20 @@ class BinanceOrderBookFeed(AbstractDataFeed):
         self._name = asset
         self._interval = interval
 
-    def _fetch_rest_snapshot(self, limit: int = 100) -> dict:
-        resp = requests.get(
-            "https://api.binance.com/api/v3/depth",
-            params={"symbol": self._name, "limit": min(limit, 5000)},
-        )
-        resp.raise_for_status()
-        return resp.json()
+    async def _fetch_rest_snapshot(self, limit: int = 100) -> dict:
+        def _sync_fetch():
+            resp = requests.get(
+                "https://api.binance.com/api/v3/depth",
+                params={"symbol": self._name, "limit": min(limit, 5000)},
+            )
+            resp.raise_for_status()
+            return resp.json()
+        return await asyncio.to_thread(_sync_fetch)
 
     async def get_initial_snapshot(self):
         """Fetch snapshot and process any buffered events that cover it."""
-        
-        raw = self._fetch_rest_snapshot(100)
+
+        raw = await self._fetch_rest_snapshot(100)
         ts = int(time.time() * 1000)
         bids = [[float(b[0]), float(b[1])] for b in raw["bids"]]
         asks = [[float(a[0]), float(a[1])] for a in raw["asks"]]

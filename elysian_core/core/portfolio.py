@@ -16,6 +16,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Deque, Dict, List, Optional, Set
 from elysian_core.core.enums import OrderStatus, OrderType, Side, Venue
+from elysian_core.core.order import Order
 from elysian_core.core.position import Position
 from elysian_core.core.signals import OrderIntent
 import elysian_core.utils.logger as log
@@ -58,7 +59,7 @@ class Portfolio:
     _STABLECOINS = frozenset({"USDT", "USDC", "BUSD"})
 
     def __init__(self, exchange, max_history: int = 10_000, 
-                        venue: Venue = Venue.BINANCE,cfg: AppConfig = None):
+                        venue: Venue = Venue.BINANCE, cfg: AppConfig = None):
         self.cfg = cfg
         self._positions: Dict[str, Position] = {}
         self._cash: float = 0.0  # To Update as we sync from exchange
@@ -88,7 +89,7 @@ class Portfolio:
         # ── Fill tracking (for ORDER_UPDATE → update_position() delta) ───
         # Tracks cumulative filled qty seen per order_id so that each
         # ORDER_UPDATE event applies only the *incremental* fill qty,
-        # not the full cumulative qty.  Seeded at startup from open orders.
+        # not t he full cumulative qty.  Seeded at startup from open orders.
         # Note: order.commission from OrderUpdateEvent is already per-fill
         # (Binance field "n"), so no commission tracker is needed.
         self._fill_tracker: Dict[str, float] = {}  # order_id -> last known filled_qty
@@ -107,6 +108,13 @@ class Portfolio:
         # Exchange and Venue setting, only one exchange and venue per portfolio
         self.exchange = exchange
         self.venue = venue
+        
+        
+        # Outstanding orders (live, maintained by _on_order_update)
+        self._outstanding_orders: Dict[str, Order] = {}  # order_id -> Order
+
+        # Sub-account aggregation registry
+        self._shadow_books: Dict[int, Any] = {}
 
     # ══════════════════════════════════════════════════════════════════════════
     #  Lifecycle — EventBus wiring
@@ -190,11 +198,10 @@ class Portfolio:
                 except Exception:
                     pass
 
-        # ── 4. Open orders: snapshot from exchange ────────────────────────
-        self._open_orders: Dict[str, dict] = {}
+        # ── 4. Outstanding orders: snapshot from exchange ─────────────────
         for sym, orders in self.exchange._open_orders.items():
-            if orders:
-                self._open_orders[sym] = dict(orders)
+            for oid, order in orders.items():
+                self._outstanding_orders[oid] = order
 
         # ── 5. Seed fill tracker from pre-existing partially-filled orders ─
         # Prevents double-counting on restart when orders were partially
@@ -208,7 +215,7 @@ class Portfolio:
         self._refresh_derived()  # Updates
         self._peak_equity = max(self._peak_equity, self._nav)
 
-        total_open = sum(len(o) for o in self._open_orders.values())
+        total_open = len(self._outstanding_orders)
         logger.info(
             f"Portfolio synced from {venue.value}: "
             f"cash={self._cash:.2f} ({self._cash_dict}), "
@@ -287,31 +294,67 @@ class Portfolio:
             self._refresh_derived()
         
         elif event.venue == self.venue:
-            curr_position = self._positions.get(event.asset, None)
+            # Map raw base asset (e.g. "ETH") to trading pair (e.g. "ETHUSDT")
+            base_to_symbol = {
+                info.get("base_asset"): sym
+                for sym, info in self.exchange._token_infos.items()
+                if info.get("base_asset")
+            }
+            symbol = base_to_symbol.get(event.asset, event.asset)
+            curr_position = self._positions.get(symbol, None)
             if not curr_position:
                 # Making new position — seed entry price from mark price so unrealized PnL starts at 0
-                self._positions[event.asset] = Position(event.asset,
+                self._positions[symbol] = Position(symbol,
                                                         venue=self.venue,
                                                         quantity=event.delta,
-                                                        avg_entry_price=self._mark_prices.get(event.asset, 0.0),
+                                                        avg_entry_price=self._mark_prices.get(symbol, 0.0),
                                                         )
             else:
                 # Update existing position
-                self._positions[event.asset] = Position(event.asset,
+                self._positions[symbol] = Position(symbol,
                                                         venue=self.venue,
                                                         quantity=curr_position.quantity + event.delta,
-                                                        avg_entry_price= curr_position.avg_entry_price,
+                                                        avg_entry_price=curr_position.avg_entry_price,
                                                         realized_pnl=curr_position.realized_pnl,
                                                         total_commission=curr_position.total_commission)
             logger.info(
-            f"[Portfolio] Balance update: {event.asset} delta={event.delta:+.6f} "
-            f"Old Position: {curr_position} to new Position: {self._positions[event.asset]}"
-            )
+                f"[Portfolio] Balance update: {event.asset} -> {symbol} delta={event.delta:+.6f} "
+                f"Old Position: {curr_position} to new Position: {self._positions[symbol]}"
+                )
             self._refresh_derived()
         else:
             return
         
     
+    def _update_order(self, order: Order) -> None:
+        """Upsert *order* into ``_outstanding_orders`` using FSM-validated transitions.
+
+        - New orders (not yet tracked): stored directly unless already terminal.
+        - Existing tracked orders: FSM transition applied, fill state synced.
+        - Terminal orders: removed from the dict.
+        """
+        tracked = self._outstanding_orders.get(order.id)
+
+        if tracked is None:
+            if not order.is_terminal:
+                self._outstanding_orders[order.id] = order
+            return
+
+        # Apply FSM-validated status transition
+        if order.status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
+            if order.filled_qty > tracked.filled_qty:
+                tracked.update_fill(order.filled_qty, order.avg_fill_price)
+        else:
+            tracked.transition_to(order.status)
+
+        # Sync exchange metadata
+        tracked.commission = order.commission
+        tracked.commission_asset = order.commission_asset
+        tracked.last_updated_timestamp = order.last_updated_timestamp
+
+        if tracked.is_terminal:
+            self._outstanding_orders.pop(order.id, None)
+
     async def _on_order_update(self, event):
         """Route exchange fill events into update_position().
 
@@ -325,6 +368,9 @@ class Portfolio:
         order = event.order
         if event.venue != self.venue:
             return
+
+        self._update_order(order)
+
         if order.status not in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
             # Clean up tracker for terminal non-fill statuses (cancelled, rejected, expired)
             if order.is_terminal and order.id not in self._completed_order_ids:
@@ -370,8 +416,8 @@ class Portfolio:
             self.release_order_lock(order_id)
 
     def _refresh_derived(self):
-        """Recomputes from current mark prices:"
-           1.weights,
+        """Recomputes from current mark prices:
+           1. weights
            2. Nav
            3. peak_equity
            4. max_drawdown
@@ -435,9 +481,9 @@ class Portfolio:
         return dict(self._cash_dict)
 
     @property
-    def open_orders(self) -> Dict[str, dict]:
-        """Snapshot of open orders synced from exchange at startup."""
-        return dict(getattr(self, "_open_orders", {}))
+    def open_orders(self) -> Dict[str, Order]:
+        """Live outstanding orders, keyed by order_id. Maintained by _on_order_update."""
+        return dict(self._outstanding_orders)
 
     @property
     def fills(self) -> List[Fill]:
@@ -767,6 +813,24 @@ class Portfolio:
             )
         except Exception as e:
             logger.error(f"[Portfolio] Failed to save snapshot: {e}", exc_info=True)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  Sub-account aggregation (mixed-mode: shared + sub-account strategies)
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def register_shadow_book(self, shadow_book) -> None:
+        """Register a sub-account ShadowBook for aggregation reporting."""
+        self._shadow_books[shadow_book.strategy_id] = shadow_book
+
+    def aggregate_nav(self) -> float:
+        """Sum NAV: own shared-account NAV + all registered sub-account shadow books."""
+        sub_nav = sum(sb.nav for sb in self._shadow_books.values())
+        return self._nav + sub_nav
+
+    def aggregate_cash(self) -> float:
+        """Sum cash: own shared-account cash + all registered sub-account shadow books."""
+        sub_cash = sum(sb.cash for sb in self._shadow_books.values())
+        return self._cash + sub_cash
 
     def __str__(self) -> str:
         active = [str(p) for p in self._positions.values() if not p.is_flat()]

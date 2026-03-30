@@ -45,7 +45,7 @@ class BinanceFuturesKlineClientManager:
         for i in range(retries):
             try:
                 # Pre-resolve DNS to avoid async DNS issues
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 await loop.getaddrinfo("fapi.binance.com", 443)
                 logger.debug("BinanceFuturesKlineClientManager: DNS pre-resolved successfully")
 
@@ -102,6 +102,9 @@ class BinanceFuturesKlineClientManager:
 
     def register_feed(self, feed: 'BinanceFuturesKlineFeed'):
         self._active_feeds[feed._name] = feed
+
+    def get_feed(self, symbol: str):
+        return self._active_feeds.get(symbol)
 
     def unregister_feed(self, symbol: str):
         self._active_feeds.pop(symbol, None)
@@ -215,7 +218,7 @@ class BinanceFuturesOrderBookClientManager:
         for i in range(retries):
             try:
                 # Pre-resolve DNS to avoid async DNS issues
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 await loop.getaddrinfo("fapi.binance.com", 443)
                 logger.debug("BinanceFuturesOrderBookClientManager: DNS pre-resolved successfully")
 
@@ -270,6 +273,9 @@ class BinanceFuturesOrderBookClientManager:
 
     def register_feed(self, feed: 'BinanceFuturesOrderBookFeed'):
         self._active_feeds[feed._name] = feed
+
+    def get_feed(self, symbol: str):
+        return self._active_feeds.get(symbol)
 
     def unregister_feed(self, symbol: str):
         self._active_feeds.pop(symbol, None)
@@ -444,17 +450,19 @@ class BinanceFuturesOrderBookFeed(AbstractDataFeed):
         self._name = asset
         self._interval = interval
 
-    def _fetch_rest_snapshot(self, limit: int = 100) -> dict:
-        resp = requests.get(
-            "https://fapi.binance.com/fapi/v1/depth",
-            params={"symbol": self._name, "limit": min(limit, 1000)},
-        )
-        resp.raise_for_status()
-        return resp.json()
+    async def _fetch_rest_snapshot(self, limit: int = 100) -> dict:
+        def _sync_fetch():
+            resp = requests.get(
+                "https://fapi.binance.com/fapi/v1/depth",
+                params={"symbol": self._name, "limit": min(limit, 1000)},
+            )
+            resp.raise_for_status()
+            return resp.json()
+        return await asyncio.to_thread(_sync_fetch)
 
     async def get_initial_snapshot(self):
         """Fetch snapshot and process any buffered events that cover it."""
-        raw = self._fetch_rest_snapshot(100)
+        raw = await self._fetch_rest_snapshot(100)
         ts = int(time.time() * 1000)
         bids = [[float(b[0]), float(b[1])] for b in raw["bids"]]
         asks = [[float(a[0]), float(a[1])] for a in raw["asks"]]
@@ -594,32 +602,38 @@ class BinanceFuturesUserDataClientManager:
 
     # ── listenKey management ─────────────────────────────────────────────────
 
-    def _get_listen_key(self) -> str:
+    async def _get_listen_key(self) -> str:
         """POST /fapi/v1/listenKey to create or renew a listenKey."""
-        resp = requests.post(
-            f"{self.FAPI_BASE}/fapi/v1/listenKey",
-            headers={"X-MBX-APIKEY": self._api_key},
-        )
-        resp.raise_for_status()
-        return resp.json()["listenKey"]
-
-    def _keepalive_listen_key(self):
-        """PUT /fapi/v1/listenKey to extend the listenKey validity."""
-        resp = requests.put(
-            f"{self.FAPI_BASE}/fapi/v1/listenKey",
-            headers={"X-MBX-APIKEY": self._api_key},
-        )
-        resp.raise_for_status()
-
-    def _close_listen_key(self):
-        """DELETE /fapi/v1/listenKey to close the stream."""
-        try:
-            requests.delete(
+        def _sync():
+            resp = requests.post(
                 f"{self.FAPI_BASE}/fapi/v1/listenKey",
                 headers={"X-MBX-APIKEY": self._api_key},
             )
-        except Exception:
-            pass
+            resp.raise_for_status()
+            return resp.json()["listenKey"]
+        return await asyncio.to_thread(_sync)
+
+    async def _keepalive_listen_key(self):
+        """PUT /fapi/v1/listenKey to extend the listenKey validity."""
+        def _sync():
+            resp = requests.put(
+                f"{self.FAPI_BASE}/fapi/v1/listenKey",
+                headers={"X-MBX-APIKEY": self._api_key},
+            )
+            resp.raise_for_status()
+        await asyncio.to_thread(_sync)
+
+    async def _close_listen_key(self):
+        """DELETE /fapi/v1/listenKey to close the stream."""
+        def _sync():
+            try:
+                requests.delete(
+                    f"{self.FAPI_BASE}/fapi/v1/listenKey",
+                    headers={"X-MBX-APIKEY": self._api_key},
+                )
+            except Exception:
+                pass
+        await asyncio.to_thread(_sync)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -657,7 +671,7 @@ class BinanceFuturesUserDataClientManager:
             self._ws = None
 
         # Close the listenKey on the server
-        self._close_listen_key()
+        await self._close_listen_key()
         logger.info("BinanceFuturesUserDataClientManager: stopped")
 
     # ── Keepalive loop ────────────────────────────────────────────────────────
@@ -667,7 +681,7 @@ class BinanceFuturesUserDataClientManager:
         while self._running:
             try:
                 await asyncio.sleep(self.KEEPALIVE_INTERVAL)
-                self._keepalive_listen_key()
+                await self._keepalive_listen_key()
                 logger.debug("BinanceFuturesUserDataClientManager: listenKey keepalive sent")
             except asyncio.CancelledError:
                 break
@@ -682,7 +696,7 @@ class BinanceFuturesUserDataClientManager:
         while self._running:
             try:
                 # Obtain a fresh listenKey
-                self._listen_key = self._get_listen_key()
+                self._listen_key = await self._get_listen_key()
                 ws_url = f"{self.WS_BASE}/{self._listen_key}"
 
                 async with websockets.connect(

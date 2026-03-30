@@ -200,6 +200,9 @@ class StrategyConfig:
     risk_overrides: Dict[str, Any] = field(default_factory=dict)
     execution_overrides: Dict[str, Any] = field(default_factory=dict)
     portfolio_overrides: Dict[str, Any] = field(default_factory=dict)
+    # Sub-account credentials (env var name or literal value; empty = shared account)
+    sub_account_api_key: str = ""
+    sub_account_api_secret: str = ""
 
 
 # ── Per-(asset_type, venue) config overrides ─────────────────────────────────
@@ -365,6 +368,8 @@ def load_strategy_yaml(yaml_path: str) -> StrategyConfig:
         risk_overrides=s.get("risk_overrides", {}) or {},
         execution_overrides=s.get("execution_overrides", {}) or {},
         portfolio_overrides=s.get("portfolio_overrides", {}) or {},
+        sub_account_api_key=os.getenv(s.get("sub_account_api_key", ""), ""),
+        sub_account_api_secret=os.getenv(s.get("sub_account_api_secret", ""), ""),
     )
 
 
@@ -484,6 +489,8 @@ def load_app_config(
             risk_overrides=s.get("risk_overrides", {}) or {},
             execution_overrides=s.get("execution_overrides", {}) or {},
             portfolio_overrides=s.get("portfolio_overrides", {}) or {},
+            sub_account_api_key=os.getenv(s.get("sub_account_api_key", ""), ""),
+            sub_account_api_secret=os.getenv(s.get("sub_account_api_secret", ""), ""),
         ))
 
     # Load additional per-strategy YAML files (two-tier layout)

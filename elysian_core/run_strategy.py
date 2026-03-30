@@ -57,7 +57,6 @@ from elysian_core.core.weight_aggregator import WeightAggregator
 from elysian_core.core.shadow_book import ShadowBook
 import sys
 
-import aiohttp
 # Add parent directory to path so imports work when running this script directly
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -186,7 +185,10 @@ class StrategyRunner:
         }
         
         self.event_bus = None
-    
+
+        # Sub-account exchanges: strategy_id -> exchange (per-strategy, dedicated API keys)
+        self._sub_account_exchange_dict: Dict[int, Any] = {}
+
     @staticmethod
     def _get_timestamp() -> str:
         """Get current timestamp in UTC+8 timezone."""
@@ -763,6 +765,85 @@ class StrategyRunner:
             For multi-strategy, each strategy's allocation should sum to <= 1.0
             across all strategies sharing the same (asset_type, venue) pipeline.
         '''
+        # ── Sub-account mode branch ──────────────────────────────────────────
+        strat_cfg = next((s for s in self.cfg.strategies if s.id == strategy_id), None)
+        if strat_cfg and self._has_sub_account(strat_cfg):
+            logger.info(
+                f"[Runner] Sub-account mode for strategy {strategy_id} ({strategy_name})"
+            )
+            asset_type = AssetType[strat_cfg.asset_type.upper()]
+            venue = Venue[strat_cfg.venue.upper()]
+
+            # 1. Per-strategy exchange + private event bus
+            exchange, private_bus = await self._create_sub_account_exchange(strat_cfg, venue)
+            self._sub_account_exchange_dict[strategy_id] = exchange
+
+            # 2. Shared market data feeds (may be empty here; self-correct on first KLINE)
+            feeds = self._collect_all_feeds(venue, asset_type)
+
+            # 3. ShadowBook as real ledger (owns 100% of sub-account capital)
+            shadow_book = ShadowBook(
+                strategy_id=strategy_id,
+                allocation=1.0,
+                venue=venue,
+            )
+            shadow_book.sync_from_exchange(exchange, feeds)
+            shadow_book.start(
+                self.event_bus,          # shared bus for KLINE
+                sub_account_mode=True,
+                private_event_bus=private_bus,
+            )
+
+            # 4. Per-strategy risk optimizer
+            risk_cfg = self.cfg.effective_risk_for(
+                asset_type=strat_cfg.asset_type.lower(),
+                venue=strat_cfg.venue.lower(),
+                strategy_id=strategy_id,
+            )
+            optimizer = PortfolioOptimizer(risk_config=risk_cfg, portfolio=shadow_book, cfg=self.cfg)
+
+            # 5. Per-strategy execution engine
+            execution_engine = ExecutionEngine(
+                exchanges={venue: exchange},
+                portfolio=shadow_book,
+                feeds=feeds,
+                risk_config=risk_cfg,
+                default_venue=venue,
+                cfg=self.cfg,
+                asset_type=asset_type,
+                venue=venue,
+            )
+
+            # 6. Wire into strategy
+            strategy.strategy_id = strategy_id
+            strategy.strategy_name = strategy_name
+            strategy._shadow_book = shadow_book
+            strategy.portfolio = shadow_book      # backward compat: satisfies duck-type interface
+            strategy._optimizer = optimizer
+            strategy._execution_engine = execution_engine
+            strategy._event_bus = self.event_bus
+            strategy._exchanges = {venue: exchange}
+            strategy.cfg = self.cfg
+            strategy.strategy_config = strat_cfg
+
+            # 7. Register shadow book with aggregate portfolio for monitoring
+            if asset_type in self._portfolio_dict and venue in self._portfolio_dict[asset_type]:
+                self._portfolio_dict[asset_type][venue].register_shadow_book(shadow_book)
+
+            # 8. Start strategy — no aggregator in sub-account mode
+            await strategy.start(aggregator=None)
+
+            # 9. Periodic snapshot
+            self._start_snapshot_task(shadow_book.save_snapshot, f"shadow_book_{strategy_id}")
+            self._strategy_dict[strategy_id] = strategy
+
+            logger.info(
+                f"[Runner] Sub-account wiring complete: {strategy.__class__.__name__} "
+                f"(id={strategy_id}) -> ShadowBook (real ledger) -> Optimizer -> ExecutionEngine"
+            )
+            return
+
+        # ── Existing shared-account flow ─────────────────────────────────────
         logger.info(f"[Runner] Wiring Stage 3-5 + event_bus and exchanges into strategy: {strategy.__class__.__name__}")
         strat_venue, strat_asset_type = strategy.venue, strategy.asset_type
 
@@ -839,6 +920,41 @@ class StrategyRunner:
             f"ShadowBook -> Aggregator -> Optimizer -> ExecutionEngine"
         )
 
+    def _has_sub_account(self, strategy_config) -> bool:
+        """Return True if the strategy config has dedicated sub-account credentials."""
+        return bool(getattr(strategy_config, 'sub_account_api_key', ''))
+
+    async def _create_sub_account_exchange(self, strategy_config, venue: Venue):
+        """Create a per-strategy exchange connector with its own API keys and private EventBus.
+
+        Returns (exchange, private_bus). The private bus receives only this strategy's
+        user data events (ORDER_UPDATE, BALANCE_UPDATE). Market data (KLINE) continues
+        to flow through the shared EventBus via the shared kline/ob managers.
+        """
+        from elysian_core.core.event_bus import EventBus as _EventBus
+
+        api_key = strategy_config.sub_account_api_key
+        api_secret = strategy_config.sub_account_api_secret
+
+        # Private event bus: receives only this strategy's user data events
+        private_bus = _EventBus()
+
+        exchange = BinanceSpotExchange(
+            args=self.cfg,
+            api_key=api_key,
+            api_secret=api_secret,
+            symbols=strategy_config.symbols or self.binance_token_symbols,
+            kline_manager=self.binance_kline_manager,    # shared, unauthenticated
+            ob_manager=self.binance_ob_manager,          # shared, unauthenticated
+            event_bus=private_bus,                       # private bus for account events
+        )
+        await exchange.run()
+        logger.info(
+            f"[Runner] Sub-account exchange created for strategy {strategy_config.id} "
+            f"({venue.value})"
+        )
+        return exchange, private_bus
+
     def _start_snapshot_task(self, callable: Callable, tag: str) -> None:
         """Start a periodic portfolio snapshot saver using PeriodicTask.
 
@@ -867,16 +983,20 @@ class StrategyRunner:
         """Current runner lifecycle state."""
         return self._state
 
-    async def run(self, strategies: List[SpotStrategy] = [],
-                        strategy_ids: List[int] = [],
-                        strategy_names: List[str] = [],
-                        allocations: List[float] = []) -> None:
+    async def run(self, strategies: Optional[List[SpotStrategy]] = None,
+                        strategy_ids: Optional[List[int]] = None,
+                        strategy_names: Optional[List[str]] = None,
+                        allocations: Optional[List[float]] = None) -> None:
         """Run the complete strategy in a single event loop.
 
         All feeds, exchange connectors and the optional *strategy* share one
         asyncio event loop.  Heavy compute is offloaded via
         ``strategy.run_heavy()``.
         """
+        strategies = strategies or []
+        strategy_ids = strategy_ids or []
+        strategy_names = strategy_names or []
+        allocations = allocations or []
         try:
             logger.info("[Runner] ════════════════════════════════════════════════════════════════════════════════════════")
             logger.info("[Runner] Starting strategy runner................................")
@@ -963,6 +1083,27 @@ class StrategyRunner:
 
                 for _, task in self._snapshot_task_dict.items():
                     task.stop()
+
+                # Partial cleanup for sub-account exchanges (do NOT call full cleanup()
+                # as it would stop shared kline/ob managers used by all strategies)
+                for sid, sub_exchange in self._sub_account_exchange_dict.items():
+                    sub_strategy = self._strategy_dict.get(sid)
+                    if sub_strategy:
+                        try:
+                            await sub_strategy.suspend_rebalancing()
+                        except Exception:
+                            pass
+                    if getattr(sub_exchange, 'user_data_manager', None):
+                        try:
+                            await sub_exchange.user_data_manager.stop()
+                        except Exception:
+                            pass
+                    if getattr(sub_exchange, '_client', None):
+                        try:
+                            await sub_exchange._client.close_connection()
+                        except Exception:
+                            pass
+                        sub_exchange._client = None
 
                 # Clean up all exchange connectors, can make adjustments here next time
                 if hasattr(self, 'binance_exchange'):
