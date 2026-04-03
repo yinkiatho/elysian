@@ -114,9 +114,8 @@ class PortfolioSnapshot(BaseModel):
     Saved periodically (e.g. every kline) or on demand.  Useful for
     equity-curve reconstruction, risk reporting, and post-trade analysis.
     """
-    id = AutoField(primary_key=True)
+    strategy_id = IntegerField(null=True, primary_key=True)
     datetime = DateTimeField(default=lambda: datetime.datetime.now(_UTC8), index=True)
-    strategy_id = IntegerField(null=True)
     venue = EnumField(Venue, default=Venue.BINANCE)
 
     # ── Valuation ─────────────────────────────────────────────────────────

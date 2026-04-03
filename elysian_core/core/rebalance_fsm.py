@@ -41,18 +41,17 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 import elysian_core.utils.logger as log
 
 from elysian_core.core.enums import RebalanceState
 from elysian_core.core.fsm import BaseFSM
-from elysian_core.core.events import EventType, RebalanceCycleEvent, RebalanceCompleteEvent
+from elysian_core.core.events import RebalanceCycleEvent, RebalanceCompleteEvent
 from elysian_core.core.signals import RebalanceResult, TargetWeights
 
 
 if TYPE_CHECKING:
     from elysian_core.core.event_bus import EventBus
-    from elysian_core.core.weight_aggregator import WeightAggregator
     from elysian_core.execution.engine import ExecutionEngine
     from elysian_core.risk.optimizer import PortfolioOptimizer
 
@@ -105,7 +104,6 @@ class RebalanceFSM(BaseFSM):
         event_bus: Optional["EventBus"] = None,
         cooldown_s: float = 0.0,
         name: str = "RebalanceFSM",
-        aggregator: Optional["WeightAggregator"] = None,
     ):
         super().__init__(
             initial_state=RebalanceState.IDLE,
@@ -116,7 +114,6 @@ class RebalanceFSM(BaseFSM):
         self._optimizer = optimizer
         self._execution_engine = execution_engine
         self._cooldown_s = cooldown_s
-        self._aggregator = aggregator
 
         # Most recent rebalance result for inspection
         self._last_result: Optional[RebalanceResult] = None
@@ -176,21 +173,8 @@ class RebalanceFSM(BaseFSM):
 
         # Tag context with strategy_id for downstream stages
         ctx["strategy_id"] = self._strategy.strategy_id
-
-        if self._aggregator is not None:
-            # Multi-strategy mode: store this strategy's weights, merge all
-            await self._aggregator.update_weights(self._strategy.strategy_id, weights)
-            merged = await self._aggregator.get_merged_weights()
-            ctx["target_weights"] = merged
-            ctx["strategy_weights"] = weights  # keep original for audit
-            logger.info(
-                "[%s] Weights computed: %d symbols (merged: %d symbols from aggregator)",
-                self._name, len(weights), len(merged),
-            )
-        else:
-            # Single-strategy mode (no aggregator)
-            ctx["target_weights"] = weights
-            logger.info("[%s] Weights computed: %d symbols", self._name, len(weights))
+        ctx["target_weights"] = weights
+        logger.info("[%s] Weights computed: %d symbols", self._name, len(weights))
 
         await self.trigger("weights_ready", **ctx)
 
@@ -265,20 +249,6 @@ class RebalanceFSM(BaseFSM):
             "[%s] Rebalance result: %d submitted, %d failed",
             self._name, result.submitted, result.failed,
         )
-
-        # ── Fill attribution to shadow books ────────────────────────────
-        mark_prices = ctx.get("_mark_prices", {})
-        portfolio_total_value = ctx.get("_portfolio_total_value", 0.0)
-
-        if self._aggregator is not None and portfolio_total_value > 0:
-            # Multi-strategy: reconcile ALL shadow books via aggregator
-            await self._aggregator.attribute_fills(mark_prices, portfolio_total_value)
-            if result.failed > 0:
-                logger.warning(
-                    "[%s] %d orders failed — shadow books may drift from Portfolio. "
-                    "Reconciliation recommended.",
-                    self._name, result.failed,
-                )
 
         # Publish RebalanceCompleteEvent for strategy hooks
         if self._event_bus:

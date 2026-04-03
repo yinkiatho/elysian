@@ -394,30 +394,103 @@ class SpotExchangeConnector(ABC):
         
     # ── Feed accessors ────────────────────────────────────────────────────────
     def kline_feed(self, symbol: str):
-        return self.kline_manager.get_feed(symbol)
+        return self.kline_manager.get_feed(symbol) if self.kline_manager else None
 
     def ob_feed(self, symbol: str):
-        return self.ob_manager.get_feed(symbol)
-
+        return self.ob_manager.get_feed(symbol) if self.ob_manager else None
 
     def last_price(self, symbol: str) -> Optional[float]:
         """Best available mid-price: OB mid → last kline close → None."""
         ob = self.ob_feed(symbol)
         if ob and ob.data:
             return ob.data.mid_price
-        
         kf = self.kline_feed(symbol)
         if kf and kf.latest_close:
             return kf.latest_close
         return None
-    
-    
+
+    # ── Shared order utilities ────────────────────────────────────────────────
+    @staticmethod
+    def _average_fill_price(resp: dict):
+        """VWAP fill price and total commission from a market order response.
+
+        Falls back to cummulativeQuoteQty / executedQty when fills list is absent
+        (e.g. Aster spot API).
+        """
+        fills = resp.get("fills", [])
+        if fills:
+            total_qty      = sum(float(f["qty"]) for f in fills)
+            total_notional = sum(float(f["qty"]) * float(f["price"]) for f in fills)
+            total_comm     = sum(float(f["commission"]) for f in fills)
+            avg = total_notional / total_qty if total_qty else 0.0
+            return avg, total_comm
+        exec_qty  = float(resp.get("executedQty", 0))
+        quote_qty = float(resp.get("cummulativeQuoteQty", 0))
+        avg = quote_qty / exec_qty if exec_qty else 0.0
+        return avg, 0.0
+
+    def order_health_check(
+        self, symbol: str, side: Side, quantity: float, use_quote_order_qty: bool = False
+    ) -> bool:
+        """Validate balance and notional before placing an order."""
+        info = self._token_infos.get(symbol, {})
+        base_asset  = info.get("base_asset")
+        quote_asset = info.get("quote_asset")
+        if not base_asset or not quote_asset:
+            logger.error(f"[{symbol}] order_health_check: symbol info not found")
+            return False
+
+        price = self.last_price(symbol) or 0.0
+        min_notional = info.get("min_notional", 0.0)
+        estimated_notional = price * abs(quantity) if not use_quote_order_qty else abs(quantity)
+
+        if estimated_notional < min_notional:
+            logger.error(
+                f"[{symbol}] Estimated notional {estimated_notional:.4f} < min {min_notional}"
+            )
+            return False
+
+        if not use_quote_order_qty:
+            if side == Side.BUY:
+                if self._balances.get(quote_asset, 0.0) < price * abs(quantity):
+                    logger.error(
+                        f"[{symbol}] Insufficient {quote_asset} to BUY {quantity} {base_asset}"
+                    )
+                    return False
+            else:
+                if self._balances.get(base_asset, 0.0) < abs(quantity):
+                    logger.error(
+                        f"[{symbol}] Insufficient {base_asset} to SELL {quantity}"
+                    )
+                    return False
+        else:
+            if side == Side.BUY:
+                if self._balances.get(quote_asset, 0.0) < abs(quantity):
+                    logger.error(
+                        f"[{symbol}] Insufficient {quote_asset} for quoteOrderQty={quantity}"
+                    )
+                    return False
+            else:
+                if self._balances.get(base_asset, 0.0) < price * abs(quantity):
+                    logger.error(
+                        f"[{symbol}] Insufficient {base_asset} for quoteOrderQty SELL"
+                    )
+                    return False
+        return True
+
+    def base_asset_to_symbol(self, asset: str) -> Optional[str]:
+        """Map a raw base asset (e.g. 'ETH') to its trading symbol (e.g. 'ETHUSDT')."""
+        for sym, info in self._token_infos.items():
+            if info.get("base_asset") == asset:
+                return sym
+        return None
+
     # ── Initialisation ────────────────────────────────────────────────────────
     @abstractmethod
     async def initialize(self):
         """Perform any necessary setup (e.g. authentication, token info fetch)."""
         ...
-    
+
     @abstractmethod
     async def _fetch_symbol_info(self, symbol: str) -> dict:
         """Fetch and return exchange-specific info for the given symbol."""
@@ -619,10 +692,10 @@ class FuturesExchangeConnector(ABC):
 
     # ── Feed accessors ────────────────────────────────────────────────────────
     def kline_feed(self, symbol: str):
-        return self.kline_manager.get_feed(symbol)
+        return self.kline_manager.get_feed(symbol) if self.kline_manager else None
 
     def ob_feed(self, symbol: str):
-        return self.ob_manager.get_feed(symbol)
+        return self.ob_manager.get_feed(symbol) if self.ob_manager else None
 
     def last_price(self, symbol: str) -> Optional[float]:
         """Best available mid-price: OB mid → last kline close → None."""
@@ -632,6 +705,13 @@ class FuturesExchangeConnector(ABC):
         kf = self.kline_feed(symbol)
         if kf and kf.latest_close:
             return kf.latest_close
+        return None
+
+    def base_asset_to_symbol(self, asset: str) -> Optional[str]:
+        """Map a raw base asset (e.g. 'ETH') to its trading symbol (e.g. 'ETHUSDT')."""
+        for sym, info in self._token_infos.items():
+            if info.get("base_asset") == asset:
+                return sym
         return None
 
     # ── Initialisation ────────────────────────────────────────────────────────

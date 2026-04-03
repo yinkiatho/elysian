@@ -1,5 +1,5 @@
 """
-Per-strategy virtual position ledger (shadow book).
+Per-strategy Position ledger (shadow book).
 
 Each strategy gets its own ShadowBook that tracks the slice of the shared
 Portfolio attributable to it.  The real Portfolio is the exchange-level source
@@ -25,7 +25,7 @@ from typing import Deque, Dict, List, Optional, Set
 
 from elysian_core.core.enums import OrderStatus, OrderType, Side, Venue
 from elysian_core.core.events import EventType
-from elysian_core.core.order import Order
+from elysian_core.core.order import ActiveLimitOrder, ActiveOrder, Order
 from elysian_core.core.portfolio import Fill
 from elysian_core.core.position import Position
 from elysian_core.core.signals import OrderIntent
@@ -61,11 +61,13 @@ class ShadowBook:
         self._cash: float = 0.0
 
         # Mark prices (updated via strategy's kline dispatch)
-        self._mark_prices: Dict[str, float] = {}
+        # Stablecoins seeded at 1.0 so total_commission USDT conversion is correct
+        self._mark_prices: Dict[str, float] = {symbol: 1.0 for symbol in _STABLECOINS}
 
         # PnL tracking
         self._realized_pnl: float = 0.0
-        self._total_commission: float = 0.0
+        #self._total_commission: float = 0.0
+        self._total_commission_dict: Dict[str, float] = {}
 
         # Trade history (ring buffer, mirrors Portfolio._fills)
         self._fills: Deque[Fill] = deque(maxlen=10_000)
@@ -79,78 +81,23 @@ class ShadowBook:
         # EventBus wiring
         self._event_bus = None
 
-        # Fill tracking: order_id -> last known cumulative filled_qty (mirrors Portfolio)
-        self._fill_tracker: Dict[str, float] = {}
-        self._completed_order_ids: Set[str] = set()  # guards terminal cleanup against duplicate events
+        # Guards terminal cleanup against duplicate events
+        self._completed_order_ids: Set[str] = set()
 
-        # Shared map from ExecutionEngine: order_id -> strategy_id for event routing
-        # Passed in via start(). ShadowBook only processes orders belonging to its strategy.
-        self._order_strategy_map: Optional[Dict[str, int]] = None
+        # ── Active orders & locked balance ────────────────────────────────
+        # Active orders: order_id -> ActiveOrder | ActiveLimitOrder
+        # LIMIT orders are stored as ActiveLimitOrder (carries reservation state).
+        # MARKET orders are stored as ActiveOrder (fill-delta tracking only).
+        self._active_orders: Dict[str, ActiveOrder] = {}
+        self._locked_cash: float = 0.0  # sum of all ActiveLimitOrder.reserved_cash
 
-        # ── Locked balance (pending LIMIT orders only) ────────────────────
-        self._locked_cash: float = 0.0
-        self._locked_quantities: Dict[str, float] = {}
-        self._locked_cash_per_order: Dict[str, float] = {}
-        self._locked_qty_per_order: Dict[str, float] = {}
-        self._pending_order_id_to_intent: Dict[str, OrderIntent] = {}
-
-        # Outstanding orders (live, maintained by _on_order_update)
-        self._outstanding_orders: Dict[str, Order] = {}  # order_id -> Order
-
-        # Sub-account mode state
+        # Sub-account state
         self._exchange = None                  # set by sync_from_exchange()
-        self._sub_account_mode: bool = True   # real account vs virtual slice
         self._cash_dict: Dict[str, float] = {}
         self._private_event_bus = None         # per-strategy bus for user data events
 
 
     # ── Initialization ────────────────────────────────────────────────────
-
-    def init_from_portfolio_cash(self, portfolio_cash: float,
-                                 mark_prices: Optional[Dict[str, float]] = None):
-        """Initialize with proportional cash allocation (fresh start, no positions).
-
-        This is the standard init path for a new deployment.  Each strategy
-        starts with ``allocation * portfolio_cash`` and builds positions
-        through rebalance cycles.
-        """
-        self._cash = portfolio_cash 
-        self._mark_prices = dict(mark_prices or {})
-        self._refresh_derived()
-        self._peak_equity = self._nav
-        logger.info(
-            f"[ShadowBook-{self._strategy_id}] Initialized: "
-            f"cash={self._cash:.2f}"
-        )
-
-    def init_from_existing(self, portfolio_cash: float,
-                                 portfolio_positions: Dict[str, Position],
-                                 mark_prices: Dict[str, float]):
-        """Initialize by distributing existing Portfolio state proportionally.
-
-        Used when restarting with pre-existing positions.  Distributes both
-        cash and positions by allocation fraction.  This is a best-effort
-        approximation — subsequent rebalance cycles will correct any
-        mis-attribution.
-        """
-        self._cash = portfolio_cash
-        self._mark_prices = dict(mark_prices)
-
-        for sym, pos in portfolio_positions.items():
-            self._positions[sym] = Position(
-                symbol=sym,
-                venue=pos.venue,
-                quantity=pos.quantity,
-                avg_entry_price=pos.avg_entry_price,
-            )
-
-        self._refresh_derived()
-        self._peak_equity = self._nav
-        logger.info(
-            f"[ShadowBook-{self._strategy_id}] Initialized from existing: "
-            f"cash={self._cash:.2f}, {len(self._positions)} positions, "
-        )
-
     def sync_from_exchange(self, exchange, feeds: Optional[Dict] = None):
         """Initialize from real exchange state. Called once at startup for sub-account mode.
 
@@ -168,15 +115,10 @@ class ShadowBook:
         self._cash = sum(self._cash_dict.values())
 
         # Positions: non-stablecoin balances — map base asset → trading symbol
-        base_to_symbol = {
-            info.get("base_asset"): sym
-            for sym, info in exchange._token_infos.items()
-            if info.get("base_asset")
-        }
         for asset, qty in exchange._balances.items():
             if asset in _STABLECOINS or qty <= 0:
                 continue
-            symbol = base_to_symbol.get(asset)
+            symbol = exchange.base_asset_to_symbol(asset)
             if symbol is None:
                 continue
             entry_price = 0.0
@@ -203,12 +145,20 @@ class ShadowBook:
                 except Exception:
                     logger.warning(f"[ShadowBook-{self._strategy_id}] Failed to get price for {sym} during sync")
 
-        # Outstanding orders + fill tracker
+        # Wrap open orders as ActiveOrder with _prev_filled seeded to avoid double-counting
         for sym, orders in exchange._open_orders.items():
             for oid, order in orders.items():
-                self._outstanding_orders[oid] = order
-                if order.filled_qty > 0:
-                    self._fill_tracker[oid] = order.filled_qty
+                active = ActiveOrder(
+                    id=order.id, symbol=order.symbol, side=order.side,
+                    order_type=order.order_type, quantity=order.quantity,
+                    price=order.price, status=order.status,
+                    venue=order.venue or self._venue, strategy_id=order.strategy_id,
+                    filled_qty=order.filled_qty, avg_fill_price=order.avg_fill_price,
+                    commission=order.commission, commission_asset=order.commission_asset,
+                    last_updated_timestamp=order.last_updated_timestamp,
+                    _prev_filled=order.filled_qty,
+                )
+                self._active_orders[oid] = active
 
         self._refresh_derived()
         self._peak_equity = max(self._peak_equity, self._nav)
@@ -217,31 +167,35 @@ class ShadowBook:
             f"cash={self._cash:.2f} ({self._cash_dict}), "
             f"{len(self._positions)} positions, "
             f"{len(self._mark_prices)} mark prices, "
-            f"{len(self._outstanding_orders)} open orders"
+            f"{len(self._active_orders)} open orders"
         )
+
+    def init_from_portfolio_cash(
+        self, portfolio_cash: float, mark_prices: Optional[Dict[str, float]] = None,
+    ) -> None:
+        """Initialize for fresh deployment — no prior positions.
+
+        Sets cash (defaulted to USDT) and mark prices, then refreshes derived metrics.
+        """
+        self._cash = portfolio_cash
+        self._cash_dict = {"USDT": portfolio_cash}
+        if mark_prices:
+            self._mark_prices.update(mark_prices)
+        self._refresh_derived()
+        self._peak_equity = max(self._peak_equity, self._nav)
 
     # ── Lifecycle — EventBus wiring ──────────────────────────────────────
 
-    def start(self, event_bus, order_strategy_map: Optional[Dict[str, int]] = None,
-                sub_account_mode: bool = False, private_event_bus=None):
+    def start(self, event_bus, private_event_bus=None):
         """Subscribe to event buses for fill attribution and mark price updates.
 
         Parameters
         ----------
         event_bus:
-            Shared EventBus instance (market data: KLINE, ORDERBOOK_UPDATE).
-        order_strategy_map:
-            Reference to ExecutionEngine._order_strategy_map — a shared dict
-            mapping exchange order_id -> strategy_id.  Used to filter events
-            to only fills placed by this strategy (shared-account mode only).
-        sub_account_mode:
-            If True, subscribes to private_event_bus for ORDER_UPDATE and
-            BALANCE_UPDATE, and to shared event_bus for KLINE.
+            Shared EventBus instance (market data: KLINE).
         private_event_bus:
-            Per-strategy EventBus for user data events (sub-account mode only).
+            Per-strategy EventBus for user data events.
         """
-        self._sub_account_mode = sub_account_mode
-        self._order_strategy_map = order_strategy_map
         self._event_bus = event_bus
         self._private_event_bus = private_event_bus
 
@@ -272,63 +226,28 @@ class ShadowBook:
             self._private_event_bus = None
         logger.info(f"[ShadowBook-{self._strategy_id}] stopped")
 
-    def _update_order(self, order: Order) -> None:
-        """Upsert *order* into ``_outstanding_orders`` using FSM-validated transitions.
-
-        - New orders (not yet tracked): stored directly unless already terminal.
-        - Existing tracked orders: FSM transition applied, fill state synced.
-        - Terminal orders: removed from the dict.
-        """
-        tracked = self._outstanding_orders.get(order.id)
-
-        if tracked is None:
-            if not order.is_terminal:
-                self._outstanding_orders[order.id] = order
-            return
-
-        # Apply FSM-validated status transition
-        if order.status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
-            if order.filled_qty > tracked.filled_qty:
-                tracked.update_fill(order.filled_qty, order.avg_fill_price)
-        else:
-            tracked.transition_to(order.status)
-
-        # Sync exchange metadata
-        tracked.commission = order.commission
-        tracked.commission_asset = order.commission_asset
-        tracked.last_updated_timestamp = order.last_updated_timestamp
-
-        if tracked.is_terminal:
-            self._outstanding_orders.pop(order.id, None)
-
     async def _on_kline(self, event):
-        """Update mark prices from kline close (sub-account mode only)."""
+        """Update mark prices from kline close price and refresh derived metrics."""
         if event.venue == self._venue and event.kline.close and event.kline.close > 0:
             self._mark_prices[event.symbol] = event.kline.close
             self._refresh_derived()
 
     async def _on_balance_update(self, event: BalanceUpdateEvent):
         """Handle balance updates from the private sub-account event bus."""
-        base_to_symbol = {}
-        if self._exchange:
-            base_to_symbol = {
-                info.get("base_asset"): sym
-                for sym, info in self._exchange._token_infos.items()
-                if info.get("base_asset")
-            }
-
         if event.asset in _STABLECOINS:
             self._cash_dict[event.asset] = self._cash_dict.get(event.asset, 0.0) + event.delta
             self._cash = sum(self._cash_dict.values())
-            self._refresh_derived()
         else:
             # Map raw asset (e.g. "ETH") to trading symbol (e.g. "ETHUSDT")
-            symbol = base_to_symbol.get(event.asset, event.asset)
+            symbol = (
+                self._exchange.base_asset_to_symbol(event.asset)
+                if self._exchange else event.asset
+            )
             curr = self._positions.get(symbol)
             if curr is None:
-                self._positions[symbol] = Position(
-                    symbol=symbol, venue=self._venue, quantity=event.delta,
-                    avg_entry_price=self._mark_prices.get(symbol, 0.0),
+                self._positions[symbol] = Position(symbol=symbol, venue=self._venue, quantity=event.delta,
+                                                   avg_entry_price=self._mark_prices.get(symbol, 0.0),
+                                                   locked_quantity=0.0,
                 )
             else:
                 self._positions[symbol] = Position(
@@ -337,82 +256,90 @@ class ShadowBook:
                     avg_entry_price=curr.avg_entry_price,
                     realized_pnl=curr.realized_pnl,
                     total_commission=curr.total_commission,
+                    locked_quantity=curr.locked_quantity,
                 )
-            self._refresh_derived()
+        self._refresh_derived()
 
     async def _on_order_update(self, event: OrderUpdateEvent):
-        """Route exchange fill events into apply_fill().
+        """Route exchange order events into ActiveOrder bookkeeping and apply_fill().
 
-        Filters events to fills that belong to this strategy using
-        _order_strategy_map (order_id -> strategy_id, maintained by ExecutionEngine).
-        Computes the incremental fill delta to avoid double-counting partial fills.
-        commission is already per-fill from Binance field "n".
-        
-        Orders come from private event bus so should be own strategy
+        Events arrive on the private EventBus so all orders belong to this strategy.
+        Fill-delta tracking lives on the ActiveOrder._prev_filled field.
+        Lock release lives on ActiveLimitOrder.release_partial / release_all.
+        Commission is already per-fill from Binance field "n".
         """
-        order = event.order 
-        self._update_order(order)  # Transition the orders
-
-        if order.status not in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
-            if order.is_terminal and order.id not in self._completed_order_ids:
-                self._completed_order_ids.add(order.id)
-                self._fill_tracker.pop(order.id, None)
-                if self._order_strategy_map is not None:
-                    self._order_strategy_map.pop(order.id, None)
-                self.release_order_lock(order.id)
-            return
-
+        order = event.order
         order_id = order.id
-        prev_filled = self._fill_tracker.get(order_id, 0.0)
-        delta_filled = order.filled_qty - prev_filled
 
-        if delta_filled < 1e-10:
-            if order.is_terminal and order_id not in self._completed_order_ids:
-                self._completed_order_ids.add(order_id)
-                self._fill_tracker.pop(order_id, None)
-                if self._order_strategy_map is not None:
-                    self._order_strategy_map.pop(order_id, None)
-                self.release_order_lock(order_id)
-            return
+        if order_id in self._completed_order_ids:
+            return  # guard against duplicate terminal events
 
-        self._fill_tracker[order_id] = order.filled_qty
+        active = self._active_orders.get(order_id)
 
-        # Release lock proportionally for this fill increment
-        self._partial_release_lock(order_id, delta_filled)
+        if active is None:
+            # First time seeing this order — wrap in ActiveOrder for tracking.
+            # LIMIT orders created by lock_for_order() are already ActiveLimitOrder;
+            # this branch handles MARKET orders and externally-placed orders.
+            active = ActiveOrder(
+                id=order.id, symbol=order.symbol, side=order.side,
+                order_type=order.order_type, quantity=order.quantity,
+                price=order.price, status=OrderStatus.PENDING,
+                venue=order.venue or self._venue, strategy_id=order.strategy_id,
+            )
+            self._active_orders[order_id] = active
 
-        qty_delta = delta_filled if order.side == Side.BUY else -delta_filled
+        delta_filled = active.sync_from_event(order)
 
-        self.apply_fill(
-            symbol=order.symbol,
-            qty_delta=qty_delta,
-            price=order.avg_fill_price,
-            commission=order.commission,    # per-fill from Binance field "n"
-            venue=event.venue,
-        )
+        if delta_filled > 0:
+            # Release lock proportional to this fill increment
+            if isinstance(active, ActiveLimitOrder):
+                cash_rel, qty_rel = active.release_partial(delta_filled)
+                self._locked_cash = max(0.0, self._locked_cash - cash_rel)
+                if qty_rel > 0:
+                    pos = self._positions.get(order.symbol)
+                    if pos is not None:
+                        pos.locked_quantity = max(0.0, pos.locked_quantity - qty_rel)
 
-        if order.is_terminal and order_id not in self._completed_order_ids:
+            qty_delta = delta_filled if order.side == Side.BUY else -delta_filled
+            fill_price = order.last_fill_price if order.last_fill_price > 0 else order.avg_fill_price
+            self.apply_fill(
+                symbol=order.symbol,
+                base_asset=event.base_asset,
+                quote_asset=event.quote_asset,
+                qty_delta=qty_delta,
+                price=fill_price,
+                commission=order.commission,
+                commission_asset=order.commission_asset,
+                venue=event.venue,
+            )
+
+        if active.is_terminal:
+            # Drain any remaining reservation (handles partial-fill-then-cancel)
+            if isinstance(active, ActiveLimitOrder):
+                cash_rem, qty_rem = active.release_all()
+                self._locked_cash = max(0.0, self._locked_cash - cash_rem)
+                if qty_rem > 0:
+                    pos = self._positions.get(order.symbol)
+                    if pos is not None:
+                        pos.locked_quantity = max(0.0, pos.locked_quantity - qty_rem)
+            self._active_orders.pop(order_id, None)
             self._completed_order_ids.add(order_id)
-            self._fill_tracker.pop(order_id, None)
-            if self._order_strategy_map is not None:
-                self._order_strategy_map.pop(order_id, None)
-            self.release_order_lock(order_id)
 
     # ── Read — Identity ───────────────────────────────────────────────────
 
     @property
-    def outstanding_orders(self) -> Dict[str, Order]:
-        """Live outstanding orders for this strategy, keyed by order_id."""
-        return dict(self._outstanding_orders)
+    def active_orders(self) -> Dict[str, ActiveOrder]:
+        """Live active orders for this strategy, keyed by order_id."""
+        return dict(self._active_orders)
+
+    @property
+    def outstanding_orders(self) -> Dict[str, ActiveOrder]:
+        """Alias for active_orders (backward compatibility)."""
+        return self.active_orders
 
     @property
     def strategy_id(self) -> int:
         return self._strategy_id
-
-
-    @property
-    def is_sub_account_mode(self) -> bool:
-        """True if this shadow book tracks a real sub-account (not a virtual slice)."""
-        return self._sub_account_mode
 
     # ── Read — Positions & Cash ───────────────────────────────────────────
 
@@ -467,7 +394,7 @@ class ShadowBook:
         return {
             sym: (pos.quantity * prices.get(sym, pos.avg_entry_price)) / nav
             for sym, pos in self._positions.items()
-            if not pos.is_flat() and sym in prices
+            if not pos.is_flat() and prices.get(sym, pos.avg_entry_price) > 0
         }
 
     def unrealized_pnl(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
@@ -495,7 +422,7 @@ class ShadowBook:
         return self._cash / nav if nav > 0 else 1.0
 
     def net_pnl(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
-        return self._realized_pnl + self.unrealized_pnl(mark_prices) - self._total_commission
+        return self._realized_pnl + self.unrealized_pnl(mark_prices) - self.total_commission
 
     @property
     def fills(self) -> List[Fill]:
@@ -507,7 +434,9 @@ class ShadowBook:
 
     @property
     def total_commission(self) -> float:
-        return self._total_commission
+        total_com = sum(self.mark_prices.get(symbol, 1.0) * 
+                        quantity for symbol, quantity in self._total_commission_dict.items())
+        return total_com
 
     @property
     def peak_equity(self) -> float:
@@ -524,15 +453,18 @@ class ShadowBook:
         return max(0.0, (self._peak_equity - nav) / self._peak_equity)
 
     # ── Write — Fill attribution ──────────────────────────────────────────
-    def apply_fill(self, symbol: str, qty_delta: float, price: float,
-                   commission: float = 0.0, venue: Optional[Venue] = None):
+    def apply_fill(self, symbol: str, base_asset: str, quote_asset: str, qty_delta: float, price: float,
+                   commission: float = 0.0, commission_asset: Optional[str] = None,
+                   venue: Optional[Venue] = None):
         """Attribute a fill to this shadow book.
 
         Mirrors Portfolio.update_position() logic but operates on this
         strategy's virtual positions only.  Called by the fill attribution
         system after execution completes.
-        
-        Fill adjusts the Position Object, 
+
+        Updates positions, realized PnL, and cash.
+        Cash is adjusted here because _on_balance_update only handles
+        deposits/withdrawals, not trade fills.
         """
         if abs(qty_delta) < 1e-12:
             return
@@ -564,13 +496,41 @@ class ShadowBook:
                 # Position flipped direction
                 pos.avg_entry_price = price
 
+        # Commission tracking — always record in dict keyed by asset.
+        # Position.total_commission is a raw quantity (not USDT-converted);
+        # total_commission property does the USDT conversion via mark_prices.
         pos.total_commission += commission
-        self._total_commission += commission
+        if commission_asset is not None and commission > 0:
+            self._total_commission_dict[commission_asset] = (
+                self._total_commission_dict.get(commission_asset, 0.0) + commission
+            )
+
         self._positions[symbol] = pos
         if pos.is_flat():
             self._positions.pop(symbol, None)
 
-        self._mark_prices[symbol] = price
+        # ── Cash adjustment ───────────────────────────────────────────────
+        # Both _cash (total) and _cash_dict (per-stablecoin breakdown) are
+        # updated in parallel. _cash is authoritative; _cash_dict is the
+        # breakdown. Non-stablecoin commissions (BNB etc.) are tracked only
+        # in _total_commission_dict and do NOT reduce the stablecoin balance.
+        notional = abs(qty_delta) * price
+        if qty_delta > 0:  # BUY: spend quote asset
+            self._cash -= notional
+            self._cash_dict[quote_asset] = self._cash_dict.get(quote_asset, 0.0) - notional
+        else:              # SELL: receive quote asset
+            self._cash += notional
+            self._cash_dict[quote_asset] = self._cash_dict.get(quote_asset, 0.0) + notional
+
+        # Stablecoin commissions reduce the cash balance; non-stablecoin
+        # commissions (e.g. BNB) are paid from a separate BNB balance and
+        # do not affect the quote-asset cash.
+        if commission_asset in _STABLECOINS and commission > 0:
+            self._cash -= commission
+            self._cash_dict[commission_asset] = (
+                self._cash_dict.get(commission_asset, 0.0) - commission
+            )
+
         self._refresh_derived()
 
         # Audit trail
@@ -605,99 +565,60 @@ class ShadowBook:
         deposits and withdrawals are reflected in the shadow book.
         In sub-account mode, returns early — handled by _on_balance_update on private bus.
         """
-        if self._sub_account_mode:
-            return  # handled by _on_balance_update on private event bus
-        if event.asset in _STABLECOINS:
-            self._cash += event.delta
-            self._refresh_derived()
-        elif event.venue == self._venue:
-            scaled_delta = event.delta
-            curr = self._positions.get(event.asset)
-            if curr is None:
-                self._positions[event.asset] = Position(
-                    symbol=event.asset,
-                    venue=self._venue,
-                    quantity=scaled_delta,
-                    avg_entry_price=self._mark_prices.get(event.asset, 0.0),
-                )
-            else:
-                self._positions[event.asset] = Position(
-                    symbol=event.asset,
-                    venue=curr.venue,
-                    quantity=curr.quantity + scaled_delta,
-                    avg_entry_price=curr.avg_entry_price,
-                    realized_pnl=curr.realized_pnl,
-                    total_commission=curr.total_commission,
-                )
-            self._refresh_derived()
+        # Technically not needed, base_strategy class calls the shadow_book.on_balance_update(event)
+        return 
 
-    # ── Locked balance — LIMIT order reservations ─────────────────────────
+        # ── Locked balance — LIMIT order reservations ─────────────────────────
+        #
+        # Both sides are locked:
+        #   BUY  → locks quote asset (cash) via _locked_cash & ActiveLimitOrder.reserved_cash
+        #   SELL → locks base asset qty via Position.locked_quantity & ActiveLimitOrder.reserved_qty
+        #
+        # free_cash = _cash - _locked_cash        (available quote for new BUY orders)
+        # free_quantity = pos.quantity - pos.locked_quantity  (available base for new SELL orders)
 
     def lock_for_order(self, order_id: str, intent: OrderIntent) -> None:
-        """Reserve balance for a submitted LIMIT order. No-op for MARKET orders."""
+        """Reserve balance for a submitted LIMIT order.  No-op for MARKET orders.
+
+        Creates an ActiveLimitOrder, initializes its reservation, and stores
+        it in _active_orders.  BUY locks cash, SELL locks base-asset quantity.
+        """
         if intent.order_type != OrderType.LIMIT:
             return
-        if order_id in self._pending_order_id_to_intent:
+        if order_id in self._active_orders:
             return  # idempotent
-        self._pending_order_id_to_intent[order_id] = intent
-        if intent.side == Side.BUY:
-            if intent.price is None:
-                logger.warning(f"[ShadowBook] lock_for_order: LIMIT order {order_id} has price=None, skipping lock")
-                return
-            notional = intent.quantity * intent.price
-            self._locked_cash += notional
-            self._locked_cash_per_order[order_id] = notional
-        else:  # SELL
-            self._locked_quantities[intent.symbol] = (
-                self._locked_quantities.get(intent.symbol, 0.0) + intent.quantity
+        if intent.side == Side.BUY and intent.price is None:
+            logger.warning(
+                f"[ShadowBook] lock_for_order: LIMIT BUY {order_id} has price=None, skipping lock"
             )
-            self._locked_qty_per_order[order_id] = intent.quantity
-
-    def _partial_release_lock(self, order_id: str, delta_filled: float) -> None:
-        """Release lock proportionally as a partial/full fill arrives."""
-        intent = self._pending_order_id_to_intent.get(order_id)
-        if intent is None or intent.order_type != OrderType.LIMIT:
             return
-        if intent.side == Side.BUY:
-            release = delta_filled * intent.price
-            remaining = max(0.0, self._locked_cash_per_order.get(order_id, 0.0) - release)
-            self._locked_cash_per_order[order_id] = remaining
-            self._locked_cash = max(0.0, self._locked_cash - release)
-        else:  # SELL
-            remaining = max(0.0, self._locked_qty_per_order.get(order_id, 0.0) - delta_filled)
-            self._locked_qty_per_order[order_id] = remaining
-            sym_locked = max(0.0, self._locked_quantities.get(intent.symbol, 0.0) - delta_filled)
-            if sym_locked == 0.0:
-                self._locked_quantities.pop(intent.symbol, None)
-            else:
-                self._locked_quantities[intent.symbol] = sym_locked
 
-    def release_order_lock(self, order_id: str) -> None:
-        """Release any remaining lock for a terminal order."""
-        intent = self._pending_order_id_to_intent.pop(order_id, None)
-        if intent is None or intent.order_type != OrderType.LIMIT:
-            self._locked_cash_per_order.pop(order_id, None)
-            self._locked_qty_per_order.pop(order_id, None)
-            return
-        if intent.side == Side.BUY:
-            remaining = self._locked_cash_per_order.pop(order_id, 0.0)
-            self._locked_cash = max(0.0, self._locked_cash - remaining)
-        else:  # SELL
-            remaining = self._locked_qty_per_order.pop(order_id, 0.0)
-            sym_locked = max(0.0, self._locked_quantities.get(intent.symbol, 0.0) - remaining)
-            if sym_locked == 0.0:
-                self._locked_quantities.pop(intent.symbol, None)
-            else:
-                self._locked_quantities[intent.symbol] = sym_locked
+        active = ActiveLimitOrder(
+            id=order_id, symbol=intent.symbol, side=intent.side,
+            order_type=intent.order_type, quantity=intent.quantity,
+            price=intent.price, status=OrderStatus.PENDING,
+            venue=intent.venue or self._venue, strategy_id=intent.strategy_id,
+        )
+        active.initialize_reservation()
+        self._active_orders[order_id] = active
+
+        # BUY: lock quote-asset cash (USDT) = qty × price
+        self._locked_cash += active.reserved_cash
+
+        # SELL: lock base-asset quantity on the Position
+        if active.reserved_qty > 0:
+            pos = self._positions.get(intent.symbol)
+            if pos is not None:
+                pos.locked_quantity += active.reserved_qty
 
     @property
     def free_cash(self) -> float:
-        """Cash available for new orders (excludes locked LIMIT BUY reservations)."""
+        """Cash available for new BUY orders (excludes LIMIT BUY reservations)."""
         return max(0.0, self._cash - self._locked_cash)
 
     def free_quantity(self, symbol: str) -> float:
-        """Base quantity available for new orders (excludes locked LIMIT SELL reservations)."""
-        return max(0.0, self.position(symbol).quantity - self._locked_quantities.get(symbol, 0.0))
+        """Base-asset quantity available for new SELL orders (excludes LIMIT SELL reservations)."""
+        return self.position(symbol).free_quantity
 
     def update_mark_prices(self, prices: Dict[str, float]):
         """Update mark prices and refresh derived metrics.
@@ -715,9 +636,10 @@ class ShadowBook:
         self._nav = self.total_value()
         if self._nav > 0:
             self._weights = {
-                sym: (pos.quantity * self._mark_prices[sym]) / self._nav
+                sym: (pos.quantity * self._mark_prices.get(sym, pos.avg_entry_price)) / self._nav
                 for sym, pos in self._positions.items()
-                if not pos.is_flat() and sym in self._mark_prices  # BUG-7: skip stale prices
+                if not pos.is_flat()
+                and self._mark_prices.get(sym, pos.avg_entry_price) > 0
             }
         else:
             self._weights = {}
@@ -737,7 +659,7 @@ class ShadowBook:
             "cash": self._cash,
             "nav": self._nav,
             "realized_pnl": self._realized_pnl,
-            "total_commission": self._total_commission,
+            "total_commission": self.total_commission,
             "peak_equity": self._peak_equity,
             "max_drawdown": self._max_drawdown,
             "positions": {sym: str(pos) for sym, pos in self._positions.items()},
@@ -760,12 +682,12 @@ class ShadowBook:
         try:
             PortfolioSnapshot.create(
                 strategy_id=self._strategy_id,
-                venue=self._venue or Venue.BINANCE,
+                venue=self._venue,
                 nav=self._nav,
                 cash=self._cash,
                 unrealized_pnl=self.unrealized_pnl(),
                 realized_pnl=self._realized_pnl,
-                total_commission=self._total_commission,
+                total_commission=self.total_commission,
                 peak_equity=self._peak_equity,
                 max_drawdown=self._max_drawdown,
                 current_drawdown=self.current_drawdown(),
@@ -792,69 +714,4 @@ class ShadowBook:
         return (
             f"ShadowBook(strategy={self._strategy_id}"
             f"cash={self._cash:.2f} nav={self._nav:.2f} positions={active})"
-        )
-
-
-# ── Fill attribution helper ──────────────────────────────────────────────
-
-def reconcile_shadow_books(
-    shadow_books: Dict[int, "ShadowBook"],
-    strategy_weights: Dict[int, Dict[str, float]],
-    allocations: Dict[int, float],
-    mark_prices: Dict[str, float],
-    portfolio_total_value: float,
-):
-    """Periodic drift-correction pass for shadow books.
-
-    DEPRECATED AS PRIMARY ACCOUNTING — ShadowBook.start() + _on_order_update()
-    now handles real-time fill attribution at actual fill prices with correct
-    commission attribution.  This function should only be called as a periodic
-    reconciliation sweep to correct accumulated rounding drift, NOT as the
-    primary mechanism for updating shadow book positions.
-
-    Reconciles all shadow books to their *target* positions after a rebalance.
-    Uses mark prices (not fill prices) — cost basis accuracy is limited.
-    Commission is NOT attributed here.
-
-    Parameters
-    ----------
-    shadow_books:
-        strategy_id -> ShadowBook mapping.
-    strategy_weights:
-        strategy_id -> {symbol: raw_weight} — the latest weights each
-        strategy computed (before allocation scaling).
-    allocations:
-        strategy_id -> allocation fraction [0, 1].
-    mark_prices:
-        symbol -> price used for fill attribution.
-    portfolio_total_value:
-        Total NAV of the aggregate Portfolio at time of execution.
-    """
-    for strat_id, book in shadow_books.items():
-        alloc = allocations.get(strat_id, 0.0)
-        weights = strategy_weights.get(strat_id, {})
-        strat_target_value = alloc * portfolio_total_value
-
-        # All symbols this strategy cares about (current + target)
-        all_syms = set(weights.keys()) | set(book.active_positions.keys())
-
-        for sym in all_syms:
-            price = mark_prices.get(sym, 0.0)
-            if price <= 0:
-                continue
-
-            target_w = weights.get(sym, 0.0)
-            target_qty = target_w * strat_target_value / price
-            current_qty = book.position(sym).quantity
-            delta = target_qty - current_qty
-
-            if abs(delta) < 1e-10:
-                continue
-
-            book.apply_fill(sym, delta, price)
-
-        logger.debug(
-            f"[ShadowBook-{strat_id}] Reconciled: "
-            f"nav={book.nav:.2f} cash={book.cash:.2f} "
-            f"{len(book.active_positions)} positions"
         )

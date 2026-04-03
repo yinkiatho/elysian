@@ -408,13 +408,13 @@
         <tr>
             <td><code>_on_enter_executing(**ctx)</code></td>
             <td>
-                1. Publishes <code>RebalanceCycleEvent</code><br>
+                1. Publishes <code>RebalanceCycleEvent</code> via <code>_publish_cycle_event("accepted")</code><br>
                 2. Reads <code>ctx["validated_weights"]</code> from validating stage<br>
                 3. Calls <code>await self._execution_engine.execute(validated, **ctx)</code><br>
                 4. On exception: triggers <code>"failed"</code> with <code>error=e</code><br>
-                5. On success: calls <code>shadow_book.lock_for_order(order_id, intent)</code> for each submitted limit order in <code>result.submitted_orders</code> (reserves balance in the shadow book)<br>
-                6. Stores result in <code>_last_result</code>; if <code>aggregator</code> is set, calls <code>aggregator.attribute_fills(mark_prices, portfolio_total_value)</code> — <strong>this call is a no-op when portfolio_total_value is 0 or ctx keys are absent</strong><br>
-                7. Publishes <code>RebalanceCompleteEvent(result, validated_weights, timestamp, strategy_id)</code> to EventBus<br>
+                5. On success: calls <code>shadow_book.lock_for_order(order_id, intent)</code> for each submitted limit order in <code>result.submitted_orders</code> (reserves balance in the shadow book for pending LIMIT orders)<br>
+                6. Stores result in <code>_last_result</code>; stores in <code>ctx["rebalance_result"]</code><br>
+                7. Publishes <code>RebalanceCompleteEvent(result, validated_weights, timestamp, strategy_id)</code> to EventBus (private bus)<br>
                 8. Triggers <code>"complete"</code>
             </td>
             <td><code>complete</code> or <code>failed</code></td>
@@ -468,6 +468,9 @@
         <strong>Request flow:</strong>
         <code>strategy.request_rebalance(**ctx)</code> &rarr; <code>RebalanceFSM.request(**ctx)</code> &rarr;
         checks if state == IDLE, then calls <code>trigger("signal", **ctx)</code>. Returns <code>False</code> silently if busy.
+        <br><br>
+        <strong>Note (Apr 2026 refactor):</strong> <code>start_timer()</code> / <code>stop_timer()</code> methods
+        were removed from RebalanceFSM. Timing is entirely the strategy's responsibility via <code>run_forever()</code>.
     </div>
 
     <h3>Public API</h3>

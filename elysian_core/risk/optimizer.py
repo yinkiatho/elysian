@@ -5,6 +5,8 @@ Validates and adjusts strategy weight signals against risk constraints.
 This is a stateless constraint projector — it clips, scales, and rejects
 weights that violate the configured risk envelope.  It is *not* a
 Markowitz-style optimizer (that logic, if desired, lives in the strategy).
+
+This is a Shadowbook Level Component aka at Strategy level
 """
 
 import time
@@ -41,7 +43,7 @@ class PortfolioOptimizer:
     def __init__(self, risk_config: RiskConfig,
                         portfolio: 'ShadowBook',
                         cfg: Optional[Any] = None):
-        self._config = risk_config
+        self._risk_config = risk_config
         self._portfolio = portfolio
         self.cfg = cfg
         self._last_rebalance_ts: int = None  # per-strategy rate limiting
@@ -50,7 +52,7 @@ class PortfolioOptimizer:
 
     @property
     def config(self) -> RiskConfig:
-        return self._config
+        return self._risk_config
     
     @property
     def venue(self) -> Optional[Venue]:
@@ -58,7 +60,8 @@ class PortfolioOptimizer:
 
     @config.setter
     def config(self, new_config: RiskConfig):
-        self._config = new_config
+        self._risk_config = new_config
+
 
     def validate(self, target: TargetWeights, **ctx) -> ValidatedWeights:
         """Project *target* weights onto the risk-feasible set.
@@ -73,20 +76,18 @@ class PortfolioOptimizer:
         """
         
         now_ms = int(time.time() * 1000)
-        cfg = self._config
+        cfg = self._risk_config
 
         logger.info(
             f"[Optimizer] Validating weights: {len(target.weights)} symbols, "
             f"sum={sum(target.weights.values()):.4f} ({target.weights})"
         )
-
         
         weights = dict(target.weights)  # mutable copy
         clips: Dict[str, float] = {}
 
         # 1. Symbol filter
         pre_filter = len(weights)
-        weights = self._filter_symbols(weights)
         if len(weights) < pre_filter:
             logger.info(f"[Optimizer] Symbol filter: {pre_filter} -> {len(weights)} symbols")
 
@@ -104,7 +105,6 @@ class PortfolioOptimizer:
         # 5. Turnover cap (best-effort without mark prices;
         #    uses raw weight delta as proxy)
         weights = self._cap_turnover(weights, original=self._portfolio.current_weights())
-
         self._last_rebalance_ts = now_ms
 
         logger.info(
@@ -132,22 +132,9 @@ class PortfolioOptimizer:
 
     # ── Private constraint steps ─────────────────────────────────────────────
 
-    def _filter_symbols(self, weights: Dict[str, float]) -> Dict[str, float]:
-        cfg = self._config
-        filtered: Dict[str, float] = {}
-        for sym, w in weights.items():
-            if sym in cfg.blocked_symbols:
-                logger.debug(f"[Optimizer] Blocked symbol removed: {sym}")
-                continue
-            if cfg.allowed_symbols is not None and sym not in cfg.allowed_symbols:
-                logger.debug(f"[Optimizer] Symbol not in allowlist: {sym}")
-                continue
-            filtered[sym] = w
-        return filtered
-
     def _clip_per_asset(self, weights: Dict[str, float]) -> Tuple[Dict[str, float], Dict[str, float]]:
         
-        cfg = self._config
+        cfg = self._risk_config
         clipped: Dict[str, float] = {}
         out: Dict[str, float] = {}
         
@@ -173,7 +160,7 @@ class PortfolioOptimizer:
 
     def _scale_exposure(self, weights: Dict[str, float]) -> Dict[str, float]:
         
-        cfg = self._config
+        cfg = self._risk_config
         gross = sum(abs(w) for w in weights.values())
         if gross <= cfg.max_total_exposure or gross == 0:
             return weights
@@ -187,7 +174,7 @@ class PortfolioOptimizer:
 
     def _enforce_cash_floor(self, weights: Dict[str, float]) -> Dict[str, float]:
         
-        cfg = self._config
+        cfg = self._risk_config
         total_long = sum(w for w in weights.values() if w > 0)
         max_invested = 1.0 - cfg.min_cash_weight
         if total_long <= max_invested or total_long == 0:
@@ -213,7 +200,7 @@ class PortfolioOptimizer:
         best-effort guard; the execution engine applies a second notional
         filter before submitting orders.
         """
-        cfg = self._config
+        cfg = self._risk_config
         all_syms = set(weights) | set(original)
         turnover = sum(
             abs(weights.get(s, 0.0) - original.get(s, 0.0)) for s in all_syms

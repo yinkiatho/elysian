@@ -10,7 +10,6 @@ from datetime import datetime as dt
 from typing import Any, Dict, List, Optional, Callable
 from urllib.parse import urlencode
 
-import pylru
 import requests
 import websockets
 import json
@@ -607,6 +606,11 @@ class BinanceUserDataClientManager:
         self._reader_task: Optional[asyncio.Task] = None
         self._subscribers: List[Callable[[dict], None]] = []
         self._event_bus = None  # Optional EventBus — set via set_event_bus()
+        self.token_infos = {}  # Cache for token info (e.g., decimals) keyed by symbol
+        
+        
+    def set_token_info(self, token_infos: dict):
+        self.token_infos = token_infos
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -695,7 +699,7 @@ class BinanceUserDataClientManager:
                         break
 
                     reconnect_delay = 1  # reset backoff on successful connection
-                    logger.info("BinanceUserDataClientManager: connected and listening")
+                    logger.success("BinanceUserDataClientManager: connected and listening")
 
                     async for raw in ws:
                         if not self._running:
@@ -728,6 +732,8 @@ class BinanceUserDataClientManager:
                                 if order:
                                     await self._event_bus.publish(OrderUpdateEvent(
                                         symbol=event.get("s"),
+                                        base_asset=self.token_infos.get(event.get("s"), {}).get("baseAsset", ""),
+                                        quote_asset=self.token_infos.get(event.get("s"), {}).get("quoteAsset", ""),
                                         venue=Venue.BINANCE,
                                         order=order,
                                         timestamp=ts,
@@ -807,6 +813,7 @@ class BinanceUserDataClientManager:
             price=float(msg.get("p", 0)) or None,
             status=status,
             avg_fill_price=avg_price,
+            last_fill_price=float(msg.get("L", 0)),
             filled_qty=cum_filled,
             timestamp=datetime.datetime.fromtimestamp(
                 msg.get("O", 0) / 1000, tz=datetime.timezone.utc

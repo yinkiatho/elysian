@@ -28,8 +28,16 @@ class Position:
     avg_entry_price: float = 0.0
     realized_pnl: float = 0.0
     total_commission: float = 0.0
+    commission_asset: str = "USDT"
+    locked_quantity: float = 0.0  # reserved qty for pending SELL limit orders
 
     # ── Computed properties ──────────────────────────────────────────────────
+
+    @property
+    def free_quantity(self) -> float:
+        """Quantity available for new sell orders (excludes locked LIMIT SELL reservations)."""
+        return max(0.0, self.quantity - self.locked_quantity)
+
 
     def unrealized_pnl(self, mark_price: float) -> float:
         """Mark-to-market unrealized P&L."""

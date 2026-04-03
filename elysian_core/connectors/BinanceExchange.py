@@ -3,15 +3,11 @@ import collections
 import datetime
 import hashlib
 import hmac
-import math
-import statistics
 import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 
-import pylru
 import requests
-import websockets
 import json
 from binance import AsyncClient, BinanceSocketManager
 from binance.exceptions import BinanceAPIException
@@ -102,6 +98,10 @@ class BinanceSpotExchange(SpotExchangeConnector):
         self._client = await AsyncClient.create(self._api_key, self._api_secret)
         for sym in self._symbols:
             await self._fetch_symbol_info(sym)
+            
+        # Pass the token_infos to the UserDataClientManager
+        if self.user_data_manager:
+            self.user_data_manager.set_token_infos(self._token_infos)
 
         # start user-data listener
         try:
@@ -131,7 +131,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
                                      "quote_asset": info["quoteAsset"], 
                                      "base_asset_precision": info["baseAssetPrecision"], 
                                      "quote_asset_precision": info["quoteAssetPrecision"]}
-        #logger.info(f"[{symbol}] step={step_size} min_notional={min_notional}")
+        logger.info(f"[{symbol}] step={step_size} min_notional={min_notional}")
 
 
     # ── Account ───────────────────────────────────────────────────────────────
@@ -300,48 +300,6 @@ class BinanceSpotExchange(SpotExchangeConnector):
     
 
     # ── Orders ────────────────────────────────────────────────────────────────
-    
-    def order_health_check(self, symbol: str, side: Side, quantity: float, use_quote_order_qty: bool = False) -> bool:
-        """
-        Does a health check on whether we have sufficient balances and notional filter to execute the trade
-        """
-        base_asset, quote_asset = self._token_infos.get(symbol, {}).get("base_asset"), self._token_infos.get(symbol, {}).get("quote_asset")
-        if not base_asset or not quote_asset:
-            logger.error(f"[{symbol}] place_market_order failed: symbol info not found")
-            return False
-        
-        # Check for minimum notional requirement
-        price = self.last_price(symbol) or 0.0
-        estimated_notional = price * abs(quantity) if not use_quote_order_qty else abs(quantity)
-        min_notional = self._token_infos.get(symbol, {}).get("min_notional", 0.0)
-
-        if estimated_notional < min_notional:
-            logger.error(f"[{symbol}] Estimated notional {estimated_notional:.4f} < min {min_notional}. Need to place order of higher notional")
-            return False 
-        
-        # Check if we have enough notional approximately to execute trade
-        if not use_quote_order_qty:   # Base asset
-            if side == Side.BUY:
-                if self._balances.get(quote_asset, 0.0) < price * abs(quantity):
-                    logger.error(f"[{symbol}] Insufficient balance to BUY estimated {quantity} {base_asset}. Need ~{price * abs(quantity):.2f} {quote_asset}")
-                    return False
-            else:  # SELL
-                if self._balances.get(base_asset, 0.0) < abs(quantity):
-                    logger.error(f"[{symbol}] Insufficient balance to SELL estimated {quantity} {base_asset}. Available: {self._balances.get(base_asset, 0.0):.4f}")
-                    return False       
-            
-        else:
-            if side == Side.BUY:
-                if self._balances.get(quote_asset, 0.0) < abs(quantity):
-                    logger.error(f"[{symbol}] Insufficient balance to BUY estimated {quantity:.2f} {quote_asset} worth of {base_asset}. Available: {self._balances.get(quote_asset, 0.0):.2f}")
-                    return False
-            else:  # SELL
-                if self._balances.get(base_asset, 0.0) < price * abs(quantity):
-                    logger.error(f"[{symbol}] Insufficient balance to SELL estimated {quantity:.2f} {quote_asset} worth of {base_asset}. Need ~{price * abs(quantity):.2f} {base_asset}")
-                    return False
-                
-        return True
-                
 
     async def place_limit_order(
         self, symbol: str, side: Side, quantity: float, price: float, strategy_id: int
@@ -532,20 +490,6 @@ class BinanceSpotExchange(SpotExchangeConnector):
 
 
 
-    @staticmethod
-    def _average_fill_price(resp: dict):
-        '''
-        Get the average fill price from a MARKET ORDER response, weighted by quantity. Also returns total commission paid for the fills.
-        '''
-        fills = resp["fills"]
-        total_qty = sum(float(f["qty"]) for f in fills)
-        total_notional = sum(float(f["qty"]) * float(f["price"]) for f in fills)
-        total_comm = sum(float(f["commission"]) for f in fills)
-        if total_qty == 0:
-            return 0.0, 0.0
-        return total_notional / total_qty, total_comm
-    
-    
     async def _record_trade(self, base_asset: str, quote_asset: str, base_amount_executed: float, quote_amount_executed: float, 
                                   order_type: OrderType, price: float, commission: float, order_id: int, 
                                   status: str, side_str: str, comm_asset: str, strategy_id: int, strategy_name: str):
@@ -595,13 +539,6 @@ class BinanceSpotExchange(SpotExchangeConnector):
         except Exception as e:
             logger.error(f"withdraw_asset error: {e}")
         return False
-
-    async def withdraw_half(self, coins: List[str], address: str, network: str = "SUI"):
-        for coin in coins:
-            bal = self._balances.get(coin, 0.0)
-            await self.withdraw_asset(coin, round(bal / 2, 2), address, network)
-
-
 
     # ── Run ───────────────────────────────────────────────────────────────────
 

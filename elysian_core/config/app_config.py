@@ -42,11 +42,12 @@ Usage::
 """
 
 from __future__ import annotations
-
+import importlib
 import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from dataclasses import asdict
 
 import yaml
 from dotenv import load_dotenv
@@ -157,7 +158,7 @@ class SymbolsConfig:
 @dataclass
 class MetaConfig:
     version_name: str = ""
-    strategy_id: int = 0
+    strategy_id: int = 90909090
     strategy_name: str = ""
     spot_venues: List[str] = field(default_factory=list)
     futures_venues: List[str] = field(default_factory=list)
@@ -187,22 +188,26 @@ class StrategyConfig:
         params:
           rebalance_interval_s: 60
     """
-    id: int = 0
-    name: str = ""
+    strategy_id: int = 0
+    strategy_name: str = ""
     class_name: str = ""
     asset_type: str = "Spot"
     venue: str = "Binance"
     venues: List[str] = field(default_factory=lambda: ["Binance"])
-    allocation: float = 1.0
     symbols: List[str] = field(default_factory=list)
     params: Dict[str, Any] = field(default_factory=dict)
+    
     # Per-strategy config overrides (applied on top of venue + global defaults)
     risk_overrides: Dict[str, Any] = field(default_factory=dict)
     execution_overrides: Dict[str, Any] = field(default_factory=dict)
     portfolio_overrides: Dict[str, Any] = field(default_factory=dict)
+    
     # Sub-account credentials (env var name or literal value; empty = shared account)
     sub_account_api_key: str = ""
     sub_account_api_secret: str = ""
+    
+    # Risk Management Parameters
+    risk_config: RiskConfig = field(default_factory=RiskConfig)
 
 
 # ── Per-(asset_type, venue) config overrides ─────────────────────────────────
@@ -233,7 +238,7 @@ class AppConfig:
     strategy: DictConfig = field(default_factory=DictConfig)
     secrets: SecretsConfig = field(default_factory=SecretsConfig)
     symbols: SymbolsConfig = field(default_factory=SymbolsConfig)
-    strategies: List[StrategyConfig] = field(default_factory=list)
+    strategies: Dict[int, StrategyConfig] = field(default_factory=dict)
     
     # Per-(asset_type, venue) config overrides from venue_configs YAML section
     venue_configs: Dict[str, VenueConfig] = field(default_factory=dict)
@@ -254,17 +259,22 @@ class AppConfig:
           2. Per-(asset_type, venue) overrides from ``venue_configs``
           3. Global ``self.risk``
         """
+        
+        # If strategy_id is provided get the risk config directly
+        if strategy_id is not None:
+            return self.strategies[strategy_id].risk_config
+        
         # Flatten global risk to a plain dict
-        base: Dict[str, Any] = {
-            f: getattr(self.risk, f)
-            for f in self.risk.__dataclass_fields__
-        }
+        # Start with global risk config as dict
+        base = asdict(self.risk)
+
         # Apply venue-level overrides
         if asset_type and venue:
             venue_key = f"{asset_type.lower()}_{venue.lower()}"
             vc = self.venue_configs.get(venue_key)
             if vc and vc.risk_overrides:
                 base.update({k: v for k, v in vc.risk_overrides.items() if v is not None})
+                
         # Apply strategy-level overrides
         if strategy_id is not None:
             sc = next((s for s in self.strategies if s.id == strategy_id), None)
@@ -276,7 +286,6 @@ class AppConfig:
         self,
         asset_type: Optional[str] = None,
         venue: Optional[str] = None,
-        strategy_id: Optional[int] = None,
     ) -> DictConfig:
         """Return a merged execution :class:`DictConfig` for the given context.
 
@@ -284,6 +293,8 @@ class AppConfig:
           1. Strategy ``execution_overrides``
           2. Per-(asset_type, venue) overrides from ``venue_configs``
           3. Global ``self.execution``
+          
+        Effective Execution if only for at the Asset-Type Venue Exchange Level
         """
         base = dict(self.execution)
         if asset_type and venue:
@@ -291,31 +302,8 @@ class AppConfig:
             vc = self.venue_configs.get(venue_key)
             if vc and vc.execution_overrides:
                 base.update(vc.execution_overrides)
-        if strategy_id is not None:
-            sc = next((s for s in self.strategies if s.id == strategy_id), None)
-            if sc and sc.execution_overrides:
-                base.update(sc.execution_overrides)
+        
         return DictConfig(base)
-
-    def effective_portfolio_for(
-        self,
-        asset_type: Optional[str] = None,
-        venue: Optional[str] = None,
-        strategy_id: Optional[int] = None,
-    ) -> DictConfig:
-        """Return a merged portfolio :class:`DictConfig` for the given context."""
-        base = dict(self.portfolio)
-        if asset_type and venue:
-            venue_key = f"{asset_type.lower()}_{venue.lower()}"
-            vc = self.venue_configs.get(venue_key)
-            if vc and vc.portfolio_overrides:
-                base.update(vc.portfolio_overrides)
-        if strategy_id is not None:
-            sc = next((s for s in self.strategies if s.id == strategy_id), None)
-            if sc and sc.portfolio_overrides:
-                base.update(sc.portfolio_overrides)
-        return DictConfig(base)
-
 
 # ── Factory ──────────────────────────────────────────────────────────────────
 
@@ -337,15 +325,17 @@ def _build_risk_config(risk_section: dict) -> RiskConfig:
             kwargs[field_name] = val
 
     # YAML list/null → frozenset
-    allowed = risk_section.get("allowed_symbols")
-    if allowed is not None and isinstance(allowed, list):
-        kwargs["allowed_symbols"] = frozenset(allowed)
-
-    blocked = risk_section.get("blocked_symbols")
-    if blocked is not None and isinstance(blocked, list) and blocked:
-        kwargs["blocked_symbols"] = frozenset(blocked)
-
     return RiskConfig(**kwargs)
+
+
+def load_strategy_class(class_path: str):
+    """
+    Load a strategy class from a fully qualified path.
+    Example: "elysian_core.strategy.event_driven.EventDrivenStrategy"
+    """
+    module_name, class_name = class_path.rsplit(".", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, class_name)
 
 
 def load_strategy_yaml(yaml_path: str) -> StrategyConfig:
@@ -355,21 +345,28 @@ def load_strategy_yaml(yaml_path: str) -> StrategyConfig:
     """
     with open(yaml_path, "r", encoding="utf-8") as f:
         s = yaml.safe_load(f) or {}
+        
+    place_holders = {
+        "strategy_name": s.get("strategy_name", ""),
+    }
+    
+    s = replace_placeholders(s, place_holders)
+    risk_config = _build_risk_config(s.get("risk", {}))
     return StrategyConfig(
-        id=s.get("id", 0),
-        name=s.get("name", ""),
+        strategy_id=s.get("strategy_id"),
+        strategy_name=s.get("strategy_name", ""),
         class_name=s.get("class", ""),
         asset_type=s.get("asset_type", "Spot"),
         venue=s.get("venue", "Binance"),
         venues=s.get("venues", [s.get("venue", "Binance")]),
-        allocation=float(s.get("allocation", 1.0)),
         symbols=s.get("symbols", []) or [],
         params=s.get("params", {}) or {},
         risk_overrides=s.get("risk_overrides", {}) or {},
         execution_overrides=s.get("execution_overrides", {}) or {},
         portfolio_overrides=s.get("portfolio_overrides", {}) or {},
-        sub_account_api_key=os.getenv(s.get("sub_account_api_key", ""), ""),
-        sub_account_api_secret=os.getenv(s.get("sub_account_api_secret", ""), ""),
+        sub_account_api_key=os.getenv(s.get("venue", "Binance").upper() + "_API_KEY_" + str(s.get("strategy_id", 0)), ""),
+        sub_account_api_secret=os.getenv(s.get("venue", "Binance").upper() + "_API_SECRET_" + str(s.get("strategy_id", 0)), ""),
+        risk_config=risk_config
     )
 
 
@@ -421,12 +418,12 @@ def load_app_config(
 
     secrets = SecretsConfig(
         binance=ExchangeSecrets(
-            api_key=os.getenv("BINANCE_API_KEY", ""),
-            api_secret=os.getenv("BINANCE_API_SECRET", ""),
+            api_key=os.getenv("BINANCE_API_KEY_0", ""),
+            api_secret=os.getenv("BINANCE_API_SECRET_0", ""),
         ),
         aster=ExchangeSecrets(
-            api_key=os.getenv("ASTER_API_KEY", ""),
-            api_secret=os.getenv("ASTER_API_SECRET", ""),
+            api_key=os.getenv("ASTER_API_KEY_0", ""),
+            api_secret=os.getenv("ASTER_API_SECRET_0", ""),
         ),
         binance_wallet_address=os.getenv("BINANCE_WALLET_ADDRESS", ""),
         postgres_user=os.getenv("POSTGRES_USER", ""),
@@ -474,28 +471,12 @@ def load_app_config(
             )
 
     # Typed: strategies list from inline YAML (legacy single-file layout)
-    strategies_list: List[StrategyConfig] = []
-    for s in y.get("strategies", []) or []:
-        strategies_list.append(StrategyConfig(
-            id=s.get("id", 0),
-            name=s.get("name", ""),
-            class_name=s.get("class", ""),
-            asset_type=s.get("asset_type", "Spot"),
-            venue=s.get("venue", "Binance"),
-            venues=s.get("venues", [s.get("venue", "Binance")]),
-            allocation=float(s.get("allocation", 1.0)),
-            symbols=s.get("symbols", []) or [],
-            params=s.get("params", {}) or {},
-            risk_overrides=s.get("risk_overrides", {}) or {},
-            execution_overrides=s.get("execution_overrides", {}) or {},
-            portfolio_overrides=s.get("portfolio_overrides", {}) or {},
-            sub_account_api_key=os.getenv(s.get("sub_account_api_key", ""), ""),
-            sub_account_api_secret=os.getenv(s.get("sub_account_api_secret", ""), ""),
-        ))
+    strategies_list: Dict[int, StrategyConfig] = {}
 
     # Load additional per-strategy YAML files (two-tier layout)
     for strat_yaml_path in (strategy_config_yamls or []):
-        strategies_list.append(load_strategy_yaml(strat_yaml_path))
+        strategy_config = load_strategy_yaml(strat_yaml_path)
+        strategies_list[strategy_config.strategy_id] = strategy_config
 
     # Collect any YAML sections not explicitly handled above
     _KNOWN_KEYS = {

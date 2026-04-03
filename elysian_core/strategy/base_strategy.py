@@ -23,17 +23,6 @@ Usage::
     await strategy.start()
 """
 
-import asyncio
-import time
-from concurrent.futures import ProcessPoolExecutor
-from typing import Any, Dict, FrozenSet, Optional, Set, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from elysian_core.execution.engine import ExecutionEngine
-    from elysian_core.risk.optimizer import PortfolioOptimizer
-    from elysian_core.config.app_config import AppConfig, StrategyConfig
-    from elysian_core.core.shadow_book import ShadowBook
-
 from elysian_core.connectors.base import SpotExchangeConnector, AbstractDataFeed
 from elysian_core.core.enums import StrategyState, Venue, AssetType
 from elysian_core.core.event_bus import EventBus
@@ -49,6 +38,18 @@ from elysian_core.core.events import (
 from elysian_core.core.signals import RebalanceResult, TargetWeights
 from elysian_core.core.rebalance_fsm import RebalanceFSM
 import elysian_core.utils.logger as log
+
+import asyncio
+import time
+from concurrent.futures import ProcessPoolExecutor
+from typing import Any, Dict, FrozenSet, Optional, Set, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from elysian_core.execution.engine import ExecutionEngine
+    from elysian_core.risk.optimizer import PortfolioOptimizer
+    from elysian_core.config.app_config import AppConfig, StrategyConfig
+    from elysian_core.core.shadow_book import ShadowBook
+
 
 logger = log.setup_custom_logger("root")
 
@@ -67,9 +68,9 @@ class SpotStrategy:
 
     def __init__(
         self,
-        exchanges: Dict[Venue, SpotExchangeConnector],
-        shared_event_bus: EventBus,
-        private_event_bus: EventBus,
+        exchanges: Dict[Venue, SpotExchangeConnector] = {},
+        shared_event_bus: EventBus = None,
+        private_event_bus: EventBus = None,
         feeds: Optional[Dict[str, AbstractDataFeed]] = None,
         max_heavy_workers: int = 4,
         optimizer: Optional["PortfolioOptimizer"] = None,
@@ -145,14 +146,15 @@ class SpotStrategy:
     def rebalance_fsm(self) -> Optional[RebalanceFSM]:
         """The rebalance cycle FSM, or None if not configured."""
         return self._rebalance_fsm
+    
 
-    @property
-    def is_sub_account_mode(self) -> bool:
-        """True if this strategy operates in dedicated sub-account mode."""
-        return getattr(self._shadow_book, '_sub_account_mode', False)
+    async def start(self):
+        """
+        Register all hooks with the event bus and call :meth:`on_start`.
 
-    async def start(self, aggregator=None):
-        """Register all hooks with the event bus and call :meth:`on_start`."""
+        Check that we have all the necessary core components wired up else we raise Error
+
+        """
         if self._state != StrategyState.CREATED:
             logger.warning(f"[Strategy] start() called in state {self._state.name}, ignoring")
             return
@@ -173,7 +175,6 @@ class SpotStrategy:
                 execution_engine=self._execution_engine,
                 event_bus=self._private_event_bus,
                 name=f"{self.__class__.__name__}.RebalanceFSM",
-                aggregator=aggregator,
             )
             logger.info(f"[Strategy] RebalanceFSM initialized for {self.__class__.__name__}")
 
@@ -257,11 +258,8 @@ class SpotStrategy:
     async def _dispatch_kline(self, event: KlineEvent):
         if event.venue not in self.venues:
             return
-        # Only manually update shadow book mark prices in shared-account mode.
-        # In sub-account mode, ShadowBook has its own KLINE subscription via the shared bus.
-        if self._shadow_book is not None and not self.is_sub_account_mode:
-            if event.kline.close and event.kline.close > 0:
-                self._shadow_book.update_mark_prices({event.symbol: event.kline.close})
+        # ShadowBook has its own KLINE subscription via the shared bus,
+        # so mark prices are updated there — no manual forwarding needed.
         self._mark_running()
         try:
             await self.on_kline(event)
@@ -281,8 +279,8 @@ class SpotStrategy:
         Order Update Events from the Private Event Bus
         '''
         try:
-            asyncio.gather(*[self.on_order_update(event), 
-                             self._shadow_book.on_order_update(event)])
+            await asyncio.gather(self.on_order_update(event),
+                                 self._shadow_book._on_order_update(event))
         except Exception as e:
             logger.error(f"SpotStrategy.on_order_update error: {e}", exc_info=True)
 
@@ -292,16 +290,9 @@ class SpotStrategy:
         '''
         if event.venue not in self.venues:
             return
-        
-        # Only manually call on_balance in shared-account mode.
-        # In sub-account mode, ShadowBook handles balance updates via its private bus subscription.
         try:
-            asyncio.gather(*[self.on_balance_update(event), 
-                             self._shadow_book._on_balance_update(event)])
-        except Exception as e:
-            logger.error(f"SpotStrategy shadow_book.on_balance error: {e}", exc_info=True)
-        try:
-            await self.on_balance_update(event)
+            await asyncio.gather(self.on_balance_update(event),
+                                 self._shadow_book._on_balance_update(event))
         except Exception as e:
             logger.error(f"SpotStrategy.on_balance_update error: {e}", exc_info=True)
 
@@ -431,20 +422,3 @@ class SpotStrategy:
             return feed.volatility * 10_000
         return None
     
-
-    def _split_pair(self, pair: str):
-        """Split a symbol like 'ETHUSDT' into ('ETH', 'USDT')."""
-        known_tokens: set = set()
-        for sym in self._feeds:
-            for stable in _STABLECOINS:
-                if sym.endswith(stable):
-                    known_tokens.add(sym[: -len(stable)])
-                    known_tokens.add(stable)
-
-        for token in known_tokens:
-            if pair.startswith(token) and pair[len(token):] in known_tokens:
-                return token, pair[len(token):]
-            if pair.endswith(token) and pair[: -len(token)] in known_tokens:
-                return pair[: -len(token)], token
-
-        return None, None

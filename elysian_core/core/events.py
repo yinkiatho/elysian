@@ -47,6 +47,8 @@ class OrderBookUpdateEvent:
 @dataclass(frozen=True)
 class OrderUpdateEvent:
     symbol: str
+    base_asset: str
+    quote_asset: str
     venue: Venue
     order: Order
     timestamp: int

@@ -2,13 +2,9 @@
   "venues": {
     "binance": {
       "spot": [
-        "SUIUSDC", "CETUSUSDT", "BTCUSDT", "ETHUSDT",
+        "SUIUSDT", "CETUSUSDT", "BTCUSDT", "ETHUSDT",
         "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT",
-        "DOGEUSDT", "AVAXUSDT", "DOTUSDT", "MATICUSDT",
-        "LINKUSDT", "UNIUSDT", "ATOMUSDT", "LTCUSDT",
-        "NEARUSDT", "APTUSDT", "ARBUSDT", "OPUSDT",
-        "INJUSDT", "TIAUSDT", "SEIUSDT", "STXUSDT",
-        "WLDUSDT"
+        "DOGEUSDT"
       ],
       "futures": [
         "BTCUSDT", "ETHUSDT",

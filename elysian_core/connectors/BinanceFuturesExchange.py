@@ -545,17 +545,6 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
         except Exception as e:
             logger.error(f"[{symbol}] place_market_order error: {e}")
 
-    @staticmethod
-    def _average_fill_price(resp: dict):
-        """Get VWAP from market order fills. Returns (avg_price, total_commission)."""
-        fills = resp.get("fills", [])
-        if not fills:
-            return 0.0, 0.0
-        total_qty = sum(float(f["qty"]) for f in fills)
-        total_notional = sum(float(f["qty"]) * float(f["price"]) for f in fills)
-        total_comm = sum(float(f["commission"]) for f in fills)
-        return total_notional / total_qty, total_comm
-
     async def cancel_order(self, symbol: str, order_id: str):
         """Cancel an active futures order by id."""
         try:

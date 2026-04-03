@@ -131,7 +131,7 @@
 <div class="container">
 
     <h1><span>ELYSIAN</span> Trading System</h1>
-    <p class="subtitle">Event-driven, multi-venue quantitative trading infrastructure &mdash; last updated 2026-03-30</p>
+    <p class="subtitle">Event-driven, multi-venue quantitative trading infrastructure &mdash; last updated 2026-04-02</p>
 
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
     <h2>1. High-Level 6-Stage Pipeline <span>End-to-end data flow</span></h2>
@@ -151,8 +151,8 @@
             subgraph S2["Stage 2: Feature Compute"]
                 KF["KlineFeed\nOHLCV + rolling vol\n60-sample history"]
                 OBF["OrderBookFeed\nL2 SortedDict depth\nbid/ask/mid/spread"]
-                PF["Portfolio\nmark prices + weights\nNAV + drawdown + fills\nKLINE + BALANCE + ORDER_UPDATE"]
-                SBF["ShadowBook (per-strategy)\nvirtual positions + cash\nNAV + PnL\nORDER_UPDATE (filtered by strategy_id)"]
+                PF["Portfolio\nNAV aggregator across ShadowBooks\nregister_shadow_book() per strategy\naggregate_nav / cash / positions"]
+                SBF["ShadowBook (per-strategy)\nreal position ledger + cash\nNAV + PnL + risk metrics\nORDER_UPDATE via private EventBus"]
             end
 
             subgraph S3["Stage 3: Strategy / Alpha"]
@@ -203,33 +203,33 @@
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
     <h2>2. EventBus Architecture <span>Pub/sub wiring</span></h2>
     <p class="desc">
-        All market data events flow through a single in-process EventBus. Publishers (client manager
-        workers, user data stream, RebalanceFSM) emit typed frozen events. Subscribers (strategy hooks,
-        portfolio) receive them sequentially with natural backpressure. Error isolation via try/except
-        at each dispatch wrapper ensures one failed subscriber cannot block others.
+        Market data (KLINE, OB) flows through the shared EventBus; user data (fills, balances, rebalance
+        complete) flows through the <strong>private EventBus</strong> — one per strategy, isolated to that
+        strategy's own sub-account stream. Publishers emit typed frozen events; subscribers receive them
+        sequentially. Error isolation via try/except at each dispatch wrapper ensures one failed subscriber
+        cannot block others. <strong>Portfolio no longer subscribes to the EventBus</strong> — it is a thin
+        NAV aggregator that reads ShadowBook state on demand.
     </p>
     <p class="file-ref">core/event_bus.py &mdash; EventBus &bull; core/events.py &mdash; 7 EventType variants</p>
     <div class="mermaid">
         graph TB
             subgraph Publishers["Event Publishers"]
-                KW["Kline Workers\n4 async workers per manager"]
-                OBW["OB Workers\n4 async workers per manager"]
-                UDM["UserData Manager\nreader loop\nexecutionReport + balanceUpdate"]
-                RFSM2["RebalanceFSM\nRebalanceCycleEvent\nRebalanceCompleteEvent"]
+                KW["Kline Workers\n4 async workers per manager\npublishes to shared_bus"]
+                OBW["OB Workers\n4 async workers per manager\npublishes to shared_bus"]
+                UDM["UserData Manager (per strategy)\nreader loop\nexecutionReport + balanceUpdate\npublishes to private_bus"]
+                RFSM2["RebalanceFSM\nRebalanceCycleEvent\nRebalanceCompleteEvent\npublishes to private_bus"]
             end
 
-            EB["EventBus\nsubscribe#40;event_type, callback#41;\npublish#40;event#41;\nSequential dispatch\nBackpressure-aware"]
+            SBUS["Shared EventBus\nKLINE + ORDERBOOK_UPDATE\n(unauthenticated market data)"]
+            PBUS["Private EventBus (per strategy)\nORDER_UPDATE + BALANCE_UPDATE\n+ REBALANCE_COMPLETE\n(user data — strategy-isolated)"]
 
-            subgraph Subscribers["Event Subscribers"]
-                DK["strategy._dispatch_kline"]
-                DOB["strategy._dispatch_ob"]
-                DO["strategy._dispatch_order"]
-                DB["strategy._dispatch_balance"]
-                DR["strategy._dispatch_rebalance"]
-                PK["portfolio._on_kline"]
-                PB["portfolio._on_balance"]
-                PO["portfolio._on_order_update"]
-                SBO["shadow_book._on_order_update\n(per-strategy fill attribution)"]
+            subgraph Subscribers["Strategy Event Subscribers"]
+                DK["strategy._dispatch_kline\n(shared_bus)"]
+                DOB["strategy._dispatch_ob\n(shared_bus)"]
+                DO["strategy._dispatch_order\n(private_bus)"]
+                DB["strategy._dispatch_balance\n(private_bus)"]
+                DR["strategy._dispatch_rebalance\n(private_bus)"]
+                SBO["shadow_book._on_order_update\n(private_bus — direct fill attribution\nno _order_strategy_map filter needed)"]
             end
 
             subgraph Hooks["Strategy Hooks - user overrides"]
@@ -240,20 +240,17 @@
                 ORC["on_rebalance_complete#40;RebalanceCompleteEvent#41;"]
             end
 
-            KW -->|"KlineEvent"| EB
-            OBW -->|"OBUpdateEvent"| EB
-            UDM -->|"OrderUpdateEvent\nBalanceUpdateEvent"| EB
-            RFSM2 -->|"RebalanceCycleEvent\nRebalanceCompleteEvent"| EB
+            KW -->|"KlineEvent"| SBUS
+            OBW -->|"OBUpdateEvent"| SBUS
+            UDM -->|"OrderUpdateEvent\nBalanceUpdateEvent"| PBUS
+            RFSM2 -->|"RebalanceCycleEvent\nRebalanceCompleteEvent"| PBUS
 
-            EB --> DK
-            EB --> DOB
-            EB --> DO
-            EB --> DB
-            EB --> DR
-            EB --> PK
-            EB --> PB
-            EB --> PO
-            EB --> SBO
+            SBUS --> DK
+            SBUS --> DOB
+            PBUS --> DO
+            PBUS --> DB
+            PBUS --> DR
+            PBUS --> SBO
 
             DK -->|"try/except"| OK
             DOB -->|"try/except"| OOB
@@ -261,7 +258,8 @@
             DB -->|"try/except"| OBU
             DR -->|"try/except"| ORC
 
-            style EB fill:#dbeafe,stroke:#2563eb,stroke-width:3px,color:#1e3a5f
+            style SBUS fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1e3a5f
+            style PBUS fill:#fdf4ff,stroke:#a855f7,stroke-width:2px,color:#6b21a8
             style Publishers fill:#fef2f2,stroke:#ef4444,color:#991b1b
             style Subscribers fill:#ecfeff,stroke:#0891b2,color:#155e75
             style Hooks fill:#f0fdf4,stroke:#16a34a,color:#166534
@@ -272,7 +270,7 @@
         <tr><th>EventType</th><th>Dataclass</th><th>Key Fields</th><th>Published By</th></tr>
         <tr><td><code>KLINE</code></td><td><code>KlineEvent</code></td><td>symbol, venue, kline (Kline), timestamp</td><td>KlineClientManager workers</td></tr>
         <tr><td><code>ORDERBOOK_UPDATE</code></td><td><code>OrderBookUpdateEvent</code></td><td>symbol, venue, orderbook (OrderBook), timestamp</td><td>OrderBookClientManager workers</td></tr>
-        <tr><td><code>ORDER_UPDATE</code></td><td><code>OrderUpdateEvent</code></td><td>symbol, venue, order (Order), timestamp</td><td>Spot: <code>BinanceUserDataClientManager</code> (new WS API, executionReport); Futures: <code>BinanceFuturesUserDataClientManager</code> (ORDER_TRADE_UPDATE) &mdash; consumed by Portfolio <code>_on_order_update</code> (aggregate fills) and ShadowBook <code>_on_order_update</code> (per-strategy attribution via <code>_order_strategy_map</code>)</td></tr>
+        <tr><td><code>ORDER_UPDATE</code></td><td><code>OrderUpdateEvent</code></td><td>symbol, venue, order (Order), timestamp</td><td>Spot: <code>BinanceUserDataClientManager</code> (new WS API, executionReport); Futures: <code>BinanceFuturesUserDataClientManager</code> (ORDER_TRADE_UPDATE) &mdash; published to <strong>private EventBus</strong>; consumed by <code>ShadowBook._on_order_update</code> (per-strategy fill attribution &amp; lock release). Portfolio does <em>not</em> subscribe to ORDER_UPDATE events.</td></tr>
         <tr><td><code>BALANCE_UPDATE</code></td><td><code>BalanceUpdateEvent</code></td><td>asset, venue, delta, new_balance, timestamp</td><td>UserData stream (balanceUpdate)</td></tr>
         <tr><td><code>REBALANCE_COMPLETE</code></td><td><code>RebalanceCompleteEvent</code></td><td>result (RebalanceResult), validated_weights, timestamp</td><td>RebalanceFSM._on_enter_executing</td></tr>
         <tr><td><code>LIFECYCLE</code></td><td><code>LifecycleEvent</code></td><td>component, old_state, new_state, timestamp</td><td>Strategy/Runner state changes</td></tr>
@@ -441,42 +439,51 @@
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>6. Portfolio State Machine <span>Lifecycle and event handlers</span></h2>
+    <h2>6. Portfolio &mdash; Thin NAV Aggregator <span>Read-only roll-up across ShadowBooks</span></h2>
     <p class="desc">
-        The Portfolio starts with a full exchange sync, then transitions to event-driven mode.
-        Kline events update mark prices and risk metrics; balance events sync cash.
-        Position updates use VWAP for same-direction trades and realize PnL on opposite-direction trades.
+        After the Apr 2026 refactor, <strong>Portfolio is a thin NAV aggregator</strong> with no event
+        subscriptions and no direct position tracking. Each strategy owns a <code>ShadowBook</code> as its
+        authoritative ledger; <code>Portfolio</code> simply sums up NAV, cash, and positions across all
+        registered ShadowBooks for monitoring and reporting. All fill attribution, lock management, and
+        risk metrics now live in <code>ShadowBook</code>.
     </p>
-    <p class="file-ref">core/portfolio.py &mdash; Portfolio &bull; core/position.py &mdash; Position</p>
+    <p class="file-ref">core/portfolio.py &mdash; Portfolio &bull; core/shadow_book.py &mdash; ShadowBook</p>
     <div class="mermaid">
         graph TD
-            START(( )) -->|"Portfolio#40;initial_cash=0#41;"| Empty["Empty\ncash=0, no positions"]
-            Empty -->|"sync_from_exchange#40;exchange, venue, feeds#41;"| Synced
+            START(( )) -->|"Portfolio#40;venue=Venue.BINANCE#41;"| Empty["Empty\n_shadow_books = {}"]
 
-            Synced["Synced\n1. Cash from stablecoins #40;USDT/USDC/BUSD#41;\n2. Positions from non-stable balances\n    entry price seeded from feeds\n3. Mark prices from feeds\n4. NAV + weights recomputed"]
+            Empty -->|"register_shadow_book#40;shadow_book#41;\n(called once per strategy by StrategyRunner)"| Active
 
-            Synced -->|"start#40;event_bus, feeds#41;\nsubscribe KLINE + BALANCE_UPDATE"| ED["Event-Driven\nAuto-updating"]
+            Active["Aggregating\n_shadow_books: Dict#91;strategy_id, ShadowBook#93;\n\naggregate_nav#40;#41; = sum#40;sb.nav#41;\naggregate_cash#40;#41; = sum#40;sb.cash#41;\naggregate_positions#40;#41; = merged positions\nunrealized_pnl = sum#40;sb.unrealized_pnl#40;#41;#41;\nrealized_pnl = sum#40;sb.realized_pnl#41;"]
 
-            ED -->|"KlineEvent"| KH["_on_kline handler\n1. Update _mark_prices#91;symbol#93;\n2. Recompute _nav = cash + positions\n3. Recompute _weights per symbol\n4. Track _peak_equity\n5. Update _max_drawdown"]
-            KH --> ED
+            Active -->|"save_snapshot#40;#41;\n(periodic PeriodicTask)"| Snap["Snapshot Saved\nPortfolioSnapshot → DB\nnav, cash, positions, drawdown,\nexposure, per-strategy nav"]
 
-            ED -->|"BalanceUpdateEvent"| BH["_on_balance handler\nIf asset in STABLECOINS:\n  _cash_dict#91;asset#93; += delta\n  _cash = sum#40;_cash_dict#41;\nElse #40;non-stable, e.g. 'ETH'#41;:\n  Map 'ETH' → 'ETHUSDT' via token_infos\n  Create or update position entry"]
-            BH --> ED
+            Snap --> Active
 
-            ED -->|"update_position#40;#41; call"| UH["update_position handler\nSame direction: VWAP avg entry\nOpposite direction:\n  realize PnL on closed portion\n  _total_realized_pnl += pnl\nRecord Fill to _fills deque\nRefresh NAV + weights"]
-            UH --> ED
+            subgraph ShadowBooks["Per-Strategy ShadowBooks (authoritative ledgers)"]
+                SB1["ShadowBook (strategy 1)\n_positions, _cash, _nav\n_fills, _locked_cash\n_outstanding_orders\n→ event-driven via private EventBus"]
+                SB2["ShadowBook (strategy N)\n..."]
+            end
 
-            ED -->|"stop#40;#41;"| Stopped["Stopped\nUnsubscribed from EventBus"]
-            Stopped --> END(( ))
+            Active -.->|"reads nav/cash/positions"| ShadowBooks
 
             style Empty fill:#f3f4f6,stroke:#9ca3af,color:#4b5563
-            style Synced fill:#ecfeff,stroke:#0891b2,color:#155e75
-            style ED fill:#f0fdf4,stroke:#16a34a,color:#166534
-            style KH fill:#fefce8,stroke:#ca8a04,color:#713f12
-            style BH fill:#fefce8,stroke:#ca8a04,color:#713f12
-            style UH fill:#fefce8,stroke:#ca8a04,color:#713f12
-            style Stopped fill:#fef2f2,stroke:#ef4444,color:#991b1b
+            style Active fill:#f0fdf4,stroke:#16a34a,color:#166534
+            style Snap fill:#ecfeff,stroke:#0891b2,color:#155e75
+            style ShadowBooks fill:#fefce8,stroke:#ca8a04,color:#713f12
     </div>
+
+    <h3>Portfolio vs ShadowBook: Responsibility Split</h3>
+    <table>
+        <tr><th>Responsibility</th><th>Portfolio</th><th>ShadowBook</th></tr>
+        <tr><td>Position tracking</td><td>Aggregated read-only (from ShadowBooks)</td><td>Authoritative per-strategy ledger</td></tr>
+        <tr><td>Fill attribution</td><td>None</td><td><code>_on_order_update()</code> via private EventBus</td></tr>
+        <tr><td>Balance tracking</td><td>None</td><td><code>_cash_dict</code> updated on BalanceUpdateEvent</td></tr>
+        <tr><td>EventBus subscription</td><td>None (no subscriptions)</td><td>private_bus: ORDER_UPDATE, BALANCE_UPDATE; shared_bus: KLINE</td></tr>
+        <tr><td>Lock management</td><td>None</td><td><code>lock_for_order()</code>, <code>release_order_lock()</code></td></tr>
+        <tr><td>NAV / PnL</td><td>Aggregated sum across all ShadowBooks</td><td>Per-strategy: <code>nav</code>, <code>unrealized_pnl()</code>, <code>realized_pnl</code></td></tr>
+        <tr><td>DB snapshots</td><td><code>save_snapshot()</code> — aggregate roll-up</td><td><code>save_snapshot()</code> — per-strategy (sub-account mode)</td></tr>
+    </table>
 
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
     <h2>7. Multi-Venue Multiplex Socket Architecture <span>Market data ingestion</span></h2>
@@ -566,85 +573,80 @@
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>8. Multi-Strategy: WeightAggregator + ShadowBook <span>Capital allocation and per-strategy attribution</span></h2>
+    <h2>8. Multi-Strategy: ShadowBook Per-Strategy Attribution <span>Sub-account mode — each strategy owns its ledger</span></h2>
     <p class="desc">
-        When multiple strategies share one portfolio, a <code>WeightAggregator</code> merges their weight
-        vectors — each scaled by its capital allocation fraction — into a single combined vector for the
-        optimizer. Each strategy owns a <code>ShadowBook</code> (virtual position ledger) so strategies
-        can read their own isolated positions, cash, weights, and PnL without touching the aggregate Portfolio.
-        ShadowBooks are updated in real time via event-driven fill attribution: each <code>ORDER_UPDATE</code>
-        event is routed to the correct ShadowBook using <code>ExecutionEngine._order_strategy_map</code>.
-        After order submission, <code>lock_for_order(order_id, intent)</code> is called on the ShadowBook to reserve locked cash/qty for pending LIMIT orders. Locks are released incrementally on each partial fill and fully on terminal status via <code>_partial_release_lock()</code> and <code>release_order_lock()</code>.
-        <strong>Note:</strong> <code>WeightAggregator.attribute_fills()</code> is a documented <strong>no-op</strong>. It previously called <code>reconcile_shadow_books()</code> which overwrote event-driven fills with mark-price approximations. Fill attribution is now handled entirely in real time via <code>ORDER_UPDATE</code> events routed through <code>_order_strategy_map</code>.
+        <strong>WeightAggregator (<code>core/weight_aggregator.py</code>) was removed in the Apr 2026 refactor.</strong>
+        The primary multi-strategy architecture is now sub-account mode: each strategy gets its own
+        dedicated exchange (API keys), private EventBus, and ShadowBook as the authoritative real ledger
+        (<code>allocation=1.0</code>). Strategies operate independently — there is no shared weight
+        merging pipeline.
+        Each ShadowBook receives ORDER_UPDATE and BALANCE_UPDATE events exclusively through its strategy's
+        private EventBus. After order submission, <code>lock_for_order(order_id, intent)</code> reserves
+        balance for pending LIMIT orders; locks are released incrementally on each partial fill via
+        <code>_partial_release_lock()</code> and fully on terminal status via <code>release_order_lock()</code>.
     </p>
-    <p class="file-ref">core/weight_aggregator.py &mdash; WeightAggregator &bull; core/shadow_book.py &mdash; ShadowBook</p>
+    <p class="file-ref">core/shadow_book.py &mdash; ShadowBook &bull; run_strategy.py &mdash; StrategyRunner.setup_strategy()</p>
     <div class="mermaid">
         graph TD
-            subgraph Strategies["Strategies (each with own ShadowBook)"]
-                SA["Strategy A\nalloc=0.60\nETHUSDT=0.5, BTCUSDT=0.5"]
-                SB["Strategy B\nalloc=0.40\nSOLUSDT=1.0"]
-                SBOA["ShadowBook A\npositions, cash, weights\nNAV, realized PnL"]
-                SBOB["ShadowBook B\npositions, cash, weights\nNAV, realized PnL"]
+            subgraph StratA["Strategy A (sub-account mode)"]
+                EX_A["BinanceSpotExchange A\nown API keys"]
+                PBUS_A["Private EventBus A\nORDER_UPDATE + BALANCE_UPDATE"]
+                SBA["ShadowBook A\nallocation=1.0\npositions, cash, nav\nfills, locks"]
+                OPT_A["PortfolioOptimizer A\nrisk_config per strategy"]
+                EE_A["ExecutionEngine A\ncompute_weights → validate → execute"]
+                EX_A --> PBUS_A
+                PBUS_A -->|"ORDER_UPDATE\nBALANCE_UPDATE"| SBA
             end
 
-            WA["WeightAggregator\nregister_strategy#40;id, alloc, symbols, shadow_book#41;\nupdate_weights#40;id, weights#41;\nget_merged_weights#40;#41; → merged\nattribute_fills#40;mark_prices, nav#41; ← NO-OP\n#40;fill attribution is event-driven via ORDER_UPDATE#41;"]
+            subgraph StratB["Strategy B (sub-account mode)"]
+                EX_B["BinanceSpotExchange B\nown API keys"]
+                PBUS_B["Private EventBus B\nORDER_UPDATE + BALANCE_UPDATE"]
+                SBB["ShadowBook B\nallocation=1.0\npositions, cash, nav\nfills, locks"]
+                EX_B --> PBUS_B
+                PBUS_B -->|"ORDER_UPDATE\nBALANCE_UPDATE"| SBB
+            end
 
-            MERGED["Merged Weights\nETHUSDT = 0.5 * 0.6 = 0.30\nBTCUSDT = 0.5 * 0.6 = 0.30\nSOLUSDT = 1.0 * 0.4 = 0.40"]
+            LOCK_A["lock_for_order#40;order_id, intent#41;\nLIMIT BUY: lock USDT = qty * limit_price\nLIMIT SELL: lock base qty\nReleased on fill via _partial_release_lock"]
+            LOCK_B["lock_for_order#40;order_id, intent#41;"]
 
-            OPT2["PortfolioOptimizer\nvalidate#40;merged#41;"]
-            EE2["ExecutionEngine\nexecute#40;validated#41;"]
-            LOCK["lock_for_order#40;order_id, intent#41;\nLIMIT BUY: lock USDT = qty * limit_price\nLIMIT SELL: lock base qty\nReleased on fill via _partial_release_lock"]
-            ROUTE["_order_strategy_map\norder_id → strategy_id\nRoutes ORDER_UPDATE events\nto correct ShadowBook via _on_order_update"]
+            AGG_PORT["Portfolio\nregister_shadow_book#40;ShadowBook A#41;\nregister_shadow_book#40;ShadowBook B#41;\naggregate_nav / cash / positions\n#40;monitoring only — no event subscriptions#41;"]
 
-            SA -->|"update_weights"| WA
-            SB -->|"update_weights"| WA
-            SA --- SBOA
-            SB --- SBOB
-            WA -->|"get_merged_weights"| MERGED
-            MERGED --> OPT2
-            OPT2 --> EE2
-            EE2 -->|"for each submitted order"| LOCK
-            LOCK --> SBOA
-            LOCK --> SBOB
-            EE2 --> ROUTE
-            ROUTE -.->|"event-driven fill attribution"| SBOA
-            ROUTE -.->|"event-driven fill attribution"| SBOB
+            EE_A -->|"after each order submission"| LOCK_A
+            LOCK_A --> SBA
+            SBA -.->|"nav / cash / positions"| AGG_PORT
+            SBB -.->|"nav / cash / positions"| AGG_PORT
 
-            style Strategies fill:#f0fdf4,stroke:#16a34a,color:#166534
-            style WA fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
-            style MERGED fill:#fefce8,stroke:#ca8a04,color:#713f12
-            style OPT2 fill:#eff6ff,stroke:#2563eb,color:#1e40af
-            style EE2 fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
-            style LOCK fill:#fef9c3,stroke:#ca8a04,color:#713f12
-            style ROUTE fill:#ecfeff,stroke:#0891b2,color:#155e75
+            style StratA fill:#f0fdf4,stroke:#16a34a,color:#166534
+            style StratB fill:#fdf4ff,stroke:#a855f7,color:#581c87
+            style LOCK_A fill:#fef9c3,stroke:#ca8a04,color:#713f12
+            style LOCK_B fill:#fef9c3,stroke:#ca8a04,color:#713f12
+            style AGG_PORT fill:#fefce8,stroke:#ca8a04,color:#713f12
     </div>
 
-    <h3>WeightAggregator: Merging Formula</h3>
+    <h3>ShadowBook: Key State Fields</h3>
     <table>
-        <tr><th>Strategy</th><th>Allocation</th><th>Raw Weights</th><th>Contribution to Merged</th></tr>
-        <tr><td>Strategy A (id=1)</td><td>0.60</td><td>ETHUSDT=0.50, BTCUSDT=0.50</td><td>ETHUSDT+=0.30, BTCUSDT+=0.30</td></tr>
-        <tr><td>Strategy B (id=2)</td><td>0.40</td><td>SOLUSDT=1.00</td><td>SOLUSDT+=0.40</td></tr>
-        <tr><td colspan="3"><strong>Merged (sum of contributions)</strong></td><td>ETHUSDT=0.30, BTCUSDT=0.30, SOLUSDT=0.40</td></tr>
-    </table>
-
-    <h3>ShadowBook vs Portfolio</h3>
-    <table>
-        <tr><th>Property</th><th>Portfolio (aggregate)</th><th>ShadowBook (per-strategy)</th></tr>
-        <tr><td>Scope</td><td>All strategies combined</td><td>One strategy's virtual slice</td></tr>
-        <tr><td>Positions</td><td>Real exchange positions</td><td>Attributed virtual positions</td></tr>
-        <tr><td>Cash</td><td>Total stablecoin balance</td><td>Strategy's allocated cash fraction</td></tr>
-        <tr><td>Updated by</td><td>Exchange fills + EventBus (ORDER_UPDATE, BALANCE_UPDATE, KLINE)</td><td>Event-driven via <code>_on_order_update()</code> filtered by <code>_order_strategy_map</code>; <code>lock_for_order()</code> called after each order submission; <code>_completed_order_ids</code> guard ensures terminal cleanup runs exactly once</td></tr>
-        <tr><td>Strategy reads</td><td>Only StrategyRunner reads this</td><td>Strategy reads its own shadow_book</td></tr>
+        <tr><th>Field</th><th>Type</th><th>Purpose</th></tr>
+        <tr><td><code>_positions</code></td><td><code>Dict[str, Position]</code></td><td>Per-strategy position state (quantity, avg_entry)</td></tr>
+        <tr><td><code>_cash</code></td><td><code>float</code></td><td>Available stablecoin balance</td></tr>
+        <tr><td><code>_locked_cash</code></td><td><code>float</code></td><td>Reserved cash for pending LIMIT BUY orders</td></tr>
+        <tr><td><code>_locked_quantities</code></td><td><code>Dict[str, float]</code></td><td>Reserved base qty for pending LIMIT SELL orders</td></tr>
+        <tr><td><code>_outstanding_orders</code></td><td><code>Dict[str, Order]</code></td><td>All live orders tracked by <code>_on_order_update</code></td></tr>
+        <tr><td><code>_completed_order_ids</code></td><td><code>Set[str]</code></td><td>Dedup guard against duplicate terminal events</td></tr>
+        <tr><td><code>_fill_tracker</code></td><td><code>Dict[str, float]</code></td><td>Tracks cumulative filled_qty to compute incremental deltas</td></tr>
+        <tr><td><code>_sub_account_mode</code></td><td><code>bool</code></td><td>True (default) — real ledger; False — virtual slice of shared portfolio</td></tr>
     </table>
 
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <h2>8b. Sub-Account Mode vs Shared-Account Mode &mdash; Full Wiring Topology <span>register_strategy() two-path fork</span></h2>
+    <h2>8b. Sub-Account Mode &mdash; Full Wiring Topology <span>Per-strategy dedicated exchange + private EventBus</span></h2>
     <p class="desc">
-        <code>StrategyRunner.setup_strategy()</code> forks at <code>_has_sub_account(strat_cfg)</code>
-        (returns <code>True</code> when <code>strategy_config.sub_account_api_key</code> is non-empty).
-        The two paths differ in exchange ownership, EventBus wiring, ShadowBook role, and aggregator participation.
-        Path A (sub-account) gives a strategy full autonomy over its own account; Path B (shared-account) lets
-        multiple strategies co-operate over a single shared exchange connection via the WeightAggregator.
+        Sub-account mode is the primary and default architecture after the Apr 2026 refactor.
+        Each strategy receives its own dedicated <code>BinanceSpotExchange</code> (with its own API keys),
+        a private EventBus for user data isolation, and a ShadowBook as the real authoritative ledger
+        (<code>allocation=1.0</code>). Market data (KLINE, OB) is shared via the unauthenticated shared
+        EventBus — one WebSocket connection per symbol across all strategies.
+        The aggregate Portfolio is registered with each ShadowBook for monitoring-only NAV roll-up.
+        <br><br>
+        <em>Shared-account mode (WeightAggregator + fractional ShadowBook) was removed in the Apr 2026 refactor.</em>
     </p>
     <p class="file-ref">run_strategy.py &mdash; StrategyRunner.setup_strategy() &bull; core/shadow_book.py &mdash; ShadowBook &bull; core/portfolio.py &mdash; Portfolio.register_shadow_book</p>
 
@@ -711,144 +713,13 @@
             style SNAP fill:#f9fafb,stroke:#6b7280,color:#374151
     </div>
 
-    <h3>Path B: Shared-Account Mode (default)</h3>
+    <h3>Sub-Account Mode: EventBus Split</h3>
     <p class="desc">
-        When <code>sub_account_api_key</code> is absent or empty, the strategy joins the shared pipeline.
-        A fractional ShadowBook tracks its virtual slice of the aggregate Portfolio. The WeightAggregator
-        merges weight vectors from all participating strategies before passing them to the shared optimizer.
-    </p>
-    <div class="mermaid">
-        graph TD
-            CFG2["StrategyConfig\nsub_account_api_key = '' or absent"]
-            CHECK2{"_has_sub_account()\n→ False"}
-
-            subgraph SharedEx["Shared Exchange (from _setup_pipeline)"]
-                EX_SHARED["BinanceSpotExchange\nshared API keys\nshared EventBus"]
-                SHARED_BUS["Shared EventBus\nKLINE + ORDER_UPDATE\n+ BALANCE_UPDATE\n#40;all strategies#41;"]
-                EX_SHARED --- SHARED_BUS
-            end
-
-            subgraph SBVirtual["ShadowBook (virtual slice, allocation=frac)"]
-                SB_SH["ShadowBook\nstrategy_id=N\nallocation=alloc #40;e.g. 0.40#41;\nvenue=venue\n\ninit_from_existing#40;#41; #40;restart#41;\n  or\ninit_from_portfolio_cash#40;#41; #40;fresh#41;\nstart#40;shared_bus, _order_strategy_map#41;"]
-                OSM["_order_strategy_map\norder_id → strategy_id\n#40;from ExecutionEngine#41;\nFilters ORDER_UPDATE\nto this strategy only"]
-                SB_SH --- OSM
-            end
-
-            LOCK2["lock_for_order#40;order_id, intent#41;\nReserves cash#47;qty for LIMIT orders\nReleased on fill via _partial_release_lock"]
-
-            WA2["4. WeightAggregator\nregister_strategy#40;id, alloc, symbols, shadow_book#41;\nupdate_weights#40;id, target_weights#41;\nget_merged_weights#40;#41; → merged vector\nattribute_fills#40;#41; ← NO-OP"]
-
-            OPT_SH["3. Shared PortfolioOptimizer\n_optimizer_dict#91;asset_type#93;#91;venue#93;"]
-            EE_SH["3. Shared ExecutionEngine\n_execution_engine_dict#91;asset_type#93;#91;venue#93;"]
-
-            AGG_PORT2["Aggregate Portfolio\n_portfolio_dict#91;asset_type#93;#91;venue#93;\nprimary accounting + exchange source of truth"]
-
-            STRAT_SH["5. strategy.start#40;aggregator=aggregator#41;\nWeightAggregator in the rebalance loop"]
-
-            CFG2 --> CHECK2
-            CHECK2 -->|"no sub_account_api_key"| SharedEx
-            SharedEx --> SBVirtual
-            SBVirtual --> WA2
-            WA2 -->|"merged weights"| OPT_SH
-            OPT_SH --> EE_SH
-            EE_SH -->|"per submitted order"| LOCK2
-            LOCK2 --> SBVirtual
-            EE_SH --> STRAT_SH
-            AGG_PORT2 -.->|"portfolio_cash\nmark_prices\n#40;init only#41;"| SBVirtual
-
-            style CFG2 fill:#fef3c7,stroke:#d97706,color:#78350f
-            style CHECK2 fill:#fef3c7,stroke:#d97706,color:#78350f
-            style SharedEx fill:#ecfeff,stroke:#0891b2,color:#155e75
-            style SBVirtual fill:#f0fdf4,stroke:#16a34a,color:#166534
-            style LOCK2 fill:#fef9c3,stroke:#ca8a04,color:#713f12
-            style WA2 fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
-            style OPT_SH fill:#eff6ff,stroke:#2563eb,color:#1e40af
-            style EE_SH fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
-            style AGG_PORT2 fill:#fefce8,stroke:#ca8a04,color:#713f12
-            style STRAT_SH fill:#f9fafb,stroke:#6b7280,color:#374151
-    </div>
-
-    <h3>Key Differences: Sub-Account Mode vs Shared-Account Mode</h3>
-    <table>
-        <tr>
-            <th>Aspect</th>
-            <th>Sub-Account Mode</th>
-            <th>Shared-Account Mode</th>
-        </tr>
-        <tr>
-            <td>Trigger</td>
-            <td><code>strategy_config.sub_account_api_key</code> non-empty</td>
-            <td><code>sub_account_api_key</code> absent or empty (default)</td>
-        </tr>
-        <tr>
-            <td>Exchange</td>
-            <td>Dedicated <code>BinanceSpotExchange</code> with strategy-owned API keys; stored in <code>_sub_account_exchange_dict[strategy_id]</code></td>
-            <td>Shared <code>BinanceSpotExchange</code> from <code>_setup_pipeline</code>; all strategies on the same venue share it</td>
-        </tr>
-        <tr>
-            <td>EventBus</td>
-            <td>Shared bus for <code>KLINE</code> (market data); private bus for <code>ORDER_UPDATE</code> + <code>BALANCE_UPDATE</code> (user data)</td>
-            <td>Shared bus only; <code>ORDER_UPDATE</code> events filtered per strategy via <code>_order_strategy_map</code></td>
-        </tr>
-        <tr>
-            <td>ShadowBook role</td>
-            <td>Real ledger &mdash; owns 100% of sub-account capital (<code>allocation=1.0</code>)</td>
-            <td>Virtual slice &mdash; fractional share of shared Portfolio (<code>allocation = e.g. 0.40</code>)</td>
-        </tr>
-        <tr>
-            <td>ShadowBook init</td>
-            <td><code>sync_from_exchange(exchange, feeds)</code> &mdash; pulls live balances and positions from the dedicated exchange</td>
-            <td><code>init_from_existing()</code> on restart (existing positions) or <code>init_from_portfolio_cash()</code> on fresh start &mdash; proportional allocation from shared Portfolio cash</td>
-        </tr>
-        <tr>
-            <td><code>ShadowBook.start()</code> arguments</td>
-            <td><code>start(shared_event_bus, sub_account_mode=True, private_event_bus=private_bus)</code></td>
-            <td><code>start(shared_event_bus, order_strategy_map)</code></td>
-        </tr>
-        <tr>
-            <td><code>ORDER_UPDATE</code> routing</td>
-            <td>Private bus &rarr; ShadowBook directly; no <code>_order_strategy_map</code> filter needed (bus is already isolated)</td>
-            <td>Shared bus &rarr; filtered by <code>_order_strategy_map[order_id] == strategy_id</code> in <code>_on_order_update</code></td>
-        </tr>
-        <tr>
-            <td>WeightAggregator</td>
-            <td>Bypassed entirely &mdash; <code>strategy.start(aggregator=None)</code></td>
-            <td>Used for multi-strategy weight merging &mdash; <code>aggregator.register_strategy(id, alloc, symbols, shadow_book)</code> then <code>strategy.start(aggregator=aggregator)</code></td>
-        </tr>
-        <tr>
-            <td>PortfolioOptimizer</td>
-            <td>Dedicated instance per strategy: <code>PortfolioOptimizer(risk_config=effective_risk_for(...strategy_id), portfolio=shadow_book)</code></td>
-            <td>Shared instance from <code>_optimizer_dict[asset_type][venue]</code></td>
-        </tr>
-        <tr>
-            <td>ExecutionEngine</td>
-            <td>Dedicated instance per strategy: <code>ExecutionEngine(exchanges={venue: exchange}, portfolio=shadow_book, ...)</code></td>
-            <td>Shared instance from <code>_execution_engine_dict[asset_type][venue]</code></td>
-        </tr>
-        <tr>
-            <td>Aggregate Portfolio relationship</td>
-            <td><code>_portfolio_dict[asset_type][venue].register_shadow_book(shadow_book)</code> &mdash; monitoring and NAV roll-up only; not used for trading decisions</td>
-            <td>Portfolio is the primary source of truth; ShadowBook is a virtual projection of it</td>
-        </tr>
-        <tr>
-            <td>Periodic snapshot</td>
-            <td><code>_start_snapshot_task(shadow_book.save_snapshot, "shadow_book_{id}")</code> &mdash; scheduled via <code>PeriodicTask</code></td>
-            <td>Portfolio-level snapshots (not per-strategy ShadowBook snapshots)</td>
-        </tr>
-        <tr>
-            <td>Risk config</td>
-            <td>Per-strategy: <code>cfg.effective_risk_for(asset_type, venue, strategy_id=N)</code></td>
-            <td>Shared venue-level risk config</td>
-        </tr>
-    </table>
-
-    <h3>EventBus Split in Sub-Account Mode</h3>
-    <p class="desc">
-        The key architectural insight of sub-account mode is the split EventBus subscription: market data
-        (KLINE, orderbook) flows through the shared unauthenticated bus (shared across all strategies and
-        therefore cheaper &mdash; one WebSocket connection per symbol), while user data (fills, balance
-        changes) flows through a private isolated bus backed by the strategy's own user data stream. This
-        guarantees that a sub-account strategy never sees fills or balance events from other strategies.
+        The key architectural insight: market data (KLINE, orderbook) flows through the shared
+        unauthenticated bus — one WebSocket per symbol shared across all strategies — while user data
+        (fills, balance changes) flows through a private isolated bus backed by each strategy's own
+        authenticated user data stream. This guarantees strategies never see each other's fills or
+        balance events.
     </p>
     <div class="mermaid">
         graph LR
@@ -862,7 +733,7 @@
 
             subgraph PrivateA["Strategy A — Private Layer"]
                 EX_A["BinanceSpotExchange A\nown API keys\nown user data stream"]
-                PBUS_A["Private EventBus A\nORDER_UPDATE #40;strat A only#41;\nBALANCE_UPDATE #40;strat A only#41;"]
+                PBUS_A["Private EventBus A\nORDER_UPDATE #40;strat A only#41;\nBALANCE_UPDATE #40;strat A only#41;\nREBALANCE_COMPLETE #40;strat A only#41;"]
                 SB_A["ShadowBook A\nallocation=1.0\nreal ledger"]
                 EX_A --> PBUS_A
                 PBUS_A -->|"ORDER_UPDATE\nBALANCE_UPDATE"| SB_A
@@ -870,7 +741,7 @@
 
             subgraph PrivateB["Strategy B — Private Layer"]
                 EX_B["BinanceSpotExchange B\nown API keys\nown user data stream"]
-                PBUS_B["Private EventBus B\nORDER_UPDATE #40;strat B only#41;\nBALANCE_UPDATE #40;strat B only#41;"]
+                PBUS_B["Private EventBus B\nORDER_UPDATE #40;strat B only#41;\nBALANCE_UPDATE #40;strat B only#41;\nREBALANCE_COMPLETE #40;strat B only#41;"]
                 SB_B["ShadowBook B\nallocation=1.0\nreal ledger"]
                 EX_B --> PBUS_B
                 PBUS_B -->|"ORDER_UPDATE\nBALANCE_UPDATE"| SB_B
@@ -883,6 +754,20 @@
             style PrivateA fill:#f0fdf4,stroke:#16a34a,color:#166534
             style PrivateB fill:#fdf4ff,stroke:#a855f7,color:#581c87
     </div>
+
+    <h3>Sub-Account Mode: Component Ownership</h3>
+    <table>
+        <tr><th>Component</th><th>Ownership</th><th>Details</th></tr>
+        <tr><td>Exchange</td><td>Dedicated per strategy</td><td><code>BinanceSpotExchange(api_key=strat_cfg.sub_account_api_key, ...)</code> stored in <code>_sub_account_exchange_dict[strategy_id]</code></td></tr>
+        <tr><td>Private EventBus</td><td>Dedicated per strategy</td><td>Receives only that strategy's ORDER_UPDATE, BALANCE_UPDATE, REBALANCE_COMPLETE</td></tr>
+        <tr><td>ShadowBook</td><td>Dedicated per strategy</td><td><code>allocation=1.0</code> — real ledger. Init via <code>sync_from_exchange(exchange, feeds)</code></td></tr>
+        <tr><td>PortfolioOptimizer</td><td>Dedicated per strategy</td><td><code>PortfolioOptimizer(risk_config=effective_risk_for(...strategy_id), portfolio=shadow_book)</code></td></tr>
+        <tr><td>ExecutionEngine</td><td>Dedicated per strategy</td><td><code>ExecutionEngine(exchanges={venue: exchange}, portfolio=shadow_book, ...)</code></td></tr>
+        <tr><td>Portfolio (aggregate)</td><td>Shared, monitoring only</td><td><code>_portfolio_dict[asset_type][venue].register_shadow_book(shadow_book)</code> — NAV roll-up only</td></tr>
+        <tr><td>Snapshot task</td><td>Per strategy</td><td><code>_start_snapshot_task(shadow_book.save_snapshot, ...)</code> via <code>PeriodicTask</code></td></tr>
+        <tr><td>Risk config</td><td>Per strategy</td><td><code>cfg.effective_risk_for(asset_type, venue, strategy_id=N)</code></td></tr>
+        <tr><td>Kline/OB managers</td><td>Shared (unauthenticated)</td><td>One WebSocket per symbol across all strategies</td></tr>
+    </table>
 
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
     <h2>9. StrategyRunner Startup Sequence <span>Initialization order</span></h2>
@@ -939,21 +824,24 @@
             end
 
             rect rgb(235,235,255)
-                Note over SR,RFSM: SYNCING Pipeline Setup
-                SR->>P: sync_from_exchange
-                P->>P: "sync cash + positions + mark_prices"
-                SR->>P: "start with event_bus + feeds"
-                P->>EB: "subscribe KLINE + BALANCE_UPDATE + ORDER_UPDATE"
+                Note over SR,RFSM: SYNCING Pipeline Setup (per strategy)
+                SR->>SR: "create dedicated BinanceSpotExchange (sub-account API keys)"
+                SR->>SR: "create private EventBus for strategy"
+                SR->>P: "register_shadow_book(shadow_book)"
+                Note over P: Portfolio = thin aggregator only
 
-                SR->>POpt: create PortfolioOptimizer
+                SR->>SR: "create ShadowBook(strategy_id, venue)"
+                SR->>SR: "shadow_book.sync_from_exchange(exchange, feeds)"
+                SR->>SR: "shadow_book.start(shared_bus, sub_account_mode=True, private_bus)"
+
+                SR->>POpt: "create PortfolioOptimizer(risk_config=per-strategy, portfolio=shadow_book)"
                 SR->>S: inject optimizer
 
-                SR->>EE: create ExecutionEngine
+                SR->>EE: "create ExecutionEngine(exchanges={venue: exchange}, portfolio=shadow_book)"
                 SR->>S: inject execution_engine
 
-                Note over S,RFSM: RebalanceFSM auto-created
-                S->>RFSM: create RebalanceFSM
-                SR->>S: "shadow_book.start(event_bus, EE._order_strategy_map)"
+                Note over S,RFSM: RebalanceFSM auto-created in strategy.start()
+                S->>RFSM: "create RebalanceFSM(strategy, optimizer, engine, private_bus)"
             end
 
             rect rgb(245,245,245)
@@ -1076,11 +964,9 @@
                 -_optimizer
                 -_execution_engine
                 -float _cooldown_s
-                -TimerHandle _timer_handle
-                +request() bool
-                +start_timer(interval_s)
-                +stop_timer()
-                +wait()
+                +request(**ctx) bool
+                note: no built-in timer
+                note: strategy drives timing via run_forever()
                 -_on_enter_computing()
                 -_on_enter_validating()
                 -_on_enter_executing()
@@ -1092,11 +978,13 @@
 
             class SpotStrategy {
                 -Dict _exchanges
-                -EventBus _event_bus
+                -EventBus _shared_event_bus
+                -EventBus _private_event_bus
                 -Dict _feeds
                 -PortfolioOptimizer _optimizer
                 -ExecutionEngine _execution_engine
                 -RebalanceFSM _rebalance_fsm
+                -ShadowBook _shadow_book
                 -StrategyState _state
                 +Portfolio portfolio
                 +start()
@@ -1115,32 +1003,47 @@
             }
 
             class Portfolio {
+                -Dict _shadow_books
+                -float _peak_equity
+                -float _max_drawdown
+                -Venue venue
+                +register_shadow_book(shadow_book)
+                +aggregate_nav() float
+                +aggregate_cash() float
+                +aggregate_positions() Dict
+                +unrealized_pnl() float
+                +realized_pnl() float
+                +gross_exposure() float
+                +net_exposure() float
+                +save_snapshot()
+                +total_value() float
+                note: thin NAV aggregator only
+                note: no EventBus subscriptions
+            }
+
+            class ShadowBook {
+                -int _strategy_id
                 -Dict _positions
                 -float _cash
                 -Dict _cash_dict
                 -Dict _mark_prices
-                -Dict _weights
                 -float _nav
-                -float _peak_equity
-                -float _max_drawdown
                 -Deque _fills
                 -Dict _fill_tracker
                 -Set _completed_order_ids
                 -float _locked_cash
                 -Dict _locked_quantities
                 -Dict _outstanding_orders
-                +sync_from_exchange(exchange)
-                +start(event_bus)
-                +stop()
-                +update_position(symbol)
+                -bool _sub_account_mode
+                +sync_from_exchange(exchange, feeds)
+                +start(shared_bus, sub_account_mode, private_bus)
                 +lock_for_order(order_id, intent)
                 +release_order_lock(order_id)
                 +free_cash() float
                 +free_quantity(symbol) float
-                +save_snapshot(venue)
-                +total_value() float
-                +current_weights() dict
-                +active_positions() list
+                +save_snapshot()
+                +nav() float
+                +unrealized_pnl() float
             }
 
             class PortfolioOptimizer {
@@ -1265,20 +1168,23 @@
 
             BaseFSM <|-- RebalanceFSM
             SpotStrategy --> RebalanceFSM : owns
-            SpotStrategy --> EventBus : subscribes to
+            SpotStrategy --> EventBus : shared_bus (KLINE/OB)
+            SpotStrategy --> EventBus : private_bus (fills/balance)
             SpotStrategy --> PortfolioOptimizer : Stage 4
             SpotStrategy --> ExecutionEngine : Stage 5
-            SpotStrategy --> Portfolio : owns
+            SpotStrategy --> ShadowBook : owns per-strategy ledger
             SpotStrategy --> SpotExchangeConnector : exchange access
             PortfolioOptimizer --> RiskConfig : configured by
-            PortfolioOptimizer --> Portfolio : reads from
-            ExecutionEngine --> Portfolio : reads from
+            PortfolioOptimizer --> ShadowBook : reads nav/positions
+            ExecutionEngine --> ShadowBook : reads positions
             ExecutionEngine --> SpotExchangeConnector : submits to
-            ExecutionEngine --> RiskConfig : weight-delta filter
-            Portfolio --> Position : manages many
-            Portfolio --> EventBus : subscribes to
+            Portfolio --> ShadowBook : aggregates many
+            ShadowBook --> Position : manages many
             SpotExchangeConnector <|-- BinanceSpotExchange
             AbstractClientManager --> AbstractDataFeed : manages
+            AbstractDataFeed <|-- AbstractOrderBookFeed
+            AbstractClientManager <|-- OrderBookClientManager
+            AbstractClientManager <|-- KlineClientManager
             StrategyRunner --> SpotStrategy : orchestrates
     </div>
 

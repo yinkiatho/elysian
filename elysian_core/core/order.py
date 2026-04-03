@@ -22,6 +22,7 @@ class Order:
     price: Optional[float] = None           # None for market orders
     use_quote_order_qty: bool = False
     avg_fill_price: float = 0.0
+    last_fill_price: float = 0.0          # last executed price (field "L"); for incremental fill
     filled_qty: float = 0.0
     status: OrderStatus = OrderStatus.PENDING
     timestamp: Optional[datetime.datetime] = None
@@ -84,6 +85,72 @@ class Order:
             f"│  Status   : {self.status.value:<10} │  Commission: {self.commission} {self.commission_asset or ''}\n"
             f"└─ Updated  : {self.last_updated_timestamp}"
         )
+
+@dataclass
+class ActiveOrder(Order):
+    """Order being actively tracked — adds fill-delta bookkeeping via _prev_filled.
+
+    Inherits all fields from Order.  The extra field has a default so it
+    satisfies the dataclass inheritance rule (defaults after non-defaults).
+    """
+    _prev_filled: float = field(default=0.0, repr=False, compare=False)
+
+    def sync_from_event(self, event_order: "Order") -> float:
+        """Sync state from an incoming exchange event.  Returns incremental fill delta."""
+        delta = max(0.0, event_order.filled_qty - self._prev_filled)
+        if delta > 0:
+            self.update_fill(
+                event_order.filled_qty,
+                event_order.last_fill_price or event_order.avg_fill_price,
+            )
+            self._prev_filled = event_order.filled_qty
+        if event_order.status != self.status:
+            self.transition_to(event_order.status)
+        self.commission = event_order.commission
+        self.commission_asset = event_order.commission_asset
+        self.last_updated_timestamp = event_order.last_updated_timestamp
+        return delta
+
+
+@dataclass
+class ActiveLimitOrder(ActiveOrder):
+    """ActiveOrder with balance reservation for pending LIMIT orders.
+
+    Tracks how much cash (BUY) or quantity (SELL) is reserved for this order.
+    Reservation is initialized on placement and released incrementally as fills
+    arrive, or drained entirely on terminal (cancel/expire).
+    """
+    reserved_cash: float = field(default=0.0, repr=False, compare=False)
+    reserved_qty: float = field(default=0.0, repr=False, compare=False)
+
+    def initialize_reservation(self) -> None:
+        """Set initial reservation amounts based on order side."""
+        if self.side == Side.BUY and self.price is not None:
+            self.reserved_cash = self.quantity * self.price
+            self.reserved_qty = 0.0
+        else:  # SELL
+            self.reserved_qty = self.quantity
+            self.reserved_cash = 0.0
+
+    def release_partial(self, delta_filled: float) -> tuple:
+        """Release reservation proportional to delta_filled.
+        Returns (cash_released, qty_released)."""
+        if self.side == Side.BUY and self.price is not None:
+            release = min(delta_filled * self.price, self.reserved_cash)
+            self.reserved_cash = max(0.0, self.reserved_cash - release)
+            return release, 0.0
+        else:
+            release = min(delta_filled, self.reserved_qty)
+            self.reserved_qty = max(0.0, self.reserved_qty - release)
+            return 0.0, release
+
+    def release_all(self) -> tuple:
+        """Drain all remaining reservation on terminal.  Returns (cash, qty)."""
+        cash, qty = self.reserved_cash, self.reserved_qty
+        self.reserved_cash = 0.0
+        self.reserved_qty = 0.0
+        return cash, qty
+
 
 @dataclass
 class LimitOrder:

@@ -5,15 +5,10 @@ import statistics
 import time
 from datetime import datetime as dt
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import urlencode
-import hashlib
-import hmac
-
 import requests
 import websockets
 
-from elysian_core.connectors.base import AbstractDataFeed
-from elysian_core.connectors.base import AbstractClientManager, KlineClientManager, OrderBookClientManager
+from elysian_core.connectors.base import AbstractDataFeed, KlineClientManager, OrderBookClientManager
 
 from elysian_core.core.market_data import Kline, OrderBook, AsterOrderBook
 import elysian_core.utils.logger as log
@@ -569,23 +564,6 @@ class AsterPerpKlineFeed(AbstractDataFeed):
         )
         return kline
 
-    async def __call__(self):
-        """Register with shared client manager and wait for multiplex events."""
-        from elysian_core.connectors.AsterPerpDataConnectors import aster_perp_kline_client_manager
-
-        # Register this feed with the shared manager
-        aster_perp_kline_client_manager.register_feed(self)
-
-        # Start the shared manager if not already running
-        if not aster_perp_kline_client_manager._running:
-            await aster_perp_kline_client_manager.start()
-            # Start the multiplex feed runner in background
-            asyncio.create_task(aster_perp_kline_client_manager.run_multiplex_feeds())
-
-        # Keep the feed alive
-        while True:
-            await asyncio.sleep(1)
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # AsterPerpOrderBookFeed
@@ -707,34 +685,3 @@ class AsterPerpOrderBookFeed(AbstractDataFeed):
         logger.success(f"[{self._name}] Perpetual OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
 
 
-    async def __call__(self):
-        """Register with shared client manager and wait for multiplex events."""
-        from elysian_core.connectors.AsterPerpDataConnectors import aster_perp_ob_client_manager
-
-        # Register this feed with the shared manager (WebSocket will start buffering)
-        aster_perp_ob_client_manager.register_feed(self)
-
-        # Start the shared manager if not already running
-        if not aster_perp_ob_client_manager._running:
-            await aster_perp_ob_client_manager.start()
-
-            # Start the multiplex feed runner in background (WebSocket reader/workers)
-            asyncio.create_task(aster_perp_ob_client_manager.run_multiplex_feeds())
-
-        # Give WebSocket a moment to start buffering events
-        await asyncio.sleep(0.1)
-
-        # NOW fetch the snapshot while events are being buffered
-        await self.get_initial_snapshot()
-
-        # Keep the feed alive
-        while True:
-            await asyncio.sleep(1)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Module-level singleton managers
-# ──────────────────────────────────────────────────────────────────────────────
-
-aster_perp_kline_client_manager = AsterPerpKlineClientManager()
-aster_perp_ob_client_manager = AsterPerpOrderBookClientManager()

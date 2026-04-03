@@ -21,10 +21,12 @@ from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
 from elysian_core.connectors.base import AbstractDataFeed, SpotExchangeConnector
 from elysian_core.core.enums import AssetType, OrderType, Side, Venue
+
 from elysian_core.core.portfolio import Portfolio
 from elysian_core.core.signals import OrderIntent, RebalanceResult, ValidatedWeights
-from elysian_core.risk.risk_config import RiskConfig
 import elysian_core.utils.logger as log
+
+_STABLECOINS = frozenset({"USDT", "USDC", "BUSD"})
 
 if TYPE_CHECKING:
     from elysian_core.core.shadow_book import ShadowBook
@@ -49,7 +51,6 @@ class ExecutionEngine:
         exchanges: Dict[Venue, SpotExchangeConnector],
         portfolio: Union[Portfolio, "ShadowBook"],
         feeds: Dict[str, AbstractDataFeed],
-        risk_config: Optional[RiskConfig] = None,
         default_venue: Venue = Venue.BINANCE,
         default_order_type: OrderType = OrderType.MARKET,
         symbol_venue_map: Optional[Dict[str, Venue]] = None,
@@ -61,7 +62,6 @@ class ExecutionEngine:
         self._exchanges = exchanges
         self._portfolio = portfolio
         self._feeds = feeds
-        self._risk_config = risk_config or RiskConfig()
         self._default_venue = default_venue
         self._default_order_type = default_order_type
         self._symbol_venue_map = symbol_venue_map or {}
@@ -161,6 +161,17 @@ class ExecutionEngine:
 
         price_overrides = validated.original.price_overrides or {}
         for symbol, target_weight in validated.weights.items():
+            # Stablecoins must never appear as tradeable symbols — cash is always
+            # implicit (1 - sum(weights)).  If a strategy emits a stablecoin key
+            # it is a bug; warn loudly and skip so no order is placed.
+            if symbol in _STABLECOINS:
+                logger.warning(
+                    f"[ExecutionEngine] Stablecoin '{symbol}' found in validated weights "
+                    f"(w={target_weight:.4f}) — cash is implicit, skipping. "
+                    f"Check strategy.compute_weights() for stablecoin key emission."
+                )
+                continue
+
             # Use strategy-provided limit price if given, else fall back to mark price
             price = price_overrides.get(symbol) or mark_prices.get(symbol)
             if price is None or price <= 0:
@@ -173,10 +184,17 @@ class ExecutionEngine:
                 logger.warning(f"[ExecutionEngine] No exchange for venue {venue}, skipping {symbol}")
                 continue
 
-            # Weight-delta filter: skip legs below threshold
+            # Weight-delta filter: skip legs whose deviation is too small to matter.
+            # Avoids churning tiny rebalances that won't clear min-notional checks.
             current_qty = self._portfolio.position(symbol).quantity
             current_weight = (current_qty * price) / total_value
             weight_delta = abs(target_weight - current_weight)
+            if weight_delta < 0.001:
+                logger.debug(
+                    f"[ExecutionEngine] Skipping {symbol}: "
+                    f"weight_delta={weight_delta:.4f} below 0.001 threshold"
+                )
+                continue
 
             # Target vs current quantity
             target_notional = target_weight * total_value

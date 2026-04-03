@@ -23,8 +23,9 @@ import elysian_core.utils.logger as log
 from collections import deque
 import statistics
 import time
+import numpy as np
 
-logger = log.setup_custom_logger("root")
+logger = log.setup_custom_logger("EventDrivenStrategy")
 
 
 class EventDrivenStrategy(SpotStrategy):
@@ -33,12 +34,21 @@ class EventDrivenStrategy(SpotStrategy):
     - Work at the minute level and track short term momentum rolling statistics
     """
 
-    def __init__(self, *args, rebalance_interval_s: float = 0.0,
+    def __init__(self, *args, 
                  symbols: set = None, **kwargs):
         super().__init__(*args, **kwargs)
-        self._rebalance_interval = rebalance_interval_s
+        
         # Symbols can be passed explicitly or loaded from cfg in on_start
         self._symbols: set = set(symbols) if symbols else set()
+        self._rebalance_interval = 60  # seconds; also set on FSM cooldown     
+        
+        
+        # Strategy Params and State to write below:
+        self._price_series = {symbol: deque([], maxlen=60*240) for symbol in self._symbols}
+        self._returns_series = {symbol: deque([], maxlen=60*240) for symbol in self._symbols}
+        self._rolling_returns_series = {symbol: deque([], maxlen=60*240) for symbol in self._symbols}
+        self._last_marked_time = None
+        self._symbol_availability_status = {symbol: False for symbol in self._symbols}
 
     async def on_start(self):
         '''
@@ -54,14 +64,6 @@ class EventDrivenStrategy(SpotStrategy):
             f"rebalance every {self._rebalance_interval}s, "
             f"symbols={self._symbols}"
         )
-
-        self._price_series = {symbol: deque([], maxlen=60*240) for symbol in self._symbols}
-        self._returns_series = {symbol: deque([], maxlen=60*240) for symbol in self._symbols}
-        self._rolling_returns_series = {symbol: deque([], maxlen=60*240) for symbol in self._symbols}
-        self._last_marked_time = None
-
-        self._symbol_availability_status = {symbol: False for symbol in self._symbols}
-        
         
     async def on_stop(self):
         '''
@@ -69,8 +71,7 @@ class EventDrivenStrategy(SpotStrategy):
         '''
         await self.request_rebalance(convert_all_base=True) # We convert all to base here 
         
-        
-        
+
     async def on_kline(self, event: KlineEvent):
         '''
         on_kline hook, we update the price_series and _return_series first, check for status and then fire trigger,
@@ -121,52 +122,62 @@ class EventDrivenStrategy(SpotStrategy):
 
     def compute_weights(self, **ctx) -> dict:
         """
-        Allocate weights based on deviation of latest return from rolling mean return.
-
-        Long-only:
-        - Positive deviation → allocate weight
-        - Negative deviation → ignore (weight = 0)
-
-        Weights are normalized to sum to 0.90 (10% cash buffer).
+        For each symbol:
+            1. Compute the latest return (e.g., 1‑period return).
+            2. Compute rolling mean and rolling standard deviation (lookback = 20).
+            3. Calculate z‑score = (latest_return - rolling_mean) / rolling_std.
+            4. If z‑score > threshold (0.5) → positive signal = z‑score.
+            Else → signal = 0 (stay out).
+            5. Scale each signal by 1 / rolling_std (inverse volatility).
+            6. Normalise the resulting weights so that their sum = target_allocation (0.9).
+        Returns a dict {symbol: weight} – missing symbols imply zero weight.
         """
-        
-        # Extract any kill signals here
+        # --- Kill switch (go 100% cash) ---
         if ctx.get('convert_all_base', False):
-            weights = {sym: 0.0 for sym in self._symbols}
-            weights['USDT'] = 1.0
-            return weights
-    
-        # Normal Signal Computation        
-        signals = {}
+            logger.info("Kill signal received → returning zero weights (100% cash)")
+            return {sym: 0.0 for sym in self._symbols}
+
+        # --- Parameters ---
+        LOOKBACK = 20          # periods for rolling mean/std
+        Z_THRESHOLD = 0.5      # minimum z‑score to enter a trade
+        TARGET_ALLOC = 0.9     # sum of weights (10% cash buffer)
+
+        signals = {}           # raw z‑scores (positive only)
+        vol_estimates = {}     # rolling std for each symbol
+
         for sym in self._symbols:
             returns = self._returns_series.get(sym)
-            rolling = self._rolling_returns_series.get(sym)
-
-            # Need enough data
-            if not returns or not rolling or len(returns) == 0 or len(rolling) == 0:
+            if returns is None or len(returns) < LOOKBACK + 1:
+                logger.debug(f"Insufficient return data for {sym}")
                 continue
 
             current_return = returns[-1]
-            rolling_mean = rolling[-1]
+            rolling_mean = np.mean(returns[-LOOKBACK:])  
+            rolling_std = np.std(returns[-LOOKBACK:])
+            
+            if rolling_std == 0:
+                continue
 
-            signal = current_return - rolling_mean
+            z_score = (current_return - rolling_mean) / rolling_std
+            if abs(z_score) > Z_THRESHOLD:
+                signals[sym] = z_score
+                vol_estimates[sym] = rolling_std
 
-            # Long-only: keep positive signals
-            if signal > 0:
-                signals[sym] = signal
-
-        # If no positive signals → stay in cash
         if not signals:
+            logger.info("No positive signals above threshold → staying in cash")
             return {}
 
-        # Normalize weights
-        total_signal = sum(signals.values())
-
-        if total_signal == 0:
+        # --- Inverse volatility scaling (risk parity) ---
+        inv_vol = {sym: 1.0 / vol_estimates[sym] for sym in signals}
+        total_inv_vol = sum(inv_vol.values())
+        raw_weights = {sym: inv_vol[sym] / total_inv_vol for sym in signals}
+        adjusted_weights = {sym: raw_weights[sym] * signals[sym] for sym in signals}
+        total_adj = sum(adjusted_weights.values())
+        
+        if total_adj == 0:
             return {}
-
-        weights = {
-            sym: sig / total_signal
-            for sym, sig in signals.items()
-        }
-        return weights
+        
+        final_weights = {sym: w / total_adj * TARGET_ALLOC for sym, w in adjusted_weights.items()}
+        logger.info(f"Final weights: {final_weights} (sum = {sum(final_weights.values()):.2f})")
+        
+        return final_weights

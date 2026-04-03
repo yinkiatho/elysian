@@ -2,6 +2,7 @@ from typing import Dict, List, Optional, Callable, Any
 import asyncio
 import os
 import datetime
+import sys
 from elysian_core.connectors.BinanceExchange import (
     BinanceSpotExchange
 )
@@ -38,8 +39,6 @@ from elysian_core.connectors.AsterPerpDataConnectors import (
 )
 # TODO: AsterPerpExchange source was deleted — re-add when perp connector is rebuilt
 # from elysian_core.connectors.AsterExchange import AsterPerpExchange
-    
-
 # from elysian_core.connectors.VolatilityBarbClient import VolatilityBarbClientLocal, RedisConfig
 from elysian_core.utils.logger import setup_custom_logger
 from pathlib import Path
@@ -51,11 +50,11 @@ from elysian_core.execution.engine import ExecutionEngine
 from elysian_core.risk.optimizer import PortfolioOptimizer
 from elysian_core.core.portfolio import Portfolio
 from elysian_core.risk.risk_config import RiskConfig
-from elysian_core.config.app_config import AppConfig, load_app_config
+from elysian_core.config.app_config import AppConfig, load_app_config, load_strategy_class, StrategyConfig
 from elysian_core.strategy.base_strategy import SpotStrategy
-from elysian_core.core.weight_aggregator import WeightAggregator
 from elysian_core.core.shadow_book import ShadowBook
-import sys
+from elysian_core.db.models import create_tables
+
 
 # Add parent directory to path so imports work when running this script directly
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -76,7 +75,6 @@ class StrategyRunner:
         trading_config_yaml: str = 'elysian_core/config/trading_config.yaml',
         strategy_config_yamls: Optional[List[str]] = None,
         config_json: str = 'elysian_core/config/config.json',
-        # Backward-compat alias — maps to trading_config_yaml
         config_yaml: Optional[str] = None,
     ):
         """Initialize the strategy runner with configuration.
@@ -152,10 +150,9 @@ class StrategyRunner:
         # Aster Futures Client Managers
         self.aster_futures_kline_manager = AsterPerpKlineClientManager()
         self.aster_futures_ob_manager = AsterPerpOrderBookClientManager()
-        
-        
+
         # Managing Portfolios
-        self._portfolio_dict: Dict[AssetType, Dict[Venue, Portfolio]] = {AssetType.SPOT: {}, 
+        self._portfolio_dict: Dict[AssetType, Dict[Venue, Portfolio]] = {AssetType.SPOT: {},
                                                                          AssetType.PERPETUAL: {}}
         # Managing List of Strategies, for now just spot strategy
         self._strategy_dict: Dict[int, SpotStrategy] = {}
@@ -167,10 +164,6 @@ class StrategyRunner:
         # Managing Execution Engines
         self._execution_engine_dict: Dict[AssetType, Dict[Venue, ExecutionEngine]] = {AssetType.SPOT: {},
                                                                                       AssetType.PERPETUAL: {}}
-
-        # Managing WeightAggregators — one per (asset_type, venue) for multi-strategy coordination
-        self._aggregator_dict: Dict[AssetType, Dict[Venue, WeightAggregator]] = {AssetType.SPOT: {},
-                                                                                  AssetType.PERPETUAL: {}}
 
         # Managing Exchange Connectors
         self.exchange_connectors_dict = {
@@ -195,6 +188,9 @@ class StrategyRunner:
 
         # Sub-account exchanges: strategy_id -> exchange (per-strategy, dedicated API keys)
         self._sub_account_exchange_dict: Dict[int, Any] = {}
+        
+        # Create the Database
+        create_tables(safe=True)
 
     @staticmethod
     def _get_timestamp() -> str:
@@ -616,64 +612,31 @@ class StrategyRunner:
 
 
     async def _setup_portfolio(self, asset_type: AssetType) -> None:
-        """Initialize the strategy's portfolio with full exchange state sync.
+        """Initialize one thin Portfolio aggregator per venue.
 
-        Reads ``self.cfg.portfolio.*`` for configuration (max_history,
-        snapshot_interval_s).  Constructs a fresh Portfolio, then syncs cash,
-        positions, mark prices, and open orders from BinanceSpotExchange.
-        
-        Portfolio should not be reliant on a sepecific strategy ie. multiple strategies can rely on one portfolio in one exchange.
-        We set up a portfolio for each single venue there is
+        Portfolio is now a lightweight NAV monitor across ShadowBooks — no
+        exchange sync, no event subscriptions.  One Portfolio is created per
+        (asset_type, venue) pair; ShadowBooks are registered into it later
+        via setup_strategy().
         """
-        list_venues = self.cfg.meta.spot_venues if asset_type == AssetType.SPOT else self.cfg.meta.futures_venues
+        list_venues = (
+            self.cfg.meta.spot_venues if asset_type == AssetType.SPOT
+            else self.cfg.meta.futures_venues
+        )
         for venue in list_venues:
-            # venue here is a string , which value comes from Venue.ENUM
-            
-            # max_history and snapshot interval should be consistent throughout all portfolios
-            max_history = int(self.cfg.portfolio.get("max_history", 10_000))
-            self._snapshot_interval_s = int(self.cfg.portfolio.get("snapshot_interval_s", 0)) 
-            
-            exchange_enum, exchange = None, None # To be identified
-            logger.info(f"[Runner] Loading {venue} {asset_type.value} Portfolio config: max_history={max_history}, snapshot_interval={self._snapshot_interval_s}s")
-            
-            # Full sync: cash + positions + mark prices + open orders
+            self._snapshot_interval_s = int(self.cfg.portfolio.get("snapshot_interval_s", 0))
+
+            exchange_enum = None
             if venue.lower() == Venue.BINANCE.value.lower():
                 exchange_enum = Venue.BINANCE
-                if asset_type == AssetType.SPOT:
-                    exchange = getattr(self, 'binance_exchange', None)
-                else:
-                    exchange = getattr(self, 'binance_futures_exchange', None)
-                
             elif venue.lower() == Venue.ASTER.value.lower():
                 exchange_enum = Venue.ASTER
-                if asset_type == AssetType.SPOT:
-                    exchange = self.aster_exchange
-                else:
-                    #exchange = self.aster_futures_exchange
-                    exchange = None ### To be handled when we set up aster_futures_exchange
 
-            all_feeds = self._collect_all_feeds(venue=exchange_enum, asset_type=asset_type)
-            
-            # Initialize the Portfolio Object and start it
-            portfolio = Portfolio(
-                    exchange=exchange,
-                    max_history=max_history,
-                    cfg=self.cfg,
-                    venue=exchange_enum
-            )
-            portfolio.sync_from_exchange(all_feeds)
-            
-            # Start event-driven portfolio (auto-updates weights, mark prices, cash)
-            portfolio.start(self.shared_event_bus)
+            portfolio = Portfolio(venue=exchange_enum, cfg=self.cfg)
             self._portfolio_dict[asset_type][exchange_enum] = portfolio
-            
-            # Start the snapshot task
             self._start_snapshot_task(portfolio.save_snapshot, portfolio.name)
-            
             logger.info(
-                f"[Runner] {venue} {asset_type.value} Portfolio initialized: cash={portfolio.cash:.2f}, "
-                f"{len(portfolio.active_positions)} positions, "
-                f"{len(all_feeds)} feeds wired"
+                f"[Runner] {venue} {asset_type.value} Portfolio aggregator initialized"
             )
 
     def _setup_risk(self, portfolio: Portfolio, asset_type: AssetType, venue: Venue) -> None:
@@ -702,8 +665,6 @@ class StrategyRunner:
           strategy execution_overrides > venue_configs["{asset_type}_{venue}"] > global execution
         """
         all_feeds = self._collect_all_feeds(venue=venue, asset_type=asset_type)
-        optimizer = self._optimizer_dict.get(asset_type, {}).get(venue)
-        risk_config = optimizer.config
 
         # Resolve execution config with venue-level overrides applied
         exec_cfg = self.cfg.effective_execution_for(
@@ -728,7 +689,6 @@ class StrategyRunner:
             exchanges=self.exchange_connectors_dict.get(asset_type),
             portfolio=self._portfolio_dict.get(asset_type, {}).get(venue),
             feeds=all_feeds,
-            risk_config=risk_config,
             default_venue=default_venue,
             default_order_type=default_order_type,
             cfg=self.cfg,
@@ -737,14 +697,13 @@ class StrategyRunner:
         )
         logger.info(
             f"[Runner] {asset_type.value} {venue.value} Execution engine configured: "
-            f"min_weight_delta={risk_config.min_weight_delta}"
         )
 
 
     async def _setup_pipeline(self) -> None:
         """Wire the full Stage 3-5 pipeline: Portfolio -> Risk -> Execution, centrally for all strategies"""
         
-        logger.info("[Runner] ── Setting up Stage 3-5 pipeline ──")
+        logger.info("[Runner] -- Setting up Stage 3-5 pipeline --")
         
         # Setup both the spot and futures portfolios
         for asset_type in [AssetType.SPOT, AssetType.PERPETUAL]:
@@ -762,10 +721,6 @@ class StrategyRunner:
 
                 # Set up execution layer as well, this is set by each asset and exchange_enum
                 self._setup_execution(asset_type, exchange_enum)
-
-                # Create a WeightAggregator per (asset_type, venue) for multi-strategy coordination
-                self._aggregator_dict[asset_type][exchange_enum] = WeightAggregator()
-                logger.info(f"[Runner] WeightAggregator created for {asset_type.value} {exchange_enum.value}")
                 
                 
     async def setup_strategy(self, strategy: SpotStrategy, strategy_id: int, strategy_name: str):
@@ -785,93 +740,86 @@ class StrategyRunner:
             across all strategies sharing the same (asset_type, venue) pipeline.
         '''
         # ── Sub-account mode branch ──────────────────────────────────────────
-        strat_cfg = next((s for s in self.cfg.strategies if s.id == strategy_id), None)
-        if strat_cfg and self._has_sub_account(strat_cfg):
-            logger.info(
-                f"[Runner] Sub-account mode for strategy {strategy_id} ({strategy_name})"
-            )
-            asset_type = AssetType[strat_cfg.asset_type.upper()]
-            venue = Venue[strat_cfg.venue.upper()]
+        strat_cfg = self.cfg.strategies.get(strategy_id)
+        logger.info(
+            f"[Runner] Setting up Sub-account mode for strategy {strategy_id} ({strategy_name})"
+        )
+        asset_type = AssetType[strat_cfg.asset_type.upper()]
+        venue = Venue[strat_cfg.venue.upper()]
 
-            # 1. Per-strategy exchange + private event bus
-            private_exchange, private_bus = await self._create_sub_account_exchange(strat_cfg, venue)
-            self._sub_account_exchange_dict[strategy_id] = private_exchange
+        # 1. Per-strategy exchange + private event bus
+        private_exchange, private_bus = await self._create_sub_account_exchange(strat_cfg, venue)
+        self._sub_account_exchange_dict[strategy_id] = private_exchange
 
-            # 2. Shared market data feeds (may be empty here; self-correct on first KLINE)
-            feeds = self._collect_all_feeds(venue, asset_type)
+        # 2. Shared market data feeds (may be empty here; self-correct on first KLINE)
+        feeds = self._collect_all_feeds(venue, asset_type)
 
-            # 3. ShadowBook as real ledger (owns 100% of sub-account capital)
-            shadow_book = ShadowBook(
-                strategy_id=strategy_id,
-                venue=venue,
-            )
-            shadow_book.sync_from_exchange(private_exchange, feeds)
-            shadow_book.start(
-                self.shared_event_bus,          # shared bus for KLINE
-                sub_account_mode=True,
-                private_event_bus=private_bus,
-            )
+        # 3. ShadowBook as real ledger (owns 100% of sub-account capital)
+        shadow_book = ShadowBook(
+            strategy_id=strategy_id,
+            venue=venue,
+        )
+        shadow_book.sync_from_exchange(private_exchange, feeds)
+        shadow_book.start(
+            self.shared_event_bus,
+            private_event_bus=private_bus,
+        )
 
-            # 4. Per-strategy risk optimizer
-            risk_cfg = self.cfg.effective_risk_for(
-                asset_type=strat_cfg.asset_type.lower(),
-                venue=strat_cfg.venue.lower(),
-                strategy_id=strategy_id,
-            )
-            optimizer = PortfolioOptimizer(risk_config=risk_cfg, portfolio=shadow_book, cfg=self.cfg)
+        # 4. Per-strategy risk optimizer
+        risk_cfg = self.cfg.effective_risk_for(
+            asset_type=strat_cfg.asset_type.lower(),
+            venue=strat_cfg.venue.lower(),
+            strategy_id=strategy_id,
+        )
+        optimizer = PortfolioOptimizer(risk_config=risk_cfg, portfolio=shadow_book, cfg=self.cfg)
 
-            # 5. Per-strategy execution engine
-            execution_engine = ExecutionEngine(
-                exchanges={venue: private_exchange},
-                portfolio=shadow_book,
-                feeds=feeds,
-                risk_config=risk_cfg,
-                default_venue=venue,
-                cfg=self.cfg,
-                asset_type=asset_type,
-                venue=venue,
-            )
+        # 5. Per-strategy execution engine
+        execution_engine = ExecutionEngine(
+            exchanges={venue: private_exchange},
+            portfolio=shadow_book,
+            feeds=feeds,
+            default_venue=venue,
+            cfg=self.cfg,
+            asset_type=asset_type,
+            venue=venue,
+        )
 
-            # 6. Wire into strategy
-            strategy.strategy_id = strategy_id
-            strategy.strategy_name = strategy_name
-            strategy._shadow_book = shadow_book
-            strategy.portfolio = shadow_book      # backward compat: satisfies duck-type interface
-            strategy._optimizer = optimizer
-            strategy._execution_engine = execution_engine
-            strategy._shared_event_bus = self.shared_event_bus
-            strategy._private_event_bus = private_bus
-            strategy._exchanges = {venue: private_exchange}
-            strategy.cfg = self.cfg
-            strategy.strategy_config = strat_cfg
+        # 6. Wire into strategy
+        strategy.strategy_id = strategy_id
+        strategy.strategy_name = strategy_name
+        strategy._shadow_book = shadow_book
+        strategy.portfolio = shadow_book      # backward compat: satisfies duck-type interface
+        strategy._optimizer = optimizer
+        strategy._execution_engine = execution_engine
+        strategy._shared_event_bus = self.shared_event_bus
+        strategy._private_event_bus = private_bus
+        strategy._exchanges = {venue: private_exchange}
+        strategy.cfg = self.cfg
+        strategy.strategy_config = strat_cfg
 
-            # 7. Register shadow book with aggregate portfolio for monitoring
-            if asset_type in self._portfolio_dict and venue in self._portfolio_dict[asset_type]:
-                self._portfolio_dict[asset_type][venue].register_shadow_book(shadow_book)
+        # 7. Register shadow book with aggregate portfolio for monitoring
+        if asset_type in self._portfolio_dict and venue in self._portfolio_dict[asset_type]:
+            self._portfolio_dict[asset_type][venue].register_shadow_book(shadow_book)
 
-            # 8. Start strategy — no aggregator in sub-account mode
-            await strategy.start(aggregator=None)
+        # 8. Start strategy
+        await strategy.start()
 
-            # 9. Periodic snapshot
-            self._start_snapshot_task(shadow_book.save_snapshot, f"shadow_book_{strategy_id}")
-            self._strategy_dict[strategy_id] = strategy
+        # 9. Periodic snapshot
+        self._start_snapshot_task(shadow_book.save_snapshot, f"shadow_book_{strategy_id}")
+        self._strategy_dict[strategy_id] = strategy
 
-            logger.info(
-                f"[Runner] Sub-account wiring complete: {strategy.__class__.__name__} "
-                f"(id={strategy_id}) -> ShadowBook (real ledger) -> Optimizer -> ExecutionEngine"
-            )
-            return
+        logger.info(
+            f"[Runner] Sub-account wiring complete: {strategy.__class__.__name__} "
+            f"(id={strategy_id}) -> ShadowBook (real ledger) -> Optimizer -> ExecutionEngine"
+        )
+        return
         
-        else:
-            raise ValueError(f"Strategy config for strategy_id={strategy_id} not found or missing sub-account credentials")
-
-       
-
     def _has_sub_account(self, strategy_config) -> bool:
         """Return True if the strategy config has dedicated sub-account credentials."""
         return bool(getattr(strategy_config, 'sub_account_api_key', ''))
+    
 
-    async def _create_sub_account_exchange(self, strategy_config, 
+    async def _create_sub_account_exchange(self, strategy_config: StrategyConfig, 
                                                  venue: Venue, 
                                                  asset_type: AssetType = AssetType.SPOT):
         """Create a per-strategy exchange connector with its own API keys and private EventBus.
@@ -881,14 +829,12 @@ class StrategyRunner:
         to flow through the shared EventBus via the shared kline/ob managers.
         """
         
-
         api_key = strategy_config.sub_account_api_key
         api_secret = strategy_config.sub_account_api_secret
 
         # Private event bus: receives only this strategy's user data events
         private_bus = EventBus()
-
-        exchange_connector_cls = self._exchange_connector_callables.get((venue, asset_type))
+        exchange_connector_cls = self._exchange_connector_callables.get((asset_type, venue))
         exchange = exchange_connector_cls(
             args=self.cfg,
             api_key=api_key,
@@ -900,7 +846,7 @@ class StrategyRunner:
         )
         await exchange.run()
         logger.info(
-            f"[Runner] Sub-account exchange created for strategy {strategy_config.id} "
+            f"[Runner] Sub-account exchange created for strategy {strategy_config.strategy_id} "
             f"({venue.value})"
         )
         return exchange, private_bus
@@ -933,20 +879,27 @@ class StrategyRunner:
         """Current runner lifecycle state."""
         return self._state
 
-    async def run(self, strategies: Optional[List[SpotStrategy]] = [],
-                        strategy_ids: Optional[List[int]] = [],
-                        strategy_names: Optional[List[str]] = []) -> None:
+    async def run(self, **kwargs) -> None:
         """Run the complete strategy in a single event loop.
 
         All feeds, exchange connectors and the optional *strategy* share one
         asyncio event loop.  Heavy compute is offloaded via
         ``strategy.run_heavy()``.
         """
+        
+        # Premake the Strategies, ids and strategy_names
+        strategies, strategy_ids, strategy_names = [], [], []
+        for strategy_id, strat_cfg in self.cfg.strategies.items():
+            strategy_name = strat_cfg.strategy_name
+            strategy_ids.append(strategy_id)
+            strategy_names.append(strategy_name)
+            strategy = load_strategy_class(strat_cfg.class_name)()  # -> Get the strategy instance
+            strategies.append(strategy)
+        
         try:
-            logger.info("[Runner] ════════════════════════════════════════════════════════════════════════════════════════")
+            logger.info("[Runner] ----------------------------------------------------------------------------------------")
             logger.info("[Runner] Starting strategy runner................................")
-            logger.info("[Runner] ════════════════════════════════════════════════════════════════════════════════════════")
-
+            logger.info("[Runner] ----------------------------------------------------------------------------------------")
             # ── CONFIGURING ──
             self._state = RunnerState.CONFIGURING
             self._setup_config()
@@ -980,7 +933,7 @@ class StrategyRunner:
                 # We setup the Pipeline for all exchange and asset_type pairing
                 await self._setup_pipeline()
                     
-                logger.info(f'Initialising wiring of components for all strategies')
+                logger.info(f'Initialising wiring of components for all strategies. Strategies loaded: {list(self.cfg.strategies.keys())}')
                 await asyncio.gather(*[
                     self.setup_strategy(strategy, strategy_id, strategy_name)
                     for strategy, strategy_id, strategy_name, 
@@ -1012,7 +965,7 @@ class StrategyRunner:
                 # for asset_type, venues in self.exchange_connectors_dict.items():
                 #     for venue, exchange in venues.items():
                 #         if exchange:
-                #             logger.info(f"Stopping exchange connector for {asset_type.value} {venue.value}...")
+                #             logger.info(f"Stopping exchange c onnector for {asset_type.value} {venue.value}...")
                 #             try:
                 #                 await exchange.stop()
                 #             except Exception as e:
@@ -1052,6 +1005,9 @@ async def cleanup(tasks_groups):
             await asyncio.gather(*tasks, return_exceptions=True)
 
 
+
+
+    
 async def run_test_strategy(
     trading_config_yaml: str = 'elysian_core/config/trading_config.yaml',
     strategy_config_yamls: Optional[List[str]] = None,
@@ -1070,39 +1026,11 @@ async def run_test_strategy(
     strategy_config_yamls:
         Per-strategy YAML file paths.  Defaults to the bundled example strategy.
     """
-    if strategy_config_yamls is None:
-        strategy_config_yamls = [
-            'elysian_core/config/strategies/strategy_001_event_driven.yaml'
-        ]
-
     runner = StrategyRunner(
         trading_config_yaml=trading_config_yaml,
         strategy_config_yamls=strategy_config_yamls,
     )
-
-    # Load strategy parameters from config
-    strat_cfg = runner.cfg.strategies[0] if runner.cfg.strategies else None
-    strat_id = strat_cfg.id if strat_cfg else 1
-    strat_name = strat_cfg.name if strat_cfg else "event_driven_momentum"
-    allocation = strat_cfg.allocation if strat_cfg else 1.0
-    rebalance_interval = (
-        strat_cfg.params.get('rebalance_interval_s', 60.0) if strat_cfg else 60.0
-    )
-
-    # Create strategy — symbols will be loaded from cfg in on_start()
-    strategy = EventDrivenStrategy(
-        exchanges={},
-        event_bus=EventBus(),
-        rebalance_interval_s=rebalance_interval,
-        asset_type=AssetType.SPOT,
-        venues={Venue.BINANCE},
-    )
-
-    await runner.run(
-        strategies=[strategy],
-        strategy_ids=[strat_id],
-        strategy_names=[strat_name],
-    )
+    await runner.run()
 
 
 if __name__ == "__main__":
@@ -1111,4 +1039,13 @@ if __name__ == "__main__":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     logger.info("Running in TEST-STRATEGY mode")
-    asyncio.run(run_test_strategy())
+    
+    trading_config_yaml = 'elysian_core/config/trading_config.yaml'
+    strategy_config_yamls = [
+        'elysian_core/config/strategies/strategy_000_event_driven.yaml',
+        'elysian_core/config/strategies/strategy_001_test_print.yaml'
+    ]
+    asyncio.run(run_test_strategy(
+        trading_config_yaml=trading_config_yaml,
+        strategy_config_yamls=strategy_config_yamls,
+    ))

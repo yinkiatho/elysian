@@ -12,6 +12,9 @@ from typing import FrozenSet, Optional
 
 @dataclass
 class RiskConfig:
+    '''
+    RiskConfigs on the ShadowBook/Strategy or GlobalExchange Level
+    '''
     # ── Per-asset weight bounds ──────────────────────────────────────────────
     max_weight_per_asset: float = 0.25          # no single asset > 25%
     min_weight_per_asset: float = 0.0           # 0 = long-only is fine
@@ -24,8 +27,8 @@ class RiskConfig:
     max_turnover_per_rebalance: float = 0.5     # max sum(abs(delta_w)) per cycle
 
     # ── Symbol filters ───────────────────────────────────────────────────────
-    allowed_symbols: Optional[FrozenSet[str]] = None    # None = all allowed
-    blocked_symbols: FrozenSet[str] = field(default_factory=frozenset)
+    # allowed_symbols: Optional[FrozenSet[str]] = None    # None = all allowed
+    # blocked_symbols: FrozenSet[str] = field(default_factory=frozenset)
 
     # ── Futures / leverage ───────────────────────────────────────────────────
     max_leverage: float = 1.0

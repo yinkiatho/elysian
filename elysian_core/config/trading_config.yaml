@@ -20,56 +20,19 @@ futures:
   venues: []
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Stage 4 — Risk Management (PortfolioOptimizer global defaults)
-#
-# These are the baseline risk limits applied to ALL portfolios unless overridden
-# by a venue_config or strategy risk_overrides section below.
-#
-# Priority (highest wins): strategy risk_overrides > venue_configs risk > here
-# ═══════════════════════════════════════════════════════════════════════════════
-risk:
-  # ── Per-asset weight bounds ──
-  max_weight_per_asset: 0.25          # no single asset > 25% of portfolio
-  min_weight_per_asset: 0.0           # floor per asset (0 = long-only is fine)
-
-  # ── Portfolio-level exposure ──
-  max_total_exposure: 1.0             # sum(|weights|); 1.0 = fully invested, no leverage
-  min_cash_weight: 0.05              # always keep >= 5% in cash/stablecoins
-
-  # ── Turnover control ──
-  max_turnover_per_rebalance: 0.5     # max sum(|delta_w|) per rebalance cycle
-
-  # ── Leverage & shorts (futures expansion) ──
-  max_leverage: 1.0                   # max gross leverage (1.0 = spot-only)
-  max_short_weight: 0.0              # max short weight per asset (0 = no shorts)
-
-  # ── Notional filters ──
-  min_order_notional: 10.0            # skip orders below $10 notional
-  max_order_notional: 100000.0        # cap single order at $100k
-
-  # ── Delta threshold ──
-  min_weight_delta: 0.005             # skip rebalance legs with < 0.5% weight change
-
-  # ── Rate limiting ──
-  min_rebalance_interval_ms: 60000    # minimum 60s between rebalance cycles
-
-  # ── Symbol filters ──
-  # allowed_symbols: null = all symbols allowed
-  # Set to a list to whitelist: ["ETHUSDT", "BTCUSDT", "SOLUSDT"]
-  allowed_symbols: null
-
-  # Explicit blacklist — these symbols will never receive weight
-  blocked_symbols: []
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Portfolio (shared state across all pipeline stages)
+# Portfolio Config at the Asset-Type Exchange Level (shared state across all pipeline stages)
+# Also contains the Risk Management for the GlobalExchange Level Risk Config but to be ignored for now
 # ═══════════════════════════════════════════════════════════════════════════════
 portfolio:
   max_history: 10000                  # max fills retained in memory (ring buffer)
   snapshot_interval_s: 300            # save portfolio snapshot every N seconds (0 = disabled)
 
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # Risk Management global defaults not yet exist to be ignored for now
+  # ═══════════════════════════════════════════════════════════════════════════════
+  risk:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Execution Engine global defaults
@@ -77,14 +40,7 @@ portfolio:
 execution:
   default_order_type: "MARKET"        # "MARKET" or "LIMIT"
   default_venue: "Binance"            # primary venue for order routing
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Strategy engine config (applies to all strategies)
-# ═══════════════════════════════════════════════════════════════════════════════
-strategy:
-  max_heavy_workers: 4                # ProcessPoolExecutor workers for run_heavy()
-
+  
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Per-(asset_type, venue) config overrides

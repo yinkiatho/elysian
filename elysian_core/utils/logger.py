@@ -31,6 +31,7 @@ class ColoredFormatter(logging.Formatter):
         color = self.COLORS.get(record.levelname, self.COLORS['RESET'])
         return f'{color}{log_message}{self.COLORS["RESET"]}'
 
+
 def setup_custom_logger(name, log_level=logging.INFO):
     if loggers.get(name):
         return loggers[name]

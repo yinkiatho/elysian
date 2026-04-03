@@ -6,17 +6,12 @@ import statistics
 import time
 from datetime import datetime as dt
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import urlencode
-import hashlib
-import hmac
-
 import requests
 import websockets
 
-from elysian_core.connectors.base import AbstractDataFeed
+from elysian_core.connectors.base import AbstractDataFeed, KlineClientManager, OrderBookClientManager
 from elysian_core.core.market_data import Kline, OrderBook, AsterOrderBook
 import elysian_core.utils.logger as log
-from elysian_core.connectors.base import AbstractClientManager, KlineClientManager, OrderBookClientManager
 
 
 logger = log.setup_custom_logger("root")
@@ -599,16 +594,6 @@ class AsterKlineFeed(AbstractDataFeed):
             volume     = float(k["v"]),
         )
 
-    async def __call__(self):
-        """Register with shared manager and keep alive."""
-        from elysian_core.connectors.AsterDataConnectors import aster_spot_kline_client_manager
-        aster_spot_kline_client_manager.register_feed(self)
-        if not aster_spot_kline_client_manager._running:
-            await aster_spot_kline_client_manager.start()
-            asyncio.create_task(aster_spot_kline_client_manager.run_multiplex_feeds())
-        while True:
-            await asyncio.sleep(1)
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # AsterOrderBookFeed
@@ -732,22 +717,3 @@ class AsterOrderBookFeed(AbstractDataFeed):
             f"bid={self._data.best_bid_price:.5f} ask={self._data.best_ask_price:.5f}"
         )
 
-    async def __call__(self):
-        """Register with shared manager, start buffering, then fetch snapshot."""
-        from elysian_core.connectors.AsterDataConnectors import aster_spot_ob_client_manager
-        aster_spot_ob_client_manager.register_feed(self)
-        if not aster_spot_ob_client_manager._running:
-            await aster_spot_ob_client_manager.start()
-            asyncio.create_task(aster_spot_ob_client_manager.run_multiplex_feeds())
-        await asyncio.sleep(0.1)
-        await self.get_initial_snapshot()
-        while True:
-            await asyncio.sleep(1)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Module-level singleton managers
-# ──────────────────────────────────────────────────────────────────────────────
-
-aster_spot_kline_client_manager = AsterKlineClientManager()
-aster_spot_ob_client_manager    = AsterOrderBookClientManager()

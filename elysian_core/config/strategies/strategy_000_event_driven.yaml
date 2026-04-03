@@ -1,0 +1,77 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# strategy_000_event_driven.yaml — Per-strategy configuration
+#
+# Each strategy gets its own YAML file.  These are loaded by StrategyRunner
+# alongside trading_config.yaml and merged into AppConfig.strategies.
+#
+# Mandatory Fields:
+#   strategy_id            — unique integer, used for shadow book and logging
+#   strategy_name          — human-readable identifier
+#   class         — Python class name for instantation (e.g. "MyStrategy" for elysian_core.strategy.my_strategy.MyStrategy)
+#   asset_type    — "Spot" or "Perpetual"
+#   venue         — primary venue: "Binance", "Aster"
+#   venues        — list of venues this strategy may trade on
+#   allocation    — fraction of total portfolio capital [0.0, 1.0]
+#   symbols       — explicit symbol list; empty = loaded from config.json for this venue+asset_type
+#   risk_overrides    — overrides on top of venue and global risk (highest priority)
+#   execution_overrides — overrides on top of venue and global execution
+#   portfolio_overrides — overrides on top of global portfolio config
+#   params        — strategy-specific parameters passed to compute_weights / on_start
+#   max_heavy_workers — max number of concurrent heavy compute tasks
+# ═══════════════════════════════════════════════════════════════════════════════
+
+strategy_id: 0
+strategy_name: "event_driven_momentum_binance_spot"
+
+log_dir: "logs/{strategy_name}.log"  # relative to project root; created if doesn't exist
+class: "elysian_core.strategy.example_weight_strategy_v2_event_driven.EventDrivenStrategy"
+asset_type: "Spot"
+venue: "Binance"
+venues:
+  - "Binance"
+
+max_heavy_workers: 8
+
+# Symbols — leave empty to load from config.json for this venue+asset_type
+symbols: []
+
+# ── Risk Management for PortfolioOptimizer (StrategyShadowBook level) ──────────────────────────────────────────────
+# Only list fields you want to change; omitted fields inherit from venue/global.
+risk:
+  # ── Per-asset weight bounds ──
+  max_weight_per_asset: 0.25          # no single asset > 25% of portfolio
+  min_weight_per_asset: 0.0           # floor per asset (0 = long-only is fine)
+
+  # ── Portfolio-level exposure ──
+  max_total_exposure: 1.0             # sum(|weights|); 1.0 = fully invested, no leverage
+  min_cash_weight: 0.05              # always keep >= 5% in cash/stablecoins
+
+  # ── Turnover control ──
+  max_turnover_per_rebalance: 0.5     # max sum(|delta_w|) per rebalance cycle
+
+  # ── Leverage & shorts (futures expansion) ──
+  max_leverage: 1.0                   # max gross leverage (1.0 = spot-only)
+  max_short_weight: 0.0              # max short weight per asset (0 = no shorts)
+
+  # ── Notional filters ──
+  min_order_notional: 10.0            # skip orders below $10 notional
+  max_order_notional: 100000.0        # cap single order at $100k
+
+  # ── Delta threshold ──
+  min_weight_delta: 0.005             # skip rebalance legs with < 0.5% weight change
+
+  # ── Rate limiting ──
+  #min_rebalance_interval_ms: 60000    # minimum 60s between rebalance cycles
+
+  # ── Symbol filters ──
+
+# ── Execution overrides ────────────────────────────────────────────────────────
+execution_overrides: {}
+
+# ── Portfolio overrides ────────────────────────────────────────────────────────
+portfolio_overrides: {}
+
+# ── Strategy-specific parameters ──────────────────────────────────────────────
+# Accessible via strategy.strategy_config.params or strategy.cfg.strategies[i].params
+params:
+  rebalance_interval_s: 60     # minimum seconds between rebalance cycles

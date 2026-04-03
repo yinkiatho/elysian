@@ -4,7 +4,6 @@ import datetime
 import hashlib
 import hmac
 import math
-import statistics
 import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
@@ -312,22 +311,6 @@ class AsterSpotExchange(SpotExchangeConnector):
             self._open_orders[symbol].pop(order_id, None)
             logger.info(f"[{symbol}] Order {order_id} removed from open orders (status={status})")
 
-    # ── Price helper ──────────────────────────────────────────────────────────
-
-    def last_price(self, symbol: str) -> Optional[float]:
-        """Best available mid-price: OB mid → last kline close → None."""
-        if self.ob_manager:
-            feed = self.ob_manager.get_feed(symbol)
-            if feed and feed.data:
-                return feed.data.mid_price
-
-        if self.kline_manager:
-            feed = self.kline_manager.get_feed(symbol)
-            if feed and feed.latest_close:
-                return feed.latest_close
-
-        return None
-
     # ── Deposit / Withdraw (stubs) ────────────────────────────────────────────
 
     async def get_deposit_address(self, coin: str, network: Optional[str] = None) -> Optional[str]:
@@ -357,58 +340,8 @@ class AsterSpotExchange(SpotExchangeConnector):
 
     # ── Orders ────────────────────────────────────────────────────────────────
 
-    def order_health_check(
-        self, symbol: str, side: Side, quantity: float, use_quote_order_qty: bool = False
-    ) -> bool:
-        """Validate balance and notional before placing an order."""
-        info = self._token_infos.get(symbol, {})
-        base_asset  = info.get("base_asset")
-        quote_asset = info.get("quote_asset")
-        if not base_asset or not quote_asset:
-            logger.error(f"[{symbol}] order_health_check: symbol info not found")
-            return False
-
-        price            = self.last_price(symbol) or 0.0
-        min_notional     = info.get("min_notional", 0.0)
-        estimated_notional = price * abs(quantity) if not use_quote_order_qty else abs(quantity)
-
-        if estimated_notional < min_notional:
-            logger.error(
-                f"[{symbol}] Estimated notional {estimated_notional:.4f} < min {min_notional}"
-            )
-            return False
-
-        if not use_quote_order_qty:
-            if side == Side.BUY:
-                if self._balances.get(quote_asset, 0.0) < price * abs(quantity):
-                    logger.error(
-                        f"[{symbol}] Insufficient {quote_asset} to BUY {quantity} {base_asset}"
-                    )
-                    return False
-            else:
-                if self._balances.get(base_asset, 0.0) < abs(quantity):
-                    logger.error(
-                        f"[{symbol}] Insufficient {base_asset} to SELL {quantity}"
-                    )
-                    return False
-        else:
-            if side == Side.BUY:
-                if self._balances.get(quote_asset, 0.0) < abs(quantity):
-                    logger.error(
-                        f"[{symbol}] Insufficient {quote_asset} for quoteOrderQty={quantity}"
-                    )
-                    return False
-            else:
-                if self._balances.get(base_asset, 0.0) < price * abs(quantity):
-                    logger.error(
-                        f"[{symbol}] Insufficient {base_asset} for quoteOrderQty SELL"
-                    )
-                    return False
-
-        return True
-
     async def place_limit_order(
-        self, symbol: str, side: Side, quantity: float, price: float
+        self, symbol: str, side: Side, price: float, quantity: float, strategy_id: int = 0
     ):
         """Place a GTC limit order via POST /api/v1/order."""
         params = {
@@ -586,26 +519,6 @@ class AsterSpotExchange(SpotExchangeConnector):
             return qty
         precision = max(0, round(-math.log10(step)))
         return round(math.floor(qty / step) * step, precision)
-
-    @staticmethod
-    def _average_fill_price(resp: dict):
-        """
-        Compute VWAP from a market order fill response.
-        Falls back to cummulativeQuoteQty / executedQty if fills list is absent.
-        """
-        fills = resp.get("fills", [])
-        if fills:
-            total_qty       = sum(float(f["qty"]) for f in fills)
-            total_notional  = sum(float(f["qty"]) * float(f["price"]) for f in fills)
-            total_comm      = sum(float(f["commission"]) for f in fills)
-            avg             = total_notional / total_qty if total_qty else 0.0
-            return avg, total_comm
-
-        # Fallback for exchanges that omit fills
-        exec_qty   = float(resp.get("executedQty", 0))
-        quote_qty  = float(resp.get("cummulativeQuoteQty", 0))
-        avg        = quote_qty / exec_qty if exec_qty else 0.0
-        return avg, 0.0
 
     async def _record_trade(
         self,
