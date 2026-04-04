@@ -14,8 +14,6 @@ from elysian_core.core.market_data import Kline, OrderBook, AsterOrderBook
 import elysian_core.utils.logger as log
 
 
-logger = log.setup_custom_logger("root")
-
 SPOT_BASE_ENDPOINT     = "https://sapi.asterdex.com"
 WEBSOCKET_SPOT_STREAM  = "wss://sstream.asterdex.com/ws"          # /ws/<listenKey> or subscription endpoint
 WEBSOCKET_STREAM_BASE  = "wss://sstream.asterdex.com/stream"      # combined stream endpoint
@@ -29,6 +27,7 @@ class AsterKlineClientManager(KlineClientManager):
     """Shared WebSocket client for multiplex kline streams with queue-based processing."""
 
     def __init__(self):
+        self.logger = log.setup_custom_logger("root")
         self._websocket: Optional[Any]             = None
         self._queue: asyncio.Queue                 = asyncio.Queue(maxsize=10000)
         self._active_feeds: Dict[str, "AsterKlineFeed"] = {}
@@ -43,7 +42,7 @@ class AsterKlineClientManager(KlineClientManager):
         if self._running:
             return
         self._running = True
-        logger.info("AsterKlineClientManager: Started shared kline client")
+        self.logger.info("AsterKlineClientManager: Started shared kline client")
 
     async def stop(self):
         if not self._running:
@@ -72,7 +71,7 @@ class AsterKlineClientManager(KlineClientManager):
                 pass
             self._websocket = None
 
-        logger.info("AsterKlineClientManager: Stopped shared kline client")
+        self.logger.info("AsterKlineClientManager: Stopped shared kline client")
 
     # ── Feed registry ─────────────────────────────────────────────────────────
 
@@ -90,7 +89,7 @@ class AsterKlineClientManager(KlineClientManager):
     async def _reader_coroutine(self):
         """Network reader: connects to the combined stream and reads messages."""
         if not self._active_feeds:
-            logger.warning("AsterKlineClientManager: No feeds registered for reader")
+            self.logger.warning("AsterKlineClientManager: No feeds registered for reader")
             return
 
         streams = [f"{symbol.lower()}@kline_1s" for symbol in self._active_feeds.keys()]
@@ -100,7 +99,7 @@ class AsterKlineClientManager(KlineClientManager):
             try:
                 async with websockets.connect(WEBSOCKET_SPOT_STREAM) as websocket:
                     self._websocket = websocket
-                    logger.info(
+                    self.logger.info(
                         f"AsterKlineClientManager: WebSocket connected for {len(streams)} streams"
                     )
                     reconnect_delay = 1
@@ -123,16 +122,16 @@ class AsterKlineClientManager(KlineClientManager):
                             except Exception:
                                 pass
                         except Exception as e:
-                            logger.error(f"AsterKlineClientManager: Reader error: {e}")
+                            self.logger.error(f"AsterKlineClientManager: Reader error: {e}")
                             await asyncio.sleep(0.1)
 
             except Exception as e:
-                logger.error(
+                self.logger.error(
                     f"AsterKlineClientManager: WebSocket connection error: {e}", exc_info=False
                 )
 
             if self._running:
-                logger.warning(
+                self.logger.warning(
                     f"AsterKlineClientManager: Reconnecting in {reconnect_delay}s..."
                 )
                 await asyncio.sleep(reconnect_delay)
@@ -176,7 +175,7 @@ class AsterKlineClientManager(KlineClientManager):
                 self._queue.task_done()
 
             except Exception as e:
-                logger.error(f"AsterKlineClientManager: Worker {worker_id} error: {e}")
+                self.logger.error(f"AsterKlineClientManager: Worker {worker_id} error: {e}")
                 await asyncio.sleep(0.1)
 
     # ── Run ───────────────────────────────────────────────────────────────────
@@ -186,7 +185,7 @@ class AsterKlineClientManager(KlineClientManager):
         Call to activate the multiplex feeds
         '''
         if not self._active_feeds:
-            logger.warning("AsterKlineClientManager: No feeds registered")
+            self.logger.warning("AsterKlineClientManager: No feeds registered")
             return
 
         self._reader_task = asyncio.create_task(self._reader_coroutine())
@@ -196,7 +195,7 @@ class AsterKlineClientManager(KlineClientManager):
             asyncio.create_task(self._worker_coroutine(i)) for i in range(num_workers)
         ]
 
-        logger.info(f"AsterKlineClientManager: Started with {num_workers} workers")
+        self.logger.info(f"AsterKlineClientManager: Started with {num_workers} workers")
         await self._reader_task
 
 
@@ -208,6 +207,7 @@ class AsterOrderBookClientManager(OrderBookClientManager):
     """Shared WebSocket client for multiplex order-book streams with queue-based processing."""
 
     def __init__(self):
+        self.logger = log.setup_custom_logger("root")
         self._websocket: Optional[Any]                  = None
         self._queue: asyncio.Queue                      = asyncio.Queue(maxsize=10000)
         self._active_feeds: Dict[str, "AsterOrderBookFeed"] = {}
@@ -222,7 +222,7 @@ class AsterOrderBookClientManager(OrderBookClientManager):
         if self._running:
             return
         self._running = True
-        logger.info("AsterOrderBookClientManager: Started shared orderbook client")
+        self.logger.info("AsterOrderBookClientManager: Started shared orderbook client")
 
     async def stop(self):
         if not self._running:
@@ -251,7 +251,7 @@ class AsterOrderBookClientManager(OrderBookClientManager):
                 pass
             self._websocket = None
 
-        logger.info("AsterOrderBookClientManager: Stopped shared orderbook client")
+        self.logger.info("AsterOrderBookClientManager: Stopped shared orderbook client")
 
     # ── Feed registry ─────────────────────────────────────────────────────────
 
@@ -268,7 +268,7 @@ class AsterOrderBookClientManager(OrderBookClientManager):
 
     async def _reader_coroutine(self):
         if not self._active_feeds:
-            logger.warning("AsterOrderBookClientManager: No feeds registered for reader")
+            self.logger.warning("AsterOrderBookClientManager: No feeds registered for reader")
             return
 
         # 20-level depth with 100ms updates
@@ -281,7 +281,7 @@ class AsterOrderBookClientManager(OrderBookClientManager):
             try:
                 async with websockets.connect(WEBSOCKET_SPOT_STREAM) as websocket:
                     self._websocket = websocket
-                    logger.info(
+                    self.logger.info(
                         f"AsterOrderBookClientManager: WebSocket connected for {len(streams)} streams"
                     )
                     reconnect_delay = 1
@@ -304,16 +304,16 @@ class AsterOrderBookClientManager(OrderBookClientManager):
                             except Exception:
                                 pass
                         except Exception as e:
-                            logger.error(f"AsterOrderBookClientManager: Reader error: {e}")
+                            self.logger.error(f"AsterOrderBookClientManager: Reader error: {e}")
                             await asyncio.sleep(0.1)
 
             except Exception as e:
-                logger.error(
+                self.logger.error(
                     f"AsterOrderBookClientManager: WebSocket connection error: {e}", exc_info=False
                 )
 
             if self._running:
-                logger.warning(
+                self.logger.warning(
                     f"AsterOrderBookClientManager: Reconnecting in {reconnect_delay}s..."
                 )
                 await asyncio.sleep(reconnect_delay)
@@ -348,14 +348,14 @@ class AsterOrderBookClientManager(OrderBookClientManager):
                 self._queue.task_done()
 
             except Exception as e:
-                logger.error(f"AsterOrderBookClientManager: Worker {worker_id} error: {e}")
+                self.logger.error(f"AsterOrderBookClientManager: Worker {worker_id} error: {e}")
                 await asyncio.sleep(0.1)
 
     # ── Run ───────────────────────────────────────────────────────────────────
 
     async def run_multiplex_feeds(self):
         if not self._active_feeds:
-            logger.warning("AsterOrderBookClientManager: No feeds registered")
+            self.logger.warning("AsterOrderBookClientManager: No feeds registered")
             return
 
         self._reader_task = asyncio.create_task(self._reader_coroutine())
@@ -365,7 +365,7 @@ class AsterOrderBookClientManager(OrderBookClientManager):
             asyncio.create_task(self._worker_coroutine(i)) for i in range(num_workers)
         ]
 
-        logger.info(f"AsterOrderBookClientManager: Started with {num_workers} workers")
+        self.logger.info(f"AsterOrderBookClientManager: Started with {num_workers} workers")
         await self._reader_task
 
 
@@ -391,6 +391,7 @@ class AsterUserDataClientManager:
     _KEEPALIVE_INTERVAL = 30 * 60   # 30 minutes in seconds
 
     def __init__(self, api_key: str, api_secret: str):
+        self.logger = log.setup_custom_logger("root")
         self._api_key    = api_key
         self._api_secret = api_secret
         self._listen_key: Optional[str]            = None
@@ -445,12 +446,12 @@ class AsterUserDataClientManager:
             return
 
         self._listen_key = await asyncio.to_thread(self._get_listen_key)
-        logger.info("AsterUserDataClientManager: Obtained listen key")
+        self.logger.info("AsterUserDataClientManager: Obtained listen key")
 
         self._running        = True
         self._reader_task    = asyncio.create_task(self._reader_loop())
         self._keepalive_task = asyncio.create_task(self._keepalive_loop())
-        logger.info("AsterUserDataClientManager: Started")
+        self.logger.info("AsterUserDataClientManager: Started")
 
     async def stop(self):
         if not self._running:
@@ -476,7 +477,7 @@ class AsterUserDataClientManager:
             await asyncio.to_thread(self._delete_listen_key)
             self._listen_key = None
 
-        logger.info("AsterUserDataClientManager: Stopped")
+        self.logger.info("AsterUserDataClientManager: Stopped")
 
     # ── Reader loop ───────────────────────────────────────────────────────────
 
@@ -491,7 +492,7 @@ class AsterUserDataClientManager:
             try:
                 async with websockets.connect(ws_url) as ws:
                     self._ws = ws
-                    logger.info("AsterUserDataClientManager: WebSocket connected")
+                    self.logger.info("AsterUserDataClientManager: WebSocket connected")
                     reconnect_delay = 1
 
                     while self._running:
@@ -502,7 +503,7 @@ class AsterUserDataClientManager:
                                 try:
                                     cb(msg)
                                 except Exception as e:
-                                    logger.error(
+                                    self.logger.error(
                                         f"AsterUserDataClientManager: Subscriber error: {e}"
                                     )
                         except asyncio.TimeoutError:
@@ -511,16 +512,16 @@ class AsterUserDataClientManager:
                             except Exception:
                                 pass
                         except Exception as e:
-                            logger.error(f"AsterUserDataClientManager: Reader error: {e}")
+                            self.logger.error(f"AsterUserDataClientManager: Reader error: {e}")
                             break
 
             except Exception as e:
-                logger.error(
+                self.logger.error(
                     f"AsterUserDataClientManager: Connection error: {e}", exc_info=False
                 )
 
             if self._running:
-                logger.warning(
+                self.logger.warning(
                     f"AsterUserDataClientManager: Reconnecting in {reconnect_delay}s..."
                 )
                 await asyncio.sleep(reconnect_delay)
@@ -530,7 +531,7 @@ class AsterUserDataClientManager:
                 try:
                     self._listen_key = await asyncio.to_thread(self._get_listen_key)
                 except Exception as e:
-                    logger.error(
+                    self.logger.error(
                         f"AsterUserDataClientManager: Failed to refresh listen key: {e}"
                     )
 
@@ -543,9 +544,9 @@ class AsterUserDataClientManager:
                 break
             try:
                 await asyncio.to_thread(self._keepalive_listen_key)
-                logger.debug("AsterUserDataClientManager: Listen key extended")
+                self.logger.debug("AsterUserDataClientManager: Listen key extended")
             except Exception as e:
-                logger.error(f"AsterUserDataClientManager: Keepalive failed: {e}")
+                self.logger.error(f"AsterUserDataClientManager: Keepalive failed: {e}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -647,12 +648,12 @@ class AsterOrderBookFeed(AbstractDataFeed):
 
         self.snapshot_ready          = True
         self.first_update_processed  = False
-        logger.info(
+        self.logger.info(
             f"[{self._name}] OB snapshot fetched, lastUpdateId={raw['lastUpdateId']}"
         )
 
         if self.event_buffer:
-            logger.info(
+            self.logger.info(
                 f"[{self._name}] Replaying {len(self.event_buffer)} buffered depth events"
             )
             await self._process_buffered_events()
@@ -676,7 +677,7 @@ class AsterOrderBookFeed(AbstractDataFeed):
                 await self._apply_depth_update(ev)
 
             elif self.first_update_processed and ev.get("pu") != self._data.last_update_id:
-                logger.warning(f"[{self._name}] Gap in buffered events — re-fetching snapshot")
+                self.logger.warning(f"[{self._name}] Gap in buffered events — re-fetching snapshot")
                 self.snapshot_ready = False
                 asyncio.create_task(self.get_initial_snapshot())
                 return
@@ -693,7 +694,7 @@ class AsterOrderBookFeed(AbstractDataFeed):
             if pu < self._data.last_update_id:
                 return self._data   # stale, ignore
             else:
-                logger.error(
+                self.logger.error(
                     f"[{self._name}] Sequence break: pu={pu} > last_update_id={self._data.last_update_id}"
                 )
                 self.snapshot_ready = False
@@ -712,7 +713,7 @@ class AsterOrderBookFeed(AbstractDataFeed):
             bid_levels = event.get("b", []),
             ask_levels = event.get("a", []),
         )
-        logger.success(
+        self.logger.success(
             f"[{self._name}] OB id={self._data.last_update_id} "
             f"bid={self._data.best_bid_price:.5f} ask={self._data.best_ask_price:.5f}"
         )

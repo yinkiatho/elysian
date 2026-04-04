@@ -15,13 +15,11 @@ from typing import Callable, Dict, List
 from elysian_core.core.events import EventType
 import elysian_core.utils.logger as log
 
-logger = log.setup_custom_logger("root")
-
-
 class EventBus:
     """In-process async event bus.  Zero serialization overhead."""
 
     def __init__(self):
+        self.logger = log.setup_custom_logger("root")
         self._subscribers: Dict[EventType, List[Callable]] = defaultdict(list)
 
     def subscribe(self, event_type: EventType, callback: Callable):
@@ -46,4 +44,4 @@ class EventBus:
             try:
                 await cb(event)
             except Exception as e:
-                logger.error(f"EventBus: callback error for {event.event_type}: {e}")
+                self.logger.error(f"EventBus: callback error for {event.event_type}: {e}")

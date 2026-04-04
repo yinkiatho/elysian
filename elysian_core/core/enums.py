@@ -14,6 +14,7 @@ class Side(Enum):
 class AssetType(Enum):
     SPOT= "Spot"
     PERPETUAL = "Perpetuals"
+    MARGIN = "Margin"
     
     
 class OrderType(Enum):

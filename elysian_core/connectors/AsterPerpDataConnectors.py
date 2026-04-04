@@ -13,8 +13,6 @@ from elysian_core.connectors.base import AbstractDataFeed, KlineClientManager, O
 from elysian_core.core.market_data import Kline, OrderBook, AsterOrderBook
 import elysian_core.utils.logger as log
 
-logger = log.setup_custom_logger("root")
-
 FUTURES_BASE_ENDPOINT = "https://fapi.asterdex.com"
 WEBSOCKET_FUTURES_ENDPOINT = "wss://fstream.asterdex.com"
 WEBSOCKET_FUTURES_STREAM = "wss://fstream.asterdex.com/ws"
@@ -28,6 +26,7 @@ class AsterPerpKlineClientManager(KlineClientManager):
     """Shared WebSocket client for multiplex kline streams on perpetual market."""
 
     def __init__(self):
+        self.logger = log.setup_custom_logger("root")
         self._websocket: Optional[Any] = None
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
         self._active_feeds: Dict[str, 'AsterPerpKlineFeed'] = {}
@@ -40,7 +39,7 @@ class AsterPerpKlineClientManager(KlineClientManager):
         if self._running:
             return
         self._running = True
-        logger.info("AsterPerpKlineClientManager: Started shared perpetual kline client")
+        self.logger.info("AsterPerpKlineClientManager: Started shared perpetual kline client")
 
     async def stop(self):
         if not self._running:
@@ -69,7 +68,7 @@ class AsterPerpKlineClientManager(KlineClientManager):
             await self._websocket.close()
             self._websocket = None
 
-        logger.info("AsterPerpKlineClientManager: Stopped shared perpetual kline client")
+        self.logger.info("AsterPerpKlineClientManager: Stopped shared perpetual kline client")
 
     def register_feed(self, feed: 'AsterPerpKlineFeed'):
         self._active_feeds[feed._name] = feed
@@ -83,7 +82,7 @@ class AsterPerpKlineClientManager(KlineClientManager):
     async def _reader_coroutine(self):
         """Network reader: connects WebSocket and reads messages."""
         if not self._active_feeds:
-            logger.warning("AsterPerpKlineClientManager: No feeds registered for reader")
+            self.logger.warning("AsterPerpKlineClientManager: No feeds registered for reader")
             return
 
         # Create stream params for all symbols (1m klines)
@@ -94,7 +93,7 @@ class AsterPerpKlineClientManager(KlineClientManager):
             try:
                 async with websockets.connect(f"{WEBSOCKET_FUTURES_ENDPOINT}/stream?streams={'/'.join(streams)}") as websocket:
                     self._websocket = websocket
-                    logger.info(f"AsterPerpKlineClientManager: WebSocket connected for {len(streams)} streams")
+                    self.logger.info(f"AsterPerpKlineClientManager: WebSocket connected for {len(streams)} streams")
                     reconnect_delay = 1
 
                     while self._running:
@@ -108,20 +107,20 @@ class AsterPerpKlineClientManager(KlineClientManager):
                             except:
                                 pass
                         except Exception as e:
-                            logger.error(f"AsterPerpKlineClientManager: Error in reader: {e}")
+                            self.logger.error(f"AsterPerpKlineClientManager: Error in reader: {e}")
                             await asyncio.sleep(0.1)
 
             except Exception as e:
-                logger.error(f"AsterPerpKlineClientManager: WebSocket connection error: {e}", exc_info=False)
+                self.logger.error(f"AsterPerpKlineClientManager: WebSocket connection error: {e}", exc_info=False)
 
             if self._running:
-                logger.warning(f"AsterPerpKlineClientManager: Reconnecting in {reconnect_delay}s...")
+                self.logger.warning(f"AsterPerpKlineClientManager: Reconnecting in {reconnect_delay}s...")
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, 60)
 
     async def _worker_coroutine(self, worker_id: int):
         """Worker coroutine: processes messages from queue."""
-        logger.debug(f"AsterPerpKlineClientManager: Worker {worker_id} started")
+        self.logger.debug(f"AsterPerpKlineClientManager: Worker {worker_id} started")
 
         while self._running:
             try:
@@ -154,20 +153,20 @@ class AsterPerpKlineClientManager(KlineClientManager):
                                     for i in range(1, len(feed._historical))
                                 ]
                                 feed._vol = statistics.stdev(returns) * math.sqrt(12)
-                                logger.info(f"[{symbol}] Perpetual Volatility: {feed._vol * 1e4:.2f} bps (60-candle window)")
+                                self.logger.info(f"[{symbol}] Perpetual Volatility: {feed._vol * 1e4:.2f} bps (60-candle window)")
 
                 self._queue.task_done()
 
             except Exception as e:
-                logger.error(f"AsterPerpKlineClientManager: Worker {worker_id} error: {e}")
+                self.logger.error(f"AsterPerpKlineClientManager: Worker {worker_id} error: {e}")
                 await asyncio.sleep(0.1)
 
-        logger.debug(f"AsterPerpKlineClientManager: Worker {worker_id} stopped")
+        self.logger.debug(f"AsterPerpKlineClientManager: Worker {worker_id} stopped")
 
     async def run_multiplex_feeds(self):
         """Run multiplex socket with reader and worker pool."""
         if not self._active_feeds:
-            logger.warning("AsterPerpKlineClientManager: No feeds registered")
+            self.logger.warning("AsterPerpKlineClientManager: No feeds registered")
             return
 
         # Start reader coroutine
@@ -180,7 +179,7 @@ class AsterPerpKlineClientManager(KlineClientManager):
             for i in range(num_workers)
         ]
 
-        logger.info(f"AsterPerpKlineClientManager: Started with {num_workers} workers")
+        self.logger.info(f"AsterPerpKlineClientManager: Started with {num_workers} workers")
         await self._reader_task
 
 
@@ -192,6 +191,7 @@ class AsterPerpOrderBookClientManager(OrderBookClientManager):
     """Shared WebSocket client for multiplex orderbook streams on perpetual market."""
 
     def __init__(self):
+        self.logger = log.setup_custom_logger("root")
         self._websocket: Optional[Any] = None
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
         self._active_feeds: Dict[str, 'AsterPerpOrderBookFeed'] = {}
@@ -204,7 +204,7 @@ class AsterPerpOrderBookClientManager(OrderBookClientManager):
         if self._running:
             return
         self._running = True
-        logger.info("AsterPerpOrderBookClientManager: Started shared perpetual orderbook client")
+        self.logger.info("AsterPerpOrderBookClientManager: Started shared perpetual orderbook client")
 
     async def stop(self):
         if not self._running:
@@ -233,7 +233,7 @@ class AsterPerpOrderBookClientManager(OrderBookClientManager):
             await self._websocket.close()
             self._websocket = None
 
-        logger.info("AsterPerpOrderBookClientManager: Stopped shared perpetual orderbook client")
+        self.logger.info("AsterPerpOrderBookClientManager: Stopped shared perpetual orderbook client")
 
     def register_feed(self, feed: 'AsterPerpOrderBookFeed'):
         self._active_feeds[feed._name] = feed
@@ -247,7 +247,7 @@ class AsterPerpOrderBookClientManager(OrderBookClientManager):
     async def _reader_coroutine(self):
         """Network reader: connects WebSocket and reads messages."""
         if not self._active_feeds:
-            logger.warning("AsterPerpOrderBookClientManager: No feeds registered for reader")
+            self.logger.warning("AsterPerpOrderBookClientManager: No feeds registered for reader")
             return
 
         # Create stream params for all symbols (20-level depth updates at 100ms)
@@ -258,7 +258,7 @@ class AsterPerpOrderBookClientManager(OrderBookClientManager):
             try:
                 async with websockets.connect(f"{WEBSOCKET_FUTURES_ENDPOINT}/stream?streams={'/'.join(streams)}") as websocket:
                     self._websocket = websocket
-                    logger.info(f"AsterPerpOrderBookClientManager: WebSocket connected for {len(streams)} streams")
+                    self.logger.info(f"AsterPerpOrderBookClientManager: WebSocket connected for {len(streams)} streams")
                     reconnect_delay = 1
 
                     while self._running:
@@ -272,20 +272,20 @@ class AsterPerpOrderBookClientManager(OrderBookClientManager):
                             except:
                                 pass
                         except Exception as e:
-                            logger.error(f"AsterPerpOrderBookClientManager: Error in reader: {e}")
+                            self.logger.error(f"AsterPerpOrderBookClientManager: Error in reader: {e}")
                             await asyncio.sleep(0.1)
 
             except Exception as e:
-                logger.error(f"AsterPerpOrderBookClientManager: WebSocket connection error: {e}", exc_info=False)
+                self.logger.error(f"AsterPerpOrderBookClientManager: WebSocket connection error: {e}", exc_info=False)
 
             if self._running:
-                logger.warning(f"AsterPerpOrderBookClientManager: Reconnecting in {reconnect_delay}s...")
+                self.logger.warning(f"AsterPerpOrderBookClientManager: Reconnecting in {reconnect_delay}s...")
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, 60)
 
     async def _worker_coroutine(self, worker_id: int):
         """Worker coroutine: processes messages from queue."""
-        logger.debug(f"AsterPerpOrderBookClientManager: Worker {worker_id} started")
+        self.logger.debug(f"AsterPerpOrderBookClientManager: Worker {worker_id} started")
 
         while self._running:
             try:
@@ -313,15 +313,15 @@ class AsterPerpOrderBookClientManager(OrderBookClientManager):
                 self._queue.task_done()
 
             except Exception as e:
-                logger.error(f"AsterPerpOrderBookClientManager: Worker {worker_id} error: {e}")
+                self.logger.error(f"AsterPerpOrderBookClientManager: Worker {worker_id} error: {e}")
                 await asyncio.sleep(0.1)
 
-        logger.debug(f"AsterPerpOrderBookClientManager: Worker {worker_id} stopped")
+        self.logger.debug(f"AsterPerpOrderBookClientManager: Worker {worker_id} stopped")
 
     async def run_multiplex_feeds(self):
         """Run multiplex socket with reader and worker pool."""
         if not self._active_feeds:
-            logger.warning("AsterPerpOrderBookClientManager: No feeds registered")
+            self.logger.warning("AsterPerpOrderBookClientManager: No feeds registered")
             return
 
         # Start reader coroutine
@@ -332,7 +332,7 @@ class AsterPerpOrderBookClientManager(OrderBookClientManager):
             for i in range(num_workers)
         ]
 
-        logger.info(f"AsterPerpOrderBookClientManager: Started with {num_workers} workers")
+        self.logger.info(f"AsterPerpOrderBookClientManager: Started with {num_workers} workers")
         await self._reader_task
 
 
@@ -358,6 +358,7 @@ class AsterPerpUserDataClientManager:
     _KEEPALIVE_INTERVAL = 30 * 60   # 30 minutes in seconds
 
     def __init__(self, api_key: str, api_secret: str):
+        self.logger = log.setup_custom_logger("root")
         self._api_key = api_key
         self._api_secret = api_secret
         self._listen_key: Optional[str] = None
@@ -412,12 +413,12 @@ class AsterPerpUserDataClientManager:
             return
 
         self._listen_key = await asyncio.to_thread(self._get_listen_key)
-        logger.info("AsterPerpUserDataClientManager: Obtained listen key")
+        self.logger.info("AsterPerpUserDataClientManager: Obtained listen key")
 
         self._running = True
         self._reader_task = asyncio.create_task(self._reader_loop())
         self._keepalive_task = asyncio.create_task(self._keepalive_loop())
-        logger.info("AsterPerpUserDataClientManager: Started")
+        self.logger.info("AsterPerpUserDataClientManager: Started")
 
     async def stop(self):
         if not self._running:
@@ -443,7 +444,7 @@ class AsterPerpUserDataClientManager:
             await asyncio.to_thread(self._delete_listen_key)
             self._listen_key = None
 
-        logger.info("AsterPerpUserDataClientManager: Stopped")
+        self.logger.info("AsterPerpUserDataClientManager: Stopped")
 
     # ── Reader loop ───────────────────────────────────────────────────────────
 
@@ -458,7 +459,7 @@ class AsterPerpUserDataClientManager:
             try:
                 async with websockets.connect(ws_url) as ws:
                     self._ws = ws
-                    logger.info("AsterPerpUserDataClientManager: WebSocket connected")
+                    self.logger.info("AsterPerpUserDataClientManager: WebSocket connected")
                     reconnect_delay = 1
 
                     while self._running:
@@ -469,7 +470,7 @@ class AsterPerpUserDataClientManager:
                                 try:
                                     cb(msg)
                                 except Exception as e:
-                                    logger.error(
+                                    self.logger.error(
                                         f"AsterPerpUserDataClientManager: Subscriber error: {e}"
                                     )
                         except asyncio.TimeoutError:
@@ -478,16 +479,16 @@ class AsterPerpUserDataClientManager:
                             except Exception:
                                 pass
                         except Exception as e:
-                            logger.error(f"AsterPerpUserDataClientManager: Reader error: {e}")
+                            self.logger.error(f"AsterPerpUserDataClientManager: Reader error: {e}")
                             break
 
             except Exception as e:
-                logger.error(
+                self.logger.error(
                     f"AsterPerpUserDataClientManager: Connection error: {e}", exc_info=False
                 )
 
             if self._running:
-                logger.warning(
+                self.logger.warning(
                     f"AsterPerpUserDataClientManager: Reconnecting in {reconnect_delay}s..."
                 )
                 await asyncio.sleep(reconnect_delay)
@@ -497,7 +498,7 @@ class AsterPerpUserDataClientManager:
                 try:
                     self._listen_key = await asyncio.to_thread(self._get_listen_key)
                 except Exception as e:
-                    logger.error(
+                    self.logger.error(
                         f"AsterPerpUserDataClientManager: Failed to refresh listen key: {e}"
                     )
 
@@ -510,9 +511,9 @@ class AsterPerpUserDataClientManager:
                 break
             try:
                 await asyncio.to_thread(self._keepalive_listen_key)
-                logger.debug("AsterPerpUserDataClientManager: Listen key extended")
+                self.logger.debug("AsterPerpUserDataClientManager: Listen key extended")
             except Exception as e:
-                logger.error(f"AsterPerpUserDataClientManager: Keepalive failed: {e}")
+                self.logger.error(f"AsterPerpUserDataClientManager: Keepalive failed: {e}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -614,11 +615,11 @@ class AsterPerpOrderBookFeed(AbstractDataFeed):
 
         self.snapshot_ready = True
         self.first_update_processed = False  # Reset for new snapshot sync
-        logger.info(f"Fetched initial perpetual snapshot for [{self._name}] OB snapshot id={raw['lastUpdateId']}")
+        self.logger.info(f"Fetched initial perpetual snapshot for [{self._name}] OB snapshot id={raw['lastUpdateId']}")
 
         # Process any buffered events now that snapshot is ready
         if self.event_buffer:
-            logger.info(f"[{self._name}] Processing {len(self.event_buffer)} buffered depth events")
+            self.logger.info(f"[{self._name}] Processing {len(self.event_buffer)} buffered depth events")
             await self._process_buffered_events()
 
     async def _process_buffered_events(self):
@@ -626,27 +627,27 @@ class AsterPerpOrderBookFeed(AbstractDataFeed):
         buffered_events = self.event_buffer[:]
         self.event_buffer.clear()
 
-        logger.info(f"[{self._name}] Processing {len(buffered_events)} buffered perpetual events for snapshot sync")
+        self.logger.info(f"[{self._name}] Processing {len(buffered_events)} buffered perpetual events for snapshot sync")
         for buffered_event in buffered_events:
             # Skip events that are too old (u < lastUpdateId)
             if buffered_event['u'] < self._data.last_update_id:
-                logger.info(f"[{self._name}] Skipping old buffered event u={buffered_event['u']}")
+                self.logger.info(f"[{self._name}] Skipping old buffered event u={buffered_event['u']}")
                 continue
 
             # Find first event that covers the snapshot
             if buffered_event['U'] <= self._data.last_update_id and buffered_event['u'] >= self._data.last_update_id:
-                logger.info(f"[{self._name}] Found sync point: buffered event u={buffered_event['u']} covers snapshot id={self._data.last_update_id}")
+                self.logger.info(f"[{self._name}] Found sync point: buffered event u={buffered_event['u']} covers snapshot id={self._data.last_update_id}")
                 await self._apply_depth_update(buffered_event)
                 self.first_update_processed = True
                 self._data.last_update_id = buffered_event['u']
 
             elif self.first_update_processed and buffered_event['pu'] == self._data.last_update_id:
-                logger.info(f"[{self._name}] Applying buffered event with pu={buffered_event['pu']} matching last_update_id={self._data.last_update_id}")
+                self.logger.info(f"[{self._name}] Applying buffered event with pu={buffered_event['pu']} matching last_update_id={self._data.last_update_id}")
                 await self._apply_depth_update(buffered_event)
 
 
             elif self.first_update_processed and buffered_event['pu'] != self._data.last_update_id:
-                logger.warning(f"[{self._name}] Gap detected: buffered event U={buffered_event['U']} > snapshot id={self.last_update_id}")
+                self.logger.warning(f"[{self._name}] Gap detected: buffered event U={buffered_event['U']} > snapshot id={self.last_update_id}")
                 self.snapshot_ready = False
                 asyncio.create_task(self.get_initial_snapshot())
                 return
@@ -658,16 +659,16 @@ class AsterPerpOrderBookFeed(AbstractDataFeed):
         # Phase 1: Buffer events while snapshot is being fetched
         if not self.snapshot_ready:
             self.event_buffer.append(event)
-            logger.warning(f"[{self._name}] Buffering depth event (snapshot not ready). Buffer size: {len(self.event_buffer)}")
+            self.logger.warning(f"[{self._name}] Buffering depth event (snapshot not ready). Buffer size: {len(self.event_buffer)}")
             return self._data if self._data else None
 
         # Validate pu (previous update id)
         if event.get('pu') != self._data.last_update_id:
             if event.get('pu') < self._data.last_update_id:
-                logger.warning(f"[{self._name}] Received out-of-order event with pu={event.get('pu')} < last_update_id={self._data.last_update_id}. Ignoring event.")
+                self.logger.warning(f"[{self._name}] Received out-of-order event with pu={event.get('pu')} < last_update_id={self._data.last_update_id}. Ignoring event.")
                 return self._data
             elif event.get('pu') > self._data.last_update_id:
-                logger.error(f"[{self._name}] Sequence break: event pu={event.get('pu')} > last_update_id={self._data.last_update_id}")
+                self.logger.error(f"[{self._name}] Sequence break: event pu={event.get('pu')} > last_update_id={self._data.last_update_id}")
                 self.snapshot_ready = False
                 await asyncio.sleep(3.0)
                 asyncio.create_task(self.get_initial_snapshot())
@@ -682,6 +683,6 @@ class AsterPerpOrderBookFeed(AbstractDataFeed):
         ts = int(time.time() * 1000)
         await self._data.apply_both_updates(ts, event['u'],
                                             bid_levels=event.get("b", []), ask_levels=event.get("a", []))
-        logger.success(f"[{self._name}] Perpetual OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
+        self.logger.success(f"[{self._name}] Perpetual OB update id={self._data.last_update_id} best_bid={self._data.best_bid_price:.5f} best_ask={self._data.best_ask_price:.5f}")
 
 

@@ -10,9 +10,6 @@ from elysian_core.core.events import (
     BalanceUpdateEvent,
     RebalanceCompleteEvent,
 )
-import elysian_core.utils.logger as log
-
-logger = log.setup_custom_logger("PrintEventsStrategy")
 
 
 class PrintEventsStrategy(SpotStrategy):
@@ -31,7 +28,7 @@ class PrintEventsStrategy(SpotStrategy):
         if not self._symbols and self.cfg:
             self._symbols = set(self.cfg.symbols.symbols_for("binance", "spot"))
 
-        logger.info(
+        self.logger.info(
             f"[PrintEventsStrategy] Started. Monitoring symbols: {self._symbols}"
         )
 
@@ -42,16 +39,16 @@ class PrintEventsStrategy(SpotStrategy):
 
     async def run_forever(self):
         """Block until stop is called."""
-        logger.info("[PrintEventsStrategy] Entering event loop (waiting for events).")
+        self.logger.info("[PrintEventsStrategy] Entering event loop (waiting for events).")
         await self._stop_event.wait()
-        logger.info("[PrintEventsStrategy] Stopped.")
+        self.logger.info("[PrintEventsStrategy] Stopped.")
 
 
     async def on_kline(self, event: KlineEvent):
         """Print kline events."""
         if event.symbol not in self._symbols:
             return
-        # logger.info(
+        # self.logger.info(
         #     f"[KLINE] {event.venue.name} {event.symbol} "
         #     f"close={event.kline.close} "
         #     f"volume={event.kline.volume} "
@@ -64,7 +61,7 @@ class PrintEventsStrategy(SpotStrategy):
             return
         best_bid = event.orderbook.best_bid_price
         best_ask = event.orderbook.best_ask_price
-        # logger.info(
+        # self.logger.info(
         #     f"[ORDERBOOK] {event.venue.name} {event.symbol} "
         #     f"bid={best_bid} ask={best_ask} "
         #     f"timestamp={event.timestamp}"
@@ -73,7 +70,7 @@ class PrintEventsStrategy(SpotStrategy):
     async def on_order_update(self, event: OrderUpdateEvent):
         """Print order updates."""
         order = event.order
-        logger.info(
+        self.logger.info(
             f"[ORDER] {event.venue.name} {event.symbol} "
             f"order_id={order.order.id} status={order.status} "
             f"filled_qty={order.filled_qty} remaining_qty={order.remaining_qty} "
@@ -82,7 +79,7 @@ class PrintEventsStrategy(SpotStrategy):
 
     async def on_balance_update(self, event: BalanceUpdateEvent):
         """Print balance updates."""
-        logger.info(
+        self.logger.info(
             f"[BALANCE] {event.venue.name} {event.asset} "
             f"delta={event.delta} new_balance={event.new_balance} "
             f"timestamp={event.timestamp}"
@@ -90,7 +87,7 @@ class PrintEventsStrategy(SpotStrategy):
 
     async def on_rebalance_complete(self, event: RebalanceCompleteEvent):
         """Print rebalance completion results."""
-        logger.info(
+        self.logger.info(
             f"[REBALANCE COMPLETE] result={event.result} "
             f"errors={event.result.errors} "
             f"validated_weights={event.validated_weights}"

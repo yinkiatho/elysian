@@ -55,8 +55,6 @@ if TYPE_CHECKING:
     from elysian_core.execution.engine import ExecutionEngine
     from elysian_core.risk.optimizer import PortfolioOptimizer
 
-logger = log.setup_custom_logger("root")
-
 
 class RebalanceFSM(BaseFSM):
     """Drives the rebalance cycle: compute -> validate -> execute -> cooldown.
@@ -111,6 +109,7 @@ class RebalanceFSM(BaseFSM):
             name=name,
         )
         self._strategy = strategy
+        self.logger = log.setup_custom_logger(f"{strategy.strategy_name}_{strategy.strategy_id}")
         self._optimizer = optimizer
         self._execution_engine = execution_engine
         self._cooldown_s = cooldown_s
@@ -131,7 +130,7 @@ class RebalanceFSM(BaseFSM):
         suspended, error) — the request is silently dropped.
         """
         if self._state != RebalanceState.IDLE:
-            logger.debug(
+            self.logger.debug(
                 "[%s] Rebalance request skipped — currently in %s",
                 self._name, self._state.name,
             )
@@ -162,19 +161,19 @@ class RebalanceFSM(BaseFSM):
             else:
                 weights = result
         except Exception as e:
-            logger.error("[%s] compute_weights error: %s", self._name, e, exc_info=True)
+            self.logger.error("[%s] compute_weights error: %s", self._name, e, exc_info=True)
             await self.trigger("no_signal", **ctx)
             return
 
         if not weights:
-            logger.debug("[%s] No weights returned — returning to IDLE", self._name)
+            self.logger.debug("[%s] No weights returned — returning to IDLE", self._name)
             await self.trigger("no_signal", **ctx)
             return
 
         # Tag context with strategy_id for downstream stages
         ctx["strategy_id"] = self._strategy.strategy_id
         ctx["target_weights"] = weights
-        logger.info("[%s] Weights computed: %d symbols", self._name, len(weights))
+        self.logger.info("[%s] Weights computed: %d symbols", self._name, len(weights))
 
         await self.trigger("weights_ready", **ctx)
 
@@ -198,19 +197,19 @@ class RebalanceFSM(BaseFSM):
         try:
             validated = self._optimizer.validate(target, **ctx)
         except Exception as e:
-            logger.error("[%s] optimizer.validate error: %s", self._name, e, exc_info=True)
+            self.logger.error("[%s] optimizer.validate error: %s", self._name, e, exc_info=True)
             await self.trigger("rejected", **ctx)
             return
 
         if validated.rejected:
-            logger.warning(
+            self.logger.warning(
                 "[%s] Weights REJECTED: %s", self._name, validated.rejection_reason,
             )
             await self.trigger("rejected", **ctx)
             return
 
         ctx["validated_weights"] = validated
-        logger.info(
+        self.logger.info(
             "[%s] Stage 4 passed: %d symbols after risk adjustment",
             self._name, len(validated.weights),
         )
@@ -228,7 +227,7 @@ class RebalanceFSM(BaseFSM):
         try:
             result = await self._execution_engine.execute(validated, **ctx)
         except Exception as e:
-            logger.error("[%s] execution_engine.execute error: %s", self._name, e, exc_info=True)
+            self.logger.error("[%s] execution_engine.execute error: %s", self._name, e, exc_info=True)
             await self.trigger("failed", error=e, **ctx)
             return
 
@@ -239,13 +238,13 @@ class RebalanceFSM(BaseFSM):
                 try:
                     book.lock_for_order(order_id, intent)
                 except Exception as e:
-                    logger.error(
+                    self.logger.error(
                         "[%s] shadow_book.lock_for_order error: %s", self._name, e, exc_info=True
                     )
 
         self._last_result = result
         ctx["rebalance_result"] = result
-        logger.info(
+        self.logger.info(
             "[%s] Rebalance result: %d submitted, %d failed",
             self._name, result.submitted, result.failed,
         )
@@ -280,12 +279,12 @@ class RebalanceFSM(BaseFSM):
         try:
             await self.trigger("cooldown_done")
         except Exception as e:
-            logger.error("[%s] cooldown_done error: %s", self._name, e, exc_info=True)
+            self.logger.error("[%s] cooldown_done error: %s", self._name, e, exc_info=True)
 
     async def _on_enter_error(self, error=None, **ctx) -> None:
         """Log the error. Auto-retry after cooldown period."""
         await self._publish_cycle_event("failed", **ctx)
-        logger.error("[%s] Entered ERROR state: %s", self._name, error)
+        self.logger.error("[%s] Entered ERROR state: %s", self._name, error)
 
         # Auto-retry after cooldown
         if self._cooldown_s > 0:
@@ -301,17 +300,17 @@ class RebalanceFSM(BaseFSM):
         try:
             await self.trigger("retry")
         except Exception as e:
-            logger.error("[%s] retry error: %s", self._name, e, exc_info=True)
+            self.logger.error("[%s] retry error: %s", self._name, e, exc_info=True)
 
     async def _on_enter_suspended(self, **ctx) -> None:
         """Pause all rebalancing."""
         await self._publish_cycle_event("suspend", **ctx)
-        logger.warning("[%s] SUSPENDED — rebalancing paused", self._name)
+        self.logger.warning("[%s] SUSPENDED — rebalancing paused", self._name)
 
     async def _on_resume(self, **ctx) -> None:
         """Resume rebalancing from SUSPENDED."""
         await self._publish_cycle_event("resume", **ctx)
-        logger.info("[%s] Resumed — back to IDLE", self._name)
+        self.logger.info("[%s] Resumed — back to IDLE", self._name)
 
     # ── Observability ─────────────────────────────────────────────────────────
 

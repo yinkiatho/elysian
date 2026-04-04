@@ -23,9 +23,6 @@ if TYPE_CHECKING:
     from elysian_core.core.shadow_book import ShadowBook
 
 
-logger = log.setup_custom_logger("root")
-
-
 # ── Fill record (audit trail) — imported by shadow_book.py ──────────────────
 
 @dataclass(frozen=True)
@@ -57,6 +54,7 @@ class Portfolio:
     """
 
     def __init__(self, venue: Venue = Venue.BINANCE, cfg: Optional[AppConfig] = None):
+        self.logger = log.setup_custom_logger("root")
         self.venue = venue
         self.cfg = cfg
         self._shadow_books: Dict[int, "ShadowBook"] = {}  # strategy_id -> ShadowBook
@@ -72,7 +70,7 @@ class Portfolio:
     def register_shadow_book(self, shadow_book: "ShadowBook") -> None:
         """Register a ShadowBook for aggregation reporting."""
         self._shadow_books[shadow_book.strategy_id] = shadow_book
-        logger.info(
+        self.logger.info(
             f"[Portfolio@{self.venue.value}] Registered ShadowBook "
             f"for strategy {shadow_book.strategy_id}"
         )
@@ -222,12 +220,12 @@ class Portfolio:
                 mark_prices={},
                 num_fills=0,
             )
-            logger.info(
+            self.logger.info(
                 f"[Portfolio@{self.venue.value}] Snapshot saved: "
                 f"nav={self._nav:.2f} cash={self._cash:.2f} strategies={len(self._shadow_books)}"
             )
         except Exception as e:
-            logger.error(f"[Portfolio@{self.venue.value}] Failed to save snapshot: {e}", exc_info=True)
+            self.logger.error(f"[Portfolio@{self.venue.value}] Failed to save snapshot: {e}", exc_info=True)
 
     def __str__(self) -> str:
         return (

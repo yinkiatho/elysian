@@ -14,9 +14,6 @@ from elysian_core.core.order import Order
 from elysian_core.core.market_data import OrderBook
 import elysian_core.utils.logger as log
 
-logger = log.setup_custom_logger("root")
-
-
 class AbstractDataFeed(ABC):
     """
     Base class for all exchange order-book feeds.
@@ -30,6 +27,7 @@ class AbstractDataFeed(ABC):
     """
 
     def __init__(self, save_data: bool = False, file_dir: Optional[str] = None):
+        self.logger = log.setup_custom_logger("root")
         self._name: Optional[str] = None
         self._interval: Optional[str] = None
         self._data: Optional[OrderBook] = None
@@ -181,7 +179,7 @@ class AbstractDataFeed(ABC):
 
                 await asyncio.sleep(1)
             except Exception as e:
-                logger.error(f"[{self._name}] update_current_stats error: {e}")
+                self.logger.error(f"[{self._name}] update_current_stats error: {e}")
                 break
 
     # ── Periodic CSV logging ──────────────────────────────────────────────────
@@ -193,10 +191,10 @@ class AbstractDataFeed(ABC):
                     snapshot = self._full_df.copy()
                     path = Path(self.file_dir) / f"{self._name}_ob.csv"
                     snapshot.to_csv(path)
-                    logger.info(f"[{self._name}] OB snapshot saved to {path}")
+                    self.logger.info(f"[{self._name}] OB snapshot saved to {path}")
                 await asyncio.sleep(interval_secs)
             except Exception as e:
-                logger.error(f"[{self._name}] periodically_log_data error: {e}")
+                self.logger.error(f"[{self._name}] periodically_log_data error: {e}")
                 break
 
     async def _append_to_df(self, ob: OrderBook):
@@ -242,6 +240,7 @@ class AbstractKlineFeed(ABC):
     """
 
     def __init__(self, save_data: bool = False, file_dir: Optional[str] = None):
+        self.logger = log.setup_custom_logger("root")
         self._name: Optional[str] = None
         self._interval: Optional[str] = None
         self._kline: Optional[Any] = None
@@ -290,6 +289,7 @@ class AbstractClientManager(ABC):
     """
 
     def __init__(self):
+        self.logger = log.setup_custom_logger("root")
         self._running: bool = False
         self._active_feeds: Dict[str, Any] = {}
         self._queue: asyncio.Queue = asyncio.Queue()
@@ -373,8 +373,8 @@ class SpotExchangeConnector(ABC):
                        file_path: Optional[str] = None,
                        kline_manager: Optional[KlineClientManager]= None,
                        ob_manager: Optional[OrderBookClientManager] = None):
-        
-        # Initit 
+        self.logger = log.setup_custom_logger("root")
+        # Initit
         self._api_key = api_key
         self._api_secret = api_secret
         self._symbols = symbols
@@ -437,7 +437,7 @@ class SpotExchangeConnector(ABC):
         base_asset  = info.get("base_asset")
         quote_asset = info.get("quote_asset")
         if not base_asset or not quote_asset:
-            logger.error(f"[{symbol}] order_health_check: symbol info not found")
+            self.logger.error(f"[{symbol}] order_health_check: symbol info not found")
             return False
 
         price = self.last_price(symbol) or 0.0
@@ -445,7 +445,7 @@ class SpotExchangeConnector(ABC):
         estimated_notional = price * abs(quantity) if not use_quote_order_qty else abs(quantity)
 
         if estimated_notional < min_notional:
-            logger.error(
+            self.logger.error(
                 f"[{symbol}] Estimated notional {estimated_notional:.4f} < min {min_notional}"
             )
             return False
@@ -453,26 +453,26 @@ class SpotExchangeConnector(ABC):
         if not use_quote_order_qty:
             if side == Side.BUY:
                 if self._balances.get(quote_asset, 0.0) < price * abs(quantity):
-                    logger.error(
+                    self.logger.error(
                         f"[{symbol}] Insufficient {quote_asset} to BUY {quantity} {base_asset}"
                     )
                     return False
             else:
                 if self._balances.get(base_asset, 0.0) < abs(quantity):
-                    logger.error(
+                    self.logger.error(
                         f"[{symbol}] Insufficient {base_asset} to SELL {quantity}"
                     )
                     return False
         else:
             if side == Side.BUY:
                 if self._balances.get(quote_asset, 0.0) < abs(quantity):
-                    logger.error(
+                    self.logger.error(
                         f"[{symbol}] Insufficient {quote_asset} for quoteOrderQty={quantity}"
                     )
                     return False
             else:
                 if self._balances.get(base_asset, 0.0) < price * abs(quantity):
-                    logger.error(
+                    self.logger.error(
                         f"[{symbol}] Insufficient {base_asset} for quoteOrderQty SELL"
                     )
                     return False
@@ -512,7 +512,7 @@ class SpotExchangeConnector(ABC):
                 await self.refresh_balances()
                 await asyncio.sleep(interval_secs)
             except Exception as e:
-                logger.error(f"{name} Balance monitoring error: {e}")
+                self.logger.error(f"{name} Balance monitoring error: {e}")
                 break
             
     def get_balance(self, asset: str) -> float:
@@ -635,7 +635,7 @@ class SpotExchangeConnector(ABC):
                 #print(output_str)
                 await asyncio.sleep(poll_interval)
             except Exception as e:
-                logger.error(f"Snapshot monitoring error: {e}")
+                self.logger.error(f"Snapshot monitoring error: {e}")
                 break
         
     async def cancel_all_orders(self, symbol: str):
@@ -666,7 +666,7 @@ class FuturesExchangeConnector(ABC):
                        kline_manager: Optional[KlineClientManager] = None,
                        ob_manager: Optional[OrderBookClientManager] = None,
                        default_leverage: int = 1):
-
+        self.logger = log.setup_custom_logger("root")
         # Common state (mirrors SpotExchangeConnector)
         self._api_key = api_key
         self._api_secret = api_secret
@@ -738,7 +738,7 @@ class FuturesExchangeConnector(ABC):
                 await self.refresh_balances()
                 await asyncio.sleep(interval_secs)
             except Exception as e:
-                logger.error(f"{name} Balance monitoring error: {e}")
+                self.logger.error(f"{name} Balance monitoring error: {e}")
                 break
 
     def get_balance(self, asset: str) -> float:
@@ -886,5 +886,5 @@ class FuturesExchangeConnector(ABC):
                 print(output_str)
                 await asyncio.sleep(poll_interval)
             except Exception as e:
-                logger.error(f"Snapshot monitoring error: {e}")
+                self.logger.error(f"Snapshot monitoring error: {e}")
                 break

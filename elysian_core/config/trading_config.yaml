@@ -20,7 +20,6 @@ futures:
   venues: []
 
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Portfolio Config at the Asset-Type Exchange Level (shared state across all pipeline stages)
 # Also contains the Risk Management for the GlobalExchange Level Risk Config but to be ignored for now

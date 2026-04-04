@@ -24,8 +24,6 @@ from elysian_core.db.models import CexTrade
 import elysian_core.utils.logger as log
 
 
-logger = log.setup_custom_logger("root")
-
 _STABLECOINS = frozenset({"USDC", "USDT", "BUSD"})
 
 # Map raw Binance futures order type strings → OrderType enum
@@ -110,11 +108,11 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
         try:
             self.user_data_manager.register(self._handle_user_data)
             await self.user_data_manager.start()
-            logger.info("Futures user data stream started")
+            self.logger.info("Futures user data stream started")
         except Exception as e:
-            logger.error(f"Failed to start futures user data stream: {e}")
+            self.logger.error(f"Failed to start futures user data stream: {e}")
 
-        logger.info("BinanceFuturesExchange initialised.")
+        self.logger.info("BinanceFuturesExchange initialised.")
 
     async def _fetch_symbol_info(self, symbol: str):
         info = await self._client.futures_symbol_info(symbol)
@@ -134,32 +132,32 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
             "base_asset": info.get("baseAsset", ""),
             "quote_asset": info.get("quoteAsset", ""),
         }
-        logger.info(f"[{symbol}] Futures step={step_size} min_notional={min_notional} tick={tick_size}")
+        self.logger.info(f"[{symbol}] Futures step={step_size} min_notional={min_notional} tick={tick_size}")
 
     # ── Leverage & Margin ─────────────────────────────────────────────────────
     async def set_leverage(self, symbol: str, leverage: int):
         try:
             await self._client.futures_change_leverage(symbol=symbol, leverage=leverage)
             self._leverages[symbol] = leverage
-            logger.info(f"[{symbol}] Leverage set to {leverage}x")
+            self.logger.info(f"[{symbol}] Leverage set to {leverage}x")
         except Exception as e:
-            logger.error(f"[{symbol}] Failed to set leverage: {e}")
+            self.logger.error(f"[{symbol}] Failed to set leverage: {e}")
 
     async def set_margin_type(self, symbol: str, margin_type: str):
         """Set margin type: 'ISOLATED' or 'CROSSED'."""
         try:
             await self._client.futures_change_margin_type(symbol=symbol, marginType=margin_type)
             self._margin_types[symbol] = margin_type
-            logger.info(f"[{symbol}] Margin type set to {margin_type}")
+            self.logger.info(f"[{symbol}] Margin type set to {margin_type}")
         except BinanceAPIException as e:
             # -4046 means margin type already set — not an error
             if e.code == -4046:
                 self._margin_types[symbol] = margin_type
-                logger.debug(f"[{symbol}] Margin type already {margin_type}")
+                self.logger.debug(f"[{symbol}] Margin type already {margin_type}")
             else:
-                logger.error(f"[{symbol}] Failed to set margin type: {e}")
+                self.logger.error(f"[{symbol}] Failed to set margin type: {e}")
         except Exception as e:
-            logger.error(f"[{symbol}] Failed to set margin type: {e}")
+            self.logger.error(f"[{symbol}] Failed to set margin type: {e}")
 
     # ── Account ───────────────────────────────────────────────────────────────
     async def refresh_balances(self):
@@ -171,7 +169,7 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
             # Also update positions while we have the data
             self._update_positions_from_account(account)
         except Exception as e:
-            logger.error(f"Failed to refresh futures account: {e}")
+            self.logger.error(f"Failed to refresh futures account: {e}")
 
     async def refresh_positions(self):
         """Refresh positions only (uses same endpoint as balances)."""
@@ -179,7 +177,7 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
             account = await self._client.futures_account()
             self._update_positions_from_account(account)
         except Exception as e:
-            logger.error(f"Failed to refresh futures positions: {e}")
+            self.logger.error(f"Failed to refresh futures positions: {e}")
 
     def _update_positions_from_account(self, account: dict):
         """Extract position data from a futures_account() response."""
@@ -205,7 +203,7 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
         elif et == "ORDER_TRADE_UPDATE":
             self._handle_order_trade_update(msg)
         elif et == "MARGIN_CALL":
-            logger.warning(f"MARGIN CALL received: {msg}")
+            self.logger.warning(f"MARGIN CALL received: {msg}")
         elif et == "ACCOUNT_CONFIG_UPDATE":
             self._handle_account_config_update(msg)
 
@@ -239,7 +237,7 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
             else:
                 self._positions.pop(symbol, None)
 
-        logger.info(f"ACCOUNT_UPDATE applied: {len(account_data.get('B', []))} balance(s), {len(account_data.get('P', []))} position(s)")
+        self.logger.info(f"ACCOUNT_UPDATE applied: {len(account_data.get('B', []))} balance(s), {len(account_data.get('P', []))} position(s)")
 
     def _handle_order_trade_update(self, msg: dict):
         """
@@ -268,7 +266,7 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
 
         internal_status = _BINANCE_STATUS.get(raw_status)
         if internal_status is None:
-            logger.warning(f"[{symbol}] Unknown futures order status '{raw_status}' for order {order_id}")
+            self.logger.warning(f"[{symbol}] Unknown futures order status '{raw_status}' for order {order_id}")
             return
 
         symbol_orders = self._open_orders.get(symbol, {})
@@ -295,13 +293,13 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
                 last_updated_timestamp=int(msg.get("E", 0)),
             )
             self._open_orders[symbol][order_id] = order
-            logger.info(f"[{symbol}] New futures order registered: {order}")
+            self.logger.info(f"[{symbol}] New futures order registered: {order}")
             return
 
         # ── Update existing order ────────────────────────────────────────────
         order = symbol_orders.get(order_id)
         if order is None:
-            logger.warning(f"[{symbol}] ORDER_TRADE_UPDATE for unknown order {order_id} (status={raw_status}), skipping")
+            self.logger.warning(f"[{symbol}] ORDER_TRADE_UPDATE for unknown order {order_id} (status={raw_status}), skipping")
             return
 
         cum_filled_qty = float(o.get("z", 0))
@@ -314,12 +312,12 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
         order.commission_asset = o.get("N") or order.commission_asset
         order.status = internal_status
 
-        logger.info(f"[{symbol}] Futures order updated: {order}")
+        self.logger.info(f"[{symbol}] Futures order updated: {order}")
 
         # Remove terminal orders from open-orders registry
         if not order.is_active:
             self._open_orders[symbol].pop(order_id, None)
-            logger.info(f"[{symbol}] Futures order {order_id} removed from open orders (status={raw_status})")
+            self.logger.info(f"[{symbol}] Futures order {order_id} removed from open orders (status={raw_status})")
 
     def _handle_account_config_update(self, msg: dict):
         """Handle ACCOUNT_CONFIG_UPDATE — leverage or multi-asset mode changes."""
@@ -328,7 +326,7 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
             symbol = ac.get("s")
             leverage = int(ac.get("l", self._default_leverage))
             self._leverages[symbol] = leverage
-            logger.info(f"[{symbol}] Leverage updated to {leverage}x via stream")
+            self.logger.info(f"[{symbol}] Leverage updated to {leverage}x via stream")
 
     # ── Order Health Check ────────────────────────────────────────────────────
     def order_health_check(self, symbol: str, side: Side, quantity: float) -> bool:
@@ -338,7 +336,7 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
         min_notional = self._token_infos.get(symbol, {}).get("min_notional", 0.0)
 
         if notional < min_notional:
-            logger.error(f"[{symbol}] Estimated notional {notional:.4f} < min {min_notional}")
+            self.logger.error(f"[{symbol}] Estimated notional {notional:.4f} < min {min_notional}")
             return False
 
         # Check approximate margin availability (wallet balance in quote)
@@ -348,7 +346,7 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
         available = self._balances.get(quote_asset, 0.0)
 
         if available < required_margin:
-            logger.error(
+            self.logger.error(
                 f"[{symbol}] Insufficient margin for {side.value} {quantity}. "
                 f"Need ~{required_margin:.2f} {quote_asset} (at {leverage}x), have {available:.2f}"
             )
@@ -389,13 +387,13 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
                 last_updated_timestamp=resp.get("updateTime"),
             )
             self._open_orders[symbol][order_id] = order
-            logger.info(f"Futures limit order placed: {order}")
+            self.logger.info(f"Futures limit order placed: {order}")
             return order
 
         except BinanceAPIException as e:
-            logger.error(f"[{symbol}] place_limit_order API error: {e}")
+            self.logger.error(f"[{symbol}] place_limit_order API error: {e}")
         except Exception as e:
-            logger.error(f"[{symbol}] place_limit_order error: {e}")
+            self.logger.error(f"[{symbol}] place_limit_order error: {e}")
 
     async def place_stop_order(
         self, symbol: str, side: Side, quantity: float, stop_price: float,
@@ -428,13 +426,13 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
                 last_updated_timestamp=resp.get("updateTime"),
             )
             self._open_orders[symbol][order_id] = order
-            logger.info(f"Futures stop order placed: {order}")
+            self.logger.info(f"Futures stop order placed: {order}")
             return order
 
         except BinanceAPIException as e:
-            logger.error(f"[{symbol}] place_stop_order API error: {e}")
+            self.logger.error(f"[{symbol}] place_stop_order API error: {e}")
         except Exception as e:
-            logger.error(f"[{symbol}] place_stop_order error: {e}")
+            self.logger.error(f"[{symbol}] place_stop_order error: {e}")
 
     async def place_take_profit_order(
         self, symbol: str, side: Side, quantity: float, stop_price: float,
@@ -467,13 +465,13 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
                 last_updated_timestamp=resp.get("updateTime"),
             )
             self._open_orders[symbol][order_id] = order
-            logger.info(f"Futures take-profit order placed: {order}")
+            self.logger.info(f"Futures take-profit order placed: {order}")
             return order
 
         except BinanceAPIException as e:
-            logger.error(f"[{symbol}] place_take_profit_order API error: {e}")
+            self.logger.error(f"[{symbol}] place_take_profit_order API error: {e}")
         except Exception as e:
-            logger.error(f"[{symbol}] place_take_profit_order error: {e}")
+            self.logger.error(f"[{symbol}] place_take_profit_order error: {e}")
 
     async def place_market_order(
         self,
@@ -492,7 +490,7 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
             reduce_only: If True, only reduce an existing position
         """
         if not self.order_health_check(symbol, side, quantity):
-            logger.error(f"[{symbol}] Futures market order health check failed. Order not placed.")
+            self.logger.error(f"[{symbol}] Futures market order health check failed. Order not placed.")
             return
 
         price = self.last_price(symbol) or 0.0
@@ -503,7 +501,7 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
             step = self._token_infos.get(symbol, {}).get("step_size", 0.001)
             qty = round_step_size(abs(quantity), step)
 
-            logger.info(f"[{symbol}] Futures Market {side.value.upper()} qty={qty} (~{qty * price:.2f} {quote_asset})")
+            self.logger.info(f"[{symbol}] Futures Market {side.value.upper()} qty={qty} (~{qty * price:.2f} {quote_asset})")
 
             resp = await self._client.futures_create_order(
                 symbol=symbol,
@@ -521,7 +519,7 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
             side_str = str(resp["side"])
             comm_asset = resp["fills"][0]["commissionAsset"] if resp.get("fills") else quote_asset
 
-            logger.success(
+            self.logger.success(
                 f"[{symbol}] Futures Filled: {side_str} {total_base_quantity} @ {avg_price:.6f} "
                 f"comm={total_comm} {comm_asset}"
             )
@@ -541,18 +539,18 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
             ))
 
         except BinanceAPIException as e:
-            logger.error(f"[{symbol}] place_market_order API error: {e}")
+            self.logger.error(f"[{symbol}] place_market_order API error: {e}")
         except Exception as e:
-            logger.error(f"[{symbol}] place_market_order error: {e}")
+            self.logger.error(f"[{symbol}] place_market_order error: {e}")
 
     async def cancel_order(self, symbol: str, order_id: str):
         """Cancel an active futures order by id."""
         try:
             result = await self._client.futures_cancel_order(symbol=symbol, orderId=int(order_id))
             self._open_orders[symbol].pop(order_id, None)
-            logger.info(f"[{symbol}] Futures order {order_id} cancelled: {result}")
+            self.logger.info(f"[{symbol}] Futures order {order_id} cancelled: {result}")
         except Exception as e:
-            logger.error(f"[{symbol}] cancel_order error: {e}")
+            self.logger.error(f"[{symbol}] cancel_order error: {e}")
 
     async def get_open_orders(self, symbol: str):
         """Fetch and reconcile open orders for a specific symbol."""
@@ -599,14 +597,14 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
             self._open_orders[symbol] = refreshed
 
         except Exception as e:
-            logger.error(f"[{symbol}] get_open_orders error: {e}")
+            self.logger.error(f"[{symbol}] get_open_orders error: {e}")
 
     # ── Position Management ───────────────────────────────────────────────────
     async def close_position(self, symbol: str):
         """Close entire position for a symbol via market order."""
         position = self.get_position(symbol)
         if not position:
-            logger.warning(f"[{symbol}] No position to close")
+            self.logger.warning(f"[{symbol}] No position to close")
             return
 
         amount = position["amount"]
@@ -621,9 +619,9 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
                 quantity=qty,
                 reduceOnly=True,
             )
-            logger.info(f"[{symbol}] Position closed: {resp}")
+            self.logger.info(f"[{symbol}] Position closed: {resp}")
         except Exception as e:
-            logger.error(f"[{symbol}] Failed to close position: {e}")
+            self.logger.error(f"[{symbol}] Failed to close position: {e}")
 
     # ── Trade Recording ───────────────────────────────────────────────────────
     async def _record_trade(
@@ -662,9 +660,9 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
                 order_side=_BINANCE_SIDE.get(side_str, Side.BUY),
                 order_type=order_type,
             )
-            logger.info(f"Futures trade recorded at {ts.strftime('%Y-%m-%d_%H-%M-%S')}")
+            self.logger.info(f"Futures trade recorded at {ts.strftime('%Y-%m-%d_%H-%M-%S')}")
         except Exception as e:
-            logger.error(f"_record_trade DB error: {e}")
+            self.logger.error(f"_record_trade DB error: {e}")
 
     # ── Run ───────────────────────────────────────────────────────────────────
     async def run(self):
@@ -678,7 +676,7 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
         asyncio.create_task(self.monitor_open_orders())
         asyncio.create_task(self.print_snapshot())
         await asyncio.sleep(0.5)   # let first account fetch settle
-        logger.info("BinanceFuturesExchange running.")
+        self.logger.info("BinanceFuturesExchange running.")
 
     async def cleanup(self):
         """Cleanup client managers and authenticated client."""
@@ -696,4 +694,4 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
             await self._client.close_connection()
             self._client = None
 
-        logger.info("BinanceFuturesExchange cleanup completed.")
+        self.logger.info("BinanceFuturesExchange cleanup completed.")

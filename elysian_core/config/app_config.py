@@ -352,6 +352,8 @@ def load_strategy_yaml(yaml_path: str) -> StrategyConfig:
     
     s = replace_placeholders(s, place_holders)
     risk_config = _build_risk_config(s.get("risk", {}))
+    
+    
     return StrategyConfig(
         strategy_id=s.get("strategy_id"),
         strategy_name=s.get("strategy_name", ""),

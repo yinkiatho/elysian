@@ -35,9 +35,6 @@ import elysian_core.utils.logger as log
 
 _STABLECOINS = frozenset({"USDT", "USDC", "BUSD"})
 
-logger = log.setup_custom_logger("root")
-
-
 class ShadowBook:
     """Per-strategy virtual position and cash ledger.
 
@@ -51,9 +48,12 @@ class ShadowBook:
         Default venue for positions created by fills.
     """
 
-    def __init__(self, strategy_id: int, 
-                       venue: Venue = Venue.BINANCE):
+    def __init__(self, strategy_id: int,
+                       venue: Venue = Venue.BINANCE,
+                       strategy_name: str = ""):
         self._strategy_id = strategy_id
+        self._strategy_name = strategy_name or f"strategy_{strategy_id}"
+        self.logger = log.setup_custom_logger(f"{self._strategy_name}_{strategy_id}")
         self._venue = venue
 
         # Position state
@@ -130,7 +130,7 @@ class ShadowBook:
                         entry_price = p
                         self._mark_prices[symbol] = p
                 except Exception as e:
-                    logger.warning(f"[ShadowBook-{self._strategy_id}] Failed to get price for {symbol} during sync: {e}")
+                    self.logger.warning(f"[ShadowBook-{self._strategy_id}] Failed to get price for {symbol} during sync: {e}")
             self._positions[symbol] = Position(
                 symbol=symbol, venue=self._venue, quantity=qty, avg_entry_price=entry_price
             )
@@ -143,7 +143,7 @@ class ShadowBook:
                     if p and p > 0:
                         self._mark_prices[sym] = p
                 except Exception:
-                    logger.warning(f"[ShadowBook-{self._strategy_id}] Failed to get price for {sym} during sync")
+                    self.logger.warning(f"[ShadowBook-{self._strategy_id}] Failed to get price for {sym} during sync")
 
         # Wrap open orders as ActiveOrder with _prev_filled seeded to avoid double-counting
         for sym, orders in exchange._open_orders.items():
@@ -162,7 +162,7 @@ class ShadowBook:
 
         self._refresh_derived()
         self._peak_equity = max(self._peak_equity, self._nav)
-        logger.info(
+        self.logger.info(
             f"[ShadowBook-{self._strategy_id}] Synced from exchange: "
             f"cash={self._cash:.2f} ({self._cash_dict}), "
             f"{len(self._positions)} positions, "
@@ -210,7 +210,7 @@ class ShadowBook:
         # KLINE from shared bus (market data)
         self._event_bus.subscribe(EventType.KLINE, self._on_kline)
         
-        logger.info(
+        self.logger.info(
             f"[ShadowBook-{self._strategy_id}] started in sub-account mode — "
             f"ORDER_UPDATE+BALANCE_UPDATE on private bus, KLINE on shared bus"
         )
@@ -224,7 +224,7 @@ class ShadowBook:
             self._private_event_bus.unsubscribe(EventType.ORDER_UPDATE, self._on_order_update)
             self._private_event_bus.unsubscribe(EventType.BALANCE_UPDATE, self._on_balance_update)
             self._private_event_bus = None
-        logger.info(f"[ShadowBook-{self._strategy_id}] stopped")
+        self.logger.info(f"[ShadowBook-{self._strategy_id}] stopped")
 
     async def _on_kline(self, event):
         """Update mark prices from kline close price and refresh derived metrics."""
@@ -541,7 +541,7 @@ class ShadowBook:
             timestamp=int(time.time() * 1000),
         ))
 
-        logger.debug(
+        self.logger.debug(
             f"[ShadowBook-{self._strategy_id}] Fill: {side.value} {symbol} "
             f"qty={abs(qty_delta):.6f} @ {price:.4f} "
             f"(pos {old_qty:.6f} -> {new_qty:.6f})"
@@ -588,7 +588,7 @@ class ShadowBook:
         if order_id in self._active_orders:
             return  # idempotent
         if intent.side == Side.BUY and intent.price is None:
-            logger.warning(
+            self.logger.warning(
                 f"[ShadowBook] lock_for_order: LIMIT BUY {order_id} has price=None, skipping lock"
             )
             return
@@ -698,13 +698,13 @@ class ShadowBook:
                 mark_prices=dict(self._mark_prices),
                 num_fills=len(self._fills),
             )
-            logger.info(
+            self.logger.info(
                 f"[ShadowBook-{self._strategy_id}] Snapshot saved: nav={self._nav:.2f} "
                 f"cash={self._cash:.2f} dd={self._max_drawdown:.4%} "
                 f"positions={len(positions_json)}"
             )
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 f"[ShadowBook-{self._strategy_id}] Failed to save snapshot: {e}",
                 exc_info=True,
             )

@@ -1042,3 +1042,291 @@ async def test_on_kline_updates_price_series():
 - `on_kline`: fires ~1 time/min per symbol (1m interval). Can tolerate heavier logic.
 - `compute_weights()`: runs once per rebalance cycle. Can be more expensive but should remain deterministic and side-effect free.
 - `run_heavy(fn, *args)`: adds ~1–5ms process boundary overhead. Reserve for genuinely CPU-bound work (numpy, ML inference). `fn` must be a top-level picklable function — not a lambda, method, or closure.
+
+---
+
+## 14. End-to-End Tutorial: Creating and Running a Strategy
+
+This section walks through every step required to go from zero to a live-running strategy, and documents the critical gotchas that are easy to miss.
+
+---
+
+### Step 1: Configure your environment
+
+Create a `.env` file in the project root. Each strategy uses a dedicated sub-account identified by `strategy_id`:
+
+```bash
+# .env
+# Sub-account for strategy_id=0 on Binance
+BINANCE_API_KEY_0=your_api_key_here
+BINANCE_API_SECRET_0=your_api_secret_here
+
+# Add more strategies with incrementing IDs
+BINANCE_API_KEY_1=your_second_api_key
+BINANCE_API_SECRET_1=your_second_api_secret
+```
+
+The env var pattern is always `{VENUE}_API_KEY_{strategy_id}` / `{VENUE}_API_SECRET_{strategy_id}`. The venue prefix must match the `venue` field in your strategy YAML (e.g., `BINANCE`, `ASTER`). `StrategyConfig.sub_account_api_key` is populated automatically from these env vars in `load_strategy_yaml()` ([app_config.py:367](elysian_core/config/app_config.py#L367)).
+
+---
+
+### Step 2: Create the strategy YAML config
+
+Create a new file in `elysian_core/config/strategies/`, e.g. `strategy_002_my_strategy.yaml`:
+
+```yaml
+strategy_id: 2                            # Must be unique across all strategies
+strategy_name: "my_strategy_binance_spot"
+class: "elysian_core.strategy.my_strategy.MyStrategy"  # Fully qualified path
+asset_type: "Spot"
+venue: "Binance"
+venues:
+  - "Binance"
+
+max_heavy_workers: 4
+
+# Leave empty to load all symbols from config.json for this venue+asset_type
+# Or provide an explicit list to restrict the universe
+symbols: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
+
+risk:
+  max_weight_per_asset: 0.25
+  min_weight_per_asset: 0.0
+  max_total_exposure: 1.0
+  min_cash_weight: 0.05
+  max_turnover_per_rebalance: 0.5
+  max_leverage: 1.0
+  max_short_weight: 0.0
+  min_order_notional: 10.0
+  max_order_notional: 100000.0
+  min_weight_delta: 0.005
+
+execution_overrides: {}
+portfolio_overrides: {}
+
+params:
+  rebalance_interval_s: 60
+```
+
+---
+
+### Step 3: Create the strategy class
+
+Create `elysian_core/strategy/my_strategy.py`. See Section 11 for the full boilerplate template.
+
+**The minimum viable strategy:**
+
+```python
+from elysian_core.strategy.base_strategy import SpotStrategy
+from elysian_core.core.events import KlineEvent
+import elysian_core.utils.logger as log
+import time
+
+logger = log.setup_custom_logger("MyStrategy")
+
+class MyStrategy(SpotStrategy):
+
+    def __init__(self, *args, symbols: set = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._symbols: set = set(symbols) if symbols else set()
+        self._rebalance_interval = 60
+        self._last_rebalance_ts: float = 0.0
+
+    async def on_start(self):
+        if not self._symbols and self.cfg:
+            self._symbols = set(self.cfg.symbols.symbols_for("binance", "spot"))
+        logger.info(f"[MyStrategy] Started — symbols={self._symbols}")
+
+    async def run_forever(self):
+        if self._rebalance_fsm is not None:
+            self._rebalance_fsm._cooldown_s = self._rebalance_interval
+        await self._stop_event.wait()
+
+    async def on_kline(self, event: KlineEvent):
+        if event.symbol not in self._symbols:
+            return
+        now = time.monotonic()
+        if now - self._last_rebalance_ts > self._rebalance_interval:
+            self._last_rebalance_ts = now
+            await self.request_rebalance()
+
+    def compute_weights(self, **ctx) -> dict:
+        if ctx.get('convert_all_base', False):
+            return {}                     # return {} to go all-cash, not {'USDT': 1.0}
+        return {"BTCUSDT": 0.5, "ETHUSDT": 0.4}  # 10% implicit cash
+```
+
+---
+
+### Step 4: Register the strategy in run_strategy.py
+
+Open [elysian_core/run_strategy.py](elysian_core/run_strategy.py) and add your YAML path to the `strategy_config_yamls` list in the `__main__` block ([run_strategy.py:1044](elysian_core/run_strategy.py#L1044)):
+
+```python
+if __name__ == "__main__":
+    trading_config_yaml = 'elysian_core/config/trading_config.yaml'
+    strategy_config_yamls = [
+        'elysian_core/config/strategies/strategy_000_event_driven.yaml',
+        'elysian_core/config/strategies/strategy_001_test_print.yaml',
+        'elysian_core/config/strategies/strategy_002_my_strategy.yaml',  # <-- add this
+    ]
+    asyncio.run(run_test_strategy(
+        trading_config_yaml=trading_config_yaml,
+        strategy_config_yamls=strategy_config_yamls,
+    ))
+```
+
+---
+
+### Step 5: Run the strategy
+
+From the project root:
+
+```bash
+python -m elysian_core.run_strategy
+# or
+python elysian_core/run_strategy.py
+```
+
+Logs are written to `logs/<run_timestamp>/` with one file per strategy name.
+
+---
+
+### Key Entry Points
+
+| Location | What It Does |
+|----------|-------------|
+| [run_strategy.py:1037](elysian_core/run_strategy.py#L1037) `__main__` block | Top-level entry point. Configures YAML paths and calls `asyncio.run(run_test_strategy(...))`. |
+| [run_strategy.py:883](elysian_core/run_strategy.py#L883) `StrategyRunner.run()` | Main async orchestrator. Runs all setup stages sequentially and then launches all strategies concurrently via `asyncio.gather`. |
+| [run_strategy.py:727](elysian_core/run_strategy.py#L727) `StrategyRunner.setup_strategy()` | Wires a single strategy with its ShadowBook, PortfolioOptimizer, ExecutionEngine, and private EventBus. Called once per strategy during startup. |
+| [base_strategy.py:367](elysian_core/strategy/base_strategy.py#L367) `SpotStrategy.compute_weights()` | **Your alpha logic lives here.** Called by the RebalanceFSM on every rebalance cycle. |
+| [base_strategy.py:150](elysian_core/strategy/base_strategy.py#L150) `SpotStrategy.start()` | Registers all EventBus subscriptions and constructs the RebalanceFSM. Called by the runner — do not call manually. |
+| [run_strategy.py:704](elysian_core/run_strategy.py#L704) `StrategyRunner._setup_pipeline()` | Initializes Portfolio, PortfolioOptimizer, and ExecutionEngine for each (asset_type, venue) pair. Called before `setup_strategy()`. |
+
+### Runner State Machine
+
+The runner transitions through these states:
+
+```
+CREATED → CONFIGURING → CONNECTING → SYNCING → RUNNING → STOPPING → STOPPED
+                                                                    → FAILED
+```
+
+| State | What Happens |
+|-------|-------------|
+| `CONFIGURING` | Loads symbols, tokens, and config from YAML/JSON |
+| `CONNECTING` | Creates exchange connectors; calls `exchange.run()` on each |
+| `SYNCING` | Builds Portfolio, Optimizer, and ExecutionEngine; wires all strategies |
+| `RUNNING` | Launches feed WebSockets and all strategy `run_forever()` coroutines via `asyncio.gather` |
+| `STOPPING` | Stops snapshot tasks; calls `strategy.stop()` on all strategies |
+
+---
+
+### Critical Gotchas
+
+#### USDT / Stablecoins Are NOT a Tradeable Weight
+
+The weight dict returned by `compute_weights()` must only contain base asset pairs (e.g. `BTCUSDT`, `ETHUSDT`). **Do not include `USDT`, `USDC`, or `BUSD` as weight keys.**
+
+Cash is always implicit:
+
+```
+cash_weight = 1.0 - sum(weights.values())
+```
+
+If you want to go all-cash, return `{}` or `None` — not `{'USDT': 1.0}`. Returning a stablecoin as a weight key will cause the ExecutionEngine to attempt to place an order for `USDTUSDT`, which does not exist.
+
+```python
+# WRONG — do not do this
+def compute_weights(self, **ctx) -> dict:
+    return {"USDT": 1.0}   # ← this will error at execution time
+
+# CORRECT — return empty to go all-cash
+def compute_weights(self, **ctx) -> dict:
+    return {}              # ← framework treats this as 100% cash
+```
+
+The `_STABLECOINS` constant in [base_strategy.py:54](elysian_core/strategy/base_strategy.py#L54) and [shadow_book.py:36](elysian_core/core/shadow_book.py#L36) (`frozenset({"USDT", "USDC", "BUSD"})`) is used internally for cash accounting, not for weight allocation.
+
+#### `strategy_id` Must Be Unique and Match Env Vars
+
+The `strategy_id` in the YAML must be unique across all loaded strategies. The ShadowBook, logging, and sub-account API key lookup all key off this integer:
+
+```
+BINANCE_API_KEY_{strategy_id}    # env var loaded by load_strategy_yaml()
+BINANCE_API_SECRET_{strategy_id}
+```
+
+Reusing a `strategy_id` will cause one strategy to overwrite another's ShadowBook and use the wrong API keys.
+
+#### Initialization Goes in `on_start()`, Not `__init__()`
+
+`self.cfg`, `self.strategy_config`, `self._shadow_book`, `self._optimizer`, and `self._execution_engine` are all `None` inside `__init__()`. They are injected by `StrategyRunner.setup_strategy()` before `start()` is called. `on_start()` is the first hook where these are guaranteed to be populated:
+
+```python
+# WRONG
+def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    self._symbols = self.cfg.symbols.symbols_for("binance", "spot")  # ← cfg is None here
+
+# CORRECT
+async def on_start(self):
+    self._symbols = set(self.cfg.symbols.symbols_for("binance", "spot"))  # ← cfg is set here
+```
+
+#### Weight Sum Must Be ≤ 1.0
+
+For `AssetType.SPOT`, all weights must be non-negative (no shorts) and must sum to ≤ 1.0. The `PortfolioOptimizer` enforces `max_total_exposure = 1.0` by default — it will scale weights down if the sum exceeds the limit. However, passing weights that already sum to > 1.0 is wasteful because the optimizer will silently clip them.
+
+The conventional pattern is to reserve an explicit cash buffer:
+
+```python
+TARGET_ALLOC = 0.90    # 10% cash buffer
+final_weights = {sym: raw_w * TARGET_ALLOC for sym, raw_w in normalized.items()}
+```
+
+#### One Strategy = One Exchange + One Asset Type
+
+`SpotStrategy` is scoped to a single (venue, asset_type) pair. The `venues` field in the YAML is a frozenset of venues the strategy *receives events from*, but all order execution happens via the single `private_exchange` wired at setup. A strategy cannot trade on Binance Spot and Aster Spot simultaneously from one instance.
+
+#### Kline Feed Interval Is Fixed at Startup
+
+The `BinanceKlineFeed` interval is hardcoded to `"1s"` in `StrategyRunner._setup_binance_data_feeds()` ([run_strategy.py:341](elysian_core/run_strategy.py#L341)). If your strategy logic requires 1-minute candles, aggregate 60 `on_kline` events yourself rather than expecting the feed to emit 1m candles.
+
+#### `request_rebalance()` Is Idempotent
+
+Calling `request_rebalance()` while the FSM is mid-cycle, in cooldown, or suspended is silently ignored — it returns `False` and has no side effects. There is no queue. You cannot "stack up" rebalance requests. A new cycle only starts when the FSM returns to `IDLE`.
+
+#### Sub-account Mode Is Always Active
+
+The current architecture always runs in sub-account mode: `setup_strategy()` always calls `_create_sub_account_exchange()`, which creates a per-strategy exchange connector with its own API keys and private EventBus. There is no "shared account" fallback. Every strategy must have `BINANCE_API_KEY_{strategy_id}` and `BINANCE_API_SECRET_{strategy_id}` set in `.env`.
+
+---
+
+### Verifying Your Setup
+
+Before going live, run the `PrintEventsStrategy` (Section 10) as `strategy_id=1` to confirm:
+
+1. WebSocket feeds are connecting and emitting klines.
+2. Order updates and balance updates are routing to the correct private EventBus.
+3. The RebalanceFSM is cycling without errors.
+
+Look for these log lines as indicators:
+
+```
+[Runner] Starting strategy runner...
+[Runner] EventBus created
+[Runner] All components and strategies initialized. Starting event loops...
+[Strategy] MyStrategy started — subscribed to 5 event types
+[Strategy] RebalanceFSM initialized for MyStrategy
+```
+
+And after the first rebalance trigger:
+
+```
+[RebalanceFSM] IDLE → COMPUTING
+[RebalanceFSM] COMPUTING → VALIDATING
+[RebalanceFSM] VALIDATING → EXECUTING
+[RebalanceFSM] EXECUTING → COOLDOWN
+[RebalanceFSM] COOLDOWN → IDLE
+```

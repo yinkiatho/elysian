@@ -27,10 +27,8 @@ from elysian_core.core.market_data import Kline, OrderBook
 from elysian_core.db.models import CexTrade
 import elysian_core.utils.logger as log
 
-logger = log.setup_custom_logger("root")
 
 SPOT_BASE_ENDPOINT = "https://sapi.asterdex.com"
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # AsterSpotExchange
@@ -124,7 +122,7 @@ class AsterSpotExchange(SpotExchangeConnector):
         ) as resp:
             body = await resp.json(content_type=None)
             if resp.status >= 400:
-                logger.error(f"Aster API error {resp.status}: {body}")
+                self.logger.error(f"Aster API error {resp.status}: {body}")
                 resp.raise_for_status()
             return body
 
@@ -137,9 +135,9 @@ class AsterSpotExchange(SpotExchangeConnector):
         # Health check
         try:
             await self._request("GET", "/api/v1/ping")
-            logger.info("AsterSpotExchange: ping OK")
+            self.logger.info("AsterSpotExchange: ping OK")
         except Exception as e:
-            logger.warning(f"AsterSpotExchange: ping failed: {e}")
+            self.logger.warning(f"AsterSpotExchange: ping failed: {e}")
 
         for sym in self._symbols:
             await self._fetch_symbol_info(sym)
@@ -149,11 +147,11 @@ class AsterSpotExchange(SpotExchangeConnector):
         try:
             self.user_data_manager.register(self._handle_user_data)
             await self.user_data_manager.start()
-            logger.info("AsterSpotExchange: user data stream started")
+            self.logger.info("AsterSpotExchange: user data stream started")
         except Exception as e:
-            logger.error(f"AsterSpotExchange: failed to start user data stream: {e}")
+            self.logger.error(f"AsterSpotExchange: failed to start user data stream: {e}")
 
-        logger.info("AsterSpotExchange initialised.")
+        self.logger.info("AsterSpotExchange initialised.")
 
 
     async def _fetch_symbol_info(self, symbol: str):
@@ -163,7 +161,7 @@ class AsterSpotExchange(SpotExchangeConnector):
             symbols = data.get("symbols", [])
             info = next((s for s in symbols if s["symbol"] == symbol), None)
             if not info:
-                logger.warning(f"[{symbol}] exchangeInfo: symbol not found")
+                self.logger.warning(f"[{symbol}] exchangeInfo: symbol not found")
                 return
 
             filters = info.get("filters", [])
@@ -189,7 +187,7 @@ class AsterSpotExchange(SpotExchangeConnector):
                 "quote_asset_precision": info.get("quoteAssetPrecision", 8),
             }
         except Exception as e:
-            logger.error(f"[{symbol}] _fetch_symbol_info error: {e}")
+            self.logger.error(f"[{symbol}] _fetch_symbol_info error: {e}")
 
     # ── Account ───────────────────────────────────────────────────────────────
 
@@ -200,7 +198,7 @@ class AsterSpotExchange(SpotExchangeConnector):
             for b in account.get("balances", []):
                 self._balances[b["asset"]] = float(b["free"])
         except Exception as e:
-            logger.error(f"AsterSpotExchange: refresh_balances error: {e}")
+            self.logger.error(f"AsterSpotExchange: refresh_balances error: {e}")
 
     def _handle_user_data(self, msg: dict):
         """Callback invoked by the user-data manager when an event arrives."""
@@ -210,7 +208,7 @@ class AsterSpotExchange(SpotExchangeConnector):
             asset = msg.get("a")
             delta = float(msg.get("d", 0))
             self._balances[asset] = self._balances.get(asset, 0.0) + delta
-            logger.info(f"[{asset}] balance update delta={delta:.6f} new={self._balances[asset]:.6f}")
+            self.logger.info(f"[{asset}] balance update delta={delta:.6f} new={self._balances[asset]:.6f}")
 
         elif et == "outboundAccountPosition":
             for bal in msg.get("B", []):
@@ -218,10 +216,10 @@ class AsterSpotExchange(SpotExchangeConnector):
                 free   = float(bal.get("f", 0))
                 locked = float(bal.get("l", 0))
                 self._balances[asset] = free + locked
-            logger.info("outboundAccountPosition applied to balances")
+            self.logger.info("outboundAccountPosition applied to balances")
 
         elif et == "executionReport":
-            logger.info(
+            self.logger.info(
                 f"Execution report @ "
                 f"{datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))}"
             )
@@ -249,7 +247,7 @@ class AsterSpotExchange(SpotExchangeConnector):
 
         internal_status = _BINANCE_STATUS.get(status)
         if internal_status is None:
-            logger.warning(f"[{symbol}] Unknown order status '{status}' for order {order_id}")
+            self.logger.warning(f"[{symbol}] Unknown order status '{status}' for order {order_id}")
             return
 
         symbol_orders = self._open_orders.get(symbol, {})
@@ -283,13 +281,13 @@ class AsterSpotExchange(SpotExchangeConnector):
                 last_updated_timestamp = int(msg.get("E", 0)),
             )
             self._open_orders[symbol][order_id] = order
-            logger.info(f"[{symbol}] New order registered: {order}")
+            self.logger.info(f"[{symbol}] New order registered: {order}")
             return
 
         # ── Update existing order ─────────────────────────────────────────────
         order = symbol_orders.get(order_id)
         if order is None:
-            logger.warning(
+            self.logger.warning(
                 f"[{symbol}] executionReport for unknown order {order_id} (status={status}), skipping"
             )
             return
@@ -305,22 +303,22 @@ class AsterSpotExchange(SpotExchangeConnector):
         order.commission      += float(msg.get("n", 0))
         order.commission_asset = msg.get("N") or order.commission_asset
         order.status           = internal_status
-        logger.info(f"[{symbol}] Order updated: {order}")
+        self.logger.info(f"[{symbol}] Order updated: {order}")
 
         if not order.is_active:
             self._open_orders[symbol].pop(order_id, None)
-            logger.info(f"[{symbol}] Order {order_id} removed from open orders (status={status})")
+            self.logger.info(f"[{symbol}] Order {order_id} removed from open orders (status={status})")
 
     # ── Deposit / Withdraw (stubs) ────────────────────────────────────────────
 
     async def get_deposit_address(self, coin: str, network: Optional[str] = None) -> Optional[str]:
         """Not supported by Aster spot API — returns None."""
-        logger.warning("get_deposit_address: not supported on Aster spot")
+        self.logger.warning("get_deposit_address: not supported on Aster spot")
         return None
 
     async def deposit_asset(self, coin: str, amount: float, network: Optional[str] = None) -> bool:
         """Not applicable for CEX deposit flow — returns False."""
-        logger.warning("deposit_asset: not supported on Aster spot")
+        self.logger.warning("deposit_asset: not supported on Aster spot")
         return False
 
     async def withdraw_asset(
@@ -332,10 +330,10 @@ class AsterSpotExchange(SpotExchangeConnector):
             params["network"] = network
         try:
             resp = await self._request("POST", "/api/v1/withdraw", params=params, signed=True)
-            logger.info(f"Withdrew {amount} {coin} → {address}  resp={resp}")
+            self.logger.info(f"Withdrew {amount} {coin} → {address}  resp={resp}")
             return True
         except Exception as e:
-            logger.error(f"withdraw_asset error: {e}")
+            self.logger.error(f"withdraw_asset error: {e}")
             return False
 
     # ── Orders ────────────────────────────────────────────────────────────────
@@ -354,10 +352,10 @@ class AsterSpotExchange(SpotExchangeConnector):
         }
         try:
             resp = await self._request("POST", "/api/v1/order", params=params, signed=True)
-            logger.info(f"[{symbol}] Limit order placed: {resp}")
+            self.logger.info(f"[{symbol}] Limit order placed: {resp}")
             return resp
         except Exception as e:
-            logger.error(f"[{symbol}] place_limit_order error: {e}")
+            self.logger.error(f"[{symbol}] place_limit_order error: {e}")
 
     async def place_market_order(
         self,
@@ -368,7 +366,7 @@ class AsterSpotExchange(SpotExchangeConnector):
     ):
         """Place a market order via POST /api/v1/order."""
         if not self.order_health_check(symbol, side, quantity, use_quote_order_qty):
-            logger.error(f"[{symbol}] Market order health check failed.")
+            self.logger.error(f"[{symbol}] Market order health check failed.")
             return
 
         info        = self._token_infos.get(symbol, {})
@@ -385,14 +383,14 @@ class AsterSpotExchange(SpotExchangeConnector):
         if not use_quote_order_qty:
             qty = self._round_step(symbol, abs(quantity))
             params["quantity"] = qty
-            logger.info(
+            self.logger.info(
                 f"[{symbol}] Market {'BUY' if side == Side.BUY else 'SELL'} "
                 f"qty={qty} {base_asset} (~{qty * price:.2f} {quote_asset})"
             )
         else:
             qty = round(abs(quantity), 2)
             params["quoteOrderQty"] = qty
-            logger.info(
+            self.logger.info(
                 f"[{symbol}] Market {'BUY' if side == Side.BUY else 'SELL'} "
                 f"quoteQty={qty:.2f} {quote_asset}"
             )
@@ -408,7 +406,7 @@ class AsterSpotExchange(SpotExchangeConnector):
             side_str         = str(resp.get("side", side.value.upper()))
             comm_asset       = (resp.get("fills") or [{}])[0].get("commissionAsset", quote_asset)
 
-            logger.success(
+            self.logger.success(
                 f"[{symbol}] Filled: {side_str} {total_base_qty:.6f} @ {avg_price:.6f} "
                 f"comm={total_comm} {comm_asset}"
             )
@@ -428,7 +426,7 @@ class AsterSpotExchange(SpotExchangeConnector):
             return resp
 
         except Exception as e:
-            logger.error(f"[{symbol}] place_market_order error: {e}")
+            self.logger.error(f"[{symbol}] place_market_order error: {e}")
 
     async def cancel_order(self, symbol: str, order_id: str):
         """Cancel an active order via DELETE /api/v1/order."""
@@ -438,9 +436,9 @@ class AsterSpotExchange(SpotExchangeConnector):
                 params={"symbol": symbol, "orderId": order_id},
                 signed=True,
             )
-            logger.info(f"[{symbol}] Order {order_id} cancelled: {resp}")
+            self.logger.info(f"[{symbol}] Order {order_id} cancelled: {resp}")
         except Exception as e:
-            logger.error(f"[{symbol}] cancel_order error: {e}")
+            self.logger.error(f"[{symbol}] cancel_order error: {e}")
 
     async def get_open_orders(self, symbol: str):
         """Refresh open orders for a specific symbol from GET /api/v1/openOrders."""
@@ -450,17 +448,17 @@ class AsterSpotExchange(SpotExchangeConnector):
                 params={"symbol": symbol},
                 signed=True,
             )
-            logger.info(f"[{symbol}] Open orders: {len(orders)}")
+            self.logger.info(f"[{symbol}] Open orders: {len(orders)}")
             return orders
         except Exception as e:
-            logger.error(f"[{symbol}] get_open_orders error: {e}")
+            self.logger.error(f"[{symbol}] get_open_orders error: {e}")
 
     async def get_all_open_orders(self):
         """Refresh open orders for all symbols from GET /api/v1/openOrders (no symbol filter)."""
         try:
             all_orders = await self._request("GET", "/api/v1/openOrders", signed=True)
         except Exception as e:
-            logger.error(f"get_all_open_orders error: {e}")
+            self.logger.error(f"get_all_open_orders error: {e}")
             return
 
         self._open_orders.clear()
@@ -504,7 +502,7 @@ class AsterSpotExchange(SpotExchangeConnector):
             )
             self._open_orders[symbol][order_id] = order
 
-        logger.info(
+        self.logger.info(
             f"Refreshed open orders: "
             f"{sum(len(v) for v in self._open_orders.values())} orders "
             f"across {len(self._open_orders)} symbols"
@@ -561,9 +559,9 @@ class AsterSpotExchange(SpotExchangeConnector):
                 order_side  = _BINANCE_SIDE.get(side_str.upper(), Side.BUY),
                 order_type  = order_type,
             )
-            logger.info(f"Trade recorded at {ts.strftime('%Y-%m-%d_%H-%M-%S')}")
+            self.logger.info(f"Trade recorded at {ts.strftime('%Y-%m-%d_%H-%M-%S')}")
         except Exception as e:
-            logger.error(f"_record_trade DB error: {e}")
+            self.logger.error(f"_record_trade DB error: {e}")
 
     # ── Run / Cleanup ─────────────────────────────────────────────────────────
 
@@ -577,7 +575,7 @@ class AsterSpotExchange(SpotExchangeConnector):
         asyncio.create_task(self.monitor_open_orders())
         asyncio.create_task(self.print_snapshot())
         await asyncio.sleep(0.5)
-        logger.info("AsterSpotExchange running.")
+        self.logger.info("AsterSpotExchange running.")
 
     async def cleanup(self):
         """
@@ -595,4 +593,4 @@ class AsterSpotExchange(SpotExchangeConnector):
             await self._session.close()
             self._session = None
 
-        logger.info("AsterSpotExchange cleanup completed.")
+        self.logger.info("AsterSpotExchange cleanup completed.")

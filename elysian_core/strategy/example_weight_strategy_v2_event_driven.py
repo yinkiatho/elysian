@@ -19,13 +19,11 @@ Usage::
 
 from elysian_core.strategy.base_strategy import SpotStrategy
 from elysian_core.core.events import KlineEvent, RebalanceCompleteEvent
-import elysian_core.utils.logger as log
+from elysian_core.objs.numpy_series import NumpySeries
 from collections import deque
 import statistics
 import time
 import numpy as np
-
-logger = log.setup_custom_logger("EventDrivenStrategy")
 
 
 class EventDrivenStrategy(SpotStrategy):
@@ -34,32 +32,30 @@ class EventDrivenStrategy(SpotStrategy):
     - Work at the minute level and track short term momentum rolling statistics
     """
 
-    def __init__(self, *args, 
-                 symbols: set = None, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         
         # Symbols can be passed explicitly or loaded from cfg in on_start
-        self._symbols: set = set(symbols) if symbols else set()
-        self._rebalance_interval = 60  # seconds; also set on FSM cooldown     
-        
-        
-        # Strategy Params and State to write below:
-        self._price_series = {symbol: deque([], maxlen=60*240) for symbol in self._symbols}
-        self._returns_series = {symbol: deque([], maxlen=60*240) for symbol in self._symbols}
-        self._rolling_returns_series = {symbol: deque([], maxlen=60*240) for symbol in self._symbols}
+        self._rebalance_interval = 60  # seconds; also set on FSM cooldown
+
+        # Initialized in on_start after self._symbols is populated by the runner
+        self._price_series = {}
+        self._returns_series = {}
+        self._rolling_returns_series = {}
         self._last_marked_time = None
-        self._symbol_availability_status = {symbol: False for symbol in self._symbols}
+        self._symbol_availability_status = {}
+
 
     async def on_start(self):
         '''
         Strategy specific on start logic to be triggered aside from the common event subscribing and fsm initialization.
         cfg is guaranteed to be set by StrategyRunner.setup_strategy() before start() is called.
         '''
-        # Load symbols from cfg if not explicitly provided at construction
-        if not self._symbols and self.cfg:
-            self._symbols = set(self.cfg.symbols.symbols_for("binance", "spot"))
-
-        logger.info(
+        self._price_series = {symbol: NumpySeries(maxlen=60*240) for symbol in self._symbols}
+        self._returns_series = {symbol: NumpySeries(maxlen=60*240) for symbol in self._symbols}
+        self._rolling_returns_series = {symbol: NumpySeries(maxlen=60*240) for symbol in self._symbols}
+        self._symbol_availability_status = {symbol: False for symbol in self._symbols}
+        self.logger.info(
             f"[EventDriven Momentum Weight Strategy] Started — "
             f"rebalance every {self._rebalance_interval}s, "
             f"symbols={self._symbols}"
@@ -88,7 +84,7 @@ class EventDrivenStrategy(SpotStrategy):
             self._returns_series[event.symbol].append((event.kline.close - last_price) / last_price)
 
             if len(self._returns_series[event.symbol]) >= 30:
-                self._rolling_returns_series[event.symbol].append(statistics.mean(list(self._returns_series[event.symbol])[-30:]))
+                self._rolling_returns_series[event.symbol].append(np.mean(self._returns_series[event.symbol][-30:]))
                 self._symbol_availability_status[event.symbol] = True
                  
         # Check for full availability and past rebalance interval and trigger
@@ -102,10 +98,10 @@ class EventDrivenStrategy(SpotStrategy):
 
         Blocks until stop() is called.
         """
-        logger.info("Initiating EventDriven Strategy")
+        self.logger.info("Initiating EventDriven Strategy")
 
         if self._rebalance_fsm is None:
-            logger.warning(
+            self.logger.warning(
                 "[EventDriven] No RebalanceFSM — optimizer/execution_engine not configured"
             )
             return
@@ -117,7 +113,7 @@ class EventDrivenStrategy(SpotStrategy):
     async def on_rebalance_complete(self, event: RebalanceCompleteEvent):
         r = event.result
         if r.errors:
-            logger.warning(f"[EqualWeight] Rebalance had errors: {r.errors}")
+            self.logger.warning(f"[EqualWeight] Rebalance had errors: {r.errors}")
 
 
     def compute_weights(self, **ctx) -> dict:
@@ -131,10 +127,12 @@ class EventDrivenStrategy(SpotStrategy):
             5. Scale each signal by 1 / rolling_std (inverse volatility).
             6. Normalise the resulting weights so that their sum = target_allocation (0.9).
         Returns a dict {symbol: weight} – missing symbols imply zero weight.
+        
+        # Importantly if Asset_type is Spot, we cannot be short ie. no negative weights
         """
         # --- Kill switch (go 100% cash) ---
         if ctx.get('convert_all_base', False):
-            logger.info("Kill signal received → returning zero weights (100% cash)")
+            self.logger.info("Kill signal received => returning zero weights (100% cash)")
             return {sym: 0.0 for sym in self._symbols}
 
         # --- Parameters ---
@@ -148,7 +146,7 @@ class EventDrivenStrategy(SpotStrategy):
         for sym in self._symbols:
             returns = self._returns_series.get(sym)
             if returns is None or len(returns) < LOOKBACK + 1:
-                logger.debug(f"Insufficient return data for {sym}")
+                self.logger.debug(f"Insufficient return data for {sym}")
                 continue
 
             current_return = returns[-1]
@@ -159,12 +157,12 @@ class EventDrivenStrategy(SpotStrategy):
                 continue
 
             z_score = (current_return - rolling_mean) / rolling_std
-            if abs(z_score) > Z_THRESHOLD:
+            if z_score >= Z_THRESHOLD: # Only take positive signals for long-only strategy
                 signals[sym] = z_score
                 vol_estimates[sym] = rolling_std
 
         if not signals:
-            logger.info("No positive signals above threshold → staying in cash")
+            self.logger.info("No positive signals above threshold, staying in cash")
             return {}
 
         # --- Inverse volatility scaling (risk parity) ---
@@ -178,6 +176,6 @@ class EventDrivenStrategy(SpotStrategy):
             return {}
         
         final_weights = {sym: w / total_adj * TARGET_ALLOC for sym, w in adjusted_weights.items()}
-        logger.info(f"Final weights: {final_weights} (sum = {sum(final_weights.values()):.2f})")
+        self.logger.info(f"Final weights: {final_weights} (sum = {sum(final_weights.values()):.2f})")
         
         return final_weights

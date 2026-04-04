@@ -94,7 +94,8 @@ class StrategyRunner:
         if config_yaml is not None:
             trading_config_yaml = config_yaml
 
-        logger.info(
+        self.logger = setup_custom_logger('root')
+        self.logger.info(
             f'Kickstarted StrategyRunner with trading_config={trading_config_yaml}, '
             f'strategy_yamls={strategy_config_yamls}, json={config_json} at PWD: {os.getcwd()}'
         )
@@ -106,7 +107,7 @@ class StrategyRunner:
             json_path=config_json,
             env_path=env_path,
         )
-        logger.info(f"AppConfig loaded: {self.cfg.meta.version_name} / {self.cfg.meta.strategy_name}")
+        self.logger.info(f"AppConfig loaded: {self.cfg.meta.version_name} / {self.cfg.meta.strategy_name}")
 
         self.timestamp = self._get_timestamp()
 
@@ -214,7 +215,7 @@ class StrategyRunner:
     
     async def _cleanup(self, tasks_groups: list) -> None:
         """Cleanup function to properly shutdown all tasks and client managers."""
-        logger.info("Starting cleanup...")
+        self.logger.info("Starting cleanup...")
         
         # Stop shared client managers first
         await self.binance_kline_manager.stop()
@@ -236,13 +237,13 @@ class StrategyRunner:
         for tasks in tasks_groups:
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
-        logger.info("Cleanup completed")
+        self.logger.info("Cleanup completed")
         
     
     # --------------------------- SETUP FUNCTIONS START HERE  --------------------------- #
     def _setup_config(self) -> None:
         """Initialize tokens and pools configuration from AppConfig.symbols."""
-        logger.info("Setting up Strategy Configuration...")
+        self.logger.info("Setting up Strategy Configuration...")
 
         sym = self.cfg.symbols
         self.total_token_pairs = []
@@ -260,14 +261,14 @@ class StrategyRunner:
 
         self.spot_total_tokens = sym.spot_tokens
         self.futures_total_tokens = sym.futures_tokens
-        logger.info(f"Configuration setup completed with {len(self.total_token_pairs)} total token pairs: {self.total_token_pairs}")        
+        self.logger.info(f"Configuration setup completed with {len(self.total_token_pairs)} total token pairs: {self.total_token_pairs}")        
         
         
     def _setup_exchanges(self) -> None:
         """Initialize Exchange Connectors instances for trading operations. 
                 This is the MAIN EXCHANGE CONNECTORS"""
 
-        logger.info("Setting up exchange instances...")
+        self.logger.info("Setting up exchange instances...")
         # Initialize Binance spot exchange
         if self.binance_token_symbols and 'Binance' in self.cfg.meta.spot_venues:
             self.binance_exchange = BinanceSpotExchange(
@@ -290,7 +291,7 @@ class StrategyRunner:
                 kline_manager=self.binance_futures_kline_manager,
                 ob_manager=self.binance_futures_ob_manager,
             )
-            logger.info("Binance futures exchange initialized")
+            self.logger.info("Binance futures exchange initialized")
 
         # Initialize Aster futures exchange
         # TODO: AsterPerpExchange source was deleted — re-add when perp connector is rebuilt
@@ -307,7 +308,7 @@ class StrategyRunner:
                 kline_manager=self.aster_kline_manager,
                 ob_manager=self.aster_ob_manager,
             )
-            logger.info("Aster Spot Exchange initialized")
+            self.logger.info("Aster Spot Exchange initialized")
             
             
         # Make the exchange mapping
@@ -323,14 +324,14 @@ class StrategyRunner:
             }
         }
         # Log the initialized exchanges
-        logger.info("Exchange mapping completed:")
+        self.logger.info("Exchange mapping completed:")
                 
         
     # --------- Setting up Binance Kline and OB Feeds with Multiplex Architecture --------- # 
     async def _setup_binance_data_feeds(self) -> None:
         """Initialize all data feeds with multiplex architecture"""
         
-        logger.info("Setting up Binance data feeds with multiplex architecture...")
+        self.logger.info("Setting up Binance data feeds with multiplex architecture...")
         
         self.binance_kline_manager.set_event_bus(self.shared_event_bus)
         self.binance_ob_manager.set_event_bus(self.shared_event_bus)
@@ -354,7 +355,7 @@ class StrategyRunner:
             self.binance_ob_manager.register_feed(ob_feed)
             ob_feeds.append(ob_feed)
         
-        logger.info(f"Initialized {len(self.binance_kline_manager._active_feeds)} Binance kline feeds and {len(self.binance_ob_manager._active_feeds)} order book feeds")
+        self.logger.info(f"Initialized {len(self.binance_kline_manager._active_feeds)} Binance kline feeds and {len(self.binance_ob_manager._active_feeds)} order book feeds")
         
         # Start the multiplex managers (begins WebSocket connection and buffering)
         await self.binance_kline_manager.start()
@@ -363,11 +364,11 @@ class StrategyRunner:
         # Start multiplex reader/worker tasks (WebSocket now connecting and buffering events)
         multiplex_tasks = []
         if self.binance_kline_manager._active_feeds:
-            logger.info(f"Starting Binance Kline multiplex feeds ({len(self.binance_kline_manager._active_feeds)} feeds)")
+            self.logger.info(f"Starting Binance Kline multiplex feeds ({len(self.binance_kline_manager._active_feeds)} feeds)")
             multiplex_tasks.append(asyncio.create_task(self.binance_kline_manager.run_multiplex_feeds()))
         
         if self.binance_ob_manager._active_feeds:
-            logger.info(f"Starting Binance Order Book multiplex feeds ({len(self.binance_ob_manager._active_feeds)} feeds)")
+            self.logger.info(f"Starting Binance Order Book multiplex feeds ({len(self.binance_ob_manager._active_feeds)} feeds)")
             multiplex_tasks.append(asyncio.create_task(self.binance_ob_manager.run_multiplex_feeds()))
         
         # Give WebSocket a moment to connect and start buffering events
@@ -376,13 +377,13 @@ class StrategyRunner:
         # NOW fetch snapshots on all order book feeds
         # This will trigger _process_buffered_events() which finds the sync point
         if ob_feeds:
-            logger.info(f"Fetching initial snapshots for {len(ob_feeds)} Binance order book feeds...")
+            self.logger.info(f"Fetching initial snapshots for {len(ob_feeds)} Binance order book feeds...")
             snapshot_tasks = [feed.get_initial_snapshot() for feed in ob_feeds]
             await asyncio.gather(*snapshot_tasks)
-            logger.info(f"All Binance order book snapshots fetched and synced")
+            self.logger.info(f"All Binance order book snapshots fetched and synced")
             
         if multiplex_tasks:
-            logger.info(f"Worker process running {len(multiplex_tasks)} feed task(s)...")
+            self.logger.info(f"Worker process running {len(multiplex_tasks)} feed task(s)...")
             await asyncio.gather(*multiplex_tasks)
             
     
@@ -393,7 +394,7 @@ class StrategyRunner:
         self.binance_futures_kline_manager.set_event_bus(self.shared_event_bus)
         self.binance_futures_ob_manager.set_event_bus(self.shared_event_bus)
         
-        logger.info("Setting up Binance futures data feeds with multiplex architecture...")
+        self.logger.info("Setting up Binance futures data feeds with multiplex architecture...")
         
         # Create kline feeds that register with shared client manager
         for i, token in enumerate(self.binance_futures_token_symbols):
@@ -414,7 +415,7 @@ class StrategyRunner:
             self.binance_futures_ob_manager.register_feed(ob_feed)
             ob_feeds.append(ob_feed)
         
-        logger.info(f"Initialized {len(self.binance_futures_kline_manager._active_feeds)} Binance futures kline feeds and {len(self.binance_futures_ob_manager._active_feeds)} order book feeds")
+        self.logger.info(f"Initialized {len(self.binance_futures_kline_manager._active_feeds)} Binance futures kline feeds and {len(self.binance_futures_ob_manager._active_feeds)} order book feeds")
         
         # Start the multiplex managers (begins WebSocket connection and buffering)
         await self.binance_futures_kline_manager.start()
@@ -423,11 +424,11 @@ class StrategyRunner:
         # Start multiplex reader/worker tasks (WebSocket now connecting and buffering events)
         multiplex_tasks = []
         if self.binance_futures_kline_manager._active_feeds:
-            logger.info(f"Starting Binance Futures Kline multiplex feeds ({len(self.binance_futures_kline_manager._active_feeds)} feeds)")
+            self.logger.info(f"Starting Binance Futures Kline multiplex feeds ({len(self.binance_futures_kline_manager._active_feeds)} feeds)")
             multiplex_tasks.append(asyncio.create_task(self.binance_futures_kline_manager.run_multiplex_feeds()))
         
         if self.binance_futures_ob_manager._active_feeds:
-            logger.info(f"Starting Binance Futures Order Book multiplex feeds ({len(self.binance_futures_ob_manager._active_feeds)} feeds)")
+            self.logger.info(f"Starting Binance Futures Order Book multiplex feeds ({len(self.binance_futures_ob_manager._active_feeds)} feeds)")
             multiplex_tasks.append(asyncio.create_task(self.binance_futures_ob_manager.run_multiplex_feeds()))
         
         # Give WebSocket a moment to connect and start buffering events
@@ -436,13 +437,13 @@ class StrategyRunner:
         # NOW fetch snapshots on all order book feeds
         # This will trigger _process_buffered_events() which finds the sync point
         if ob_feeds:
-            logger.info(f"Fetching initial snapshots for {len(ob_feeds)} Binance futures order book feeds...")
+            self.logger.info(f"Fetching initial snapshots for {len(ob_feeds)} Binance futures order book feeds...")
             snapshot_tasks = [feed.get_initial_snapshot() for feed in ob_feeds]
             await asyncio.gather(*snapshot_tasks)
-            logger.info(f"All Binance futures order book snapshots fetched and synced")
+            self.logger.info(f"All Binance futures order book snapshots fetched and synced")
             
         if multiplex_tasks:
-            logger.info(f"Worker process running {len(multiplex_tasks)} futures feed task(s)...")
+            self.logger.info(f"Worker process running {len(multiplex_tasks)} futures feed task(s)...")
             await asyncio.gather(*multiplex_tasks)
 
 
@@ -453,7 +454,7 @@ class StrategyRunner:
         self.aster_kline_manager.set_event_bus(self.shared_event_bus)
         self.aster_ob_manager.set_event_bus(self.shared_event_bus)
         
-        logger.info("Setting up data feeds with multiplex architecture...")
+        self.logger.info("Setting up data feeds with multiplex architecture...")
         
         # Create kline feeds that register with shared client manager
         for i, token in enumerate(self.aster_token_symbols):
@@ -474,7 +475,7 @@ class StrategyRunner:
             self.aster_ob_manager.register_feed(ob_feed)
             ob_feeds.append(ob_feed)
         
-        logger.info(f"Initialized {len(self.aster_kline_manager._active_feeds)} Aster kline feeds and {len(self.aster_ob_manager._active_feeds)} order book feeds")
+        self.logger.info(f"Initialized {len(self.aster_kline_manager._active_feeds)} Aster kline feeds and {len(self.aster_ob_manager._active_feeds)} order book feeds")
         
         # Start the multiplex managers (begins WebSocket connection and buffering)
         await self.aster_kline_manager.start()
@@ -483,11 +484,11 @@ class StrategyRunner:
         # Start multiplex reader/worker tasks (WebSocket now connecting and buffering events)
         multiplex_tasks = []
         if self.aster_kline_manager._active_feeds:
-            logger.info(f"Starting Aster Kline multiplex feeds ({len(self.aster_kline_manager._active_feeds)} feeds)")
+            self.logger.info(f"Starting Aster Kline multiplex feeds ({len(self.aster_kline_manager._active_feeds)} feeds)")
             multiplex_tasks.append(asyncio.create_task(self.aster_kline_manager.run_multiplex_feeds()))
         
         if self.aster_ob_manager._active_feeds:
-            logger.info(f"Starting Aster Order Book multiplex feeds ({len(self.aster_ob_manager._active_feeds)} feeds)")
+            self.logger.info(f"Starting Aster Order Book multiplex feeds ({len(self.aster_ob_manager._active_feeds)} feeds)")
             multiplex_tasks.append(asyncio.create_task(self.aster_ob_manager.run_multiplex_feeds()))
         
         # Give WebSocket a moment to connect and start buffering events
@@ -496,13 +497,13 @@ class StrategyRunner:
         # NOW fetch snapshots on all order book feeds
         # This will trigger _process_buffered_events() which finds the sync point
         if ob_feeds:
-            logger.info(f"Fetching initial snapshots for {len(ob_feeds)} Aster order book feeds...")
+            self.logger.info(f"Fetching initial snapshots for {len(ob_feeds)} Aster order book feeds...")
             snapshot_tasks = [feed.get_initial_snapshot() for feed in ob_feeds]
             await asyncio.gather(*snapshot_tasks)
-            logger.info(f"All Aster order book snapshots fetched and synced")
+            self.logger.info(f"All Aster order book snapshots fetched and synced")
             
         if multiplex_tasks:
-            logger.info(f"Worker process running {len(multiplex_tasks)} feed task(s)...")
+            self.logger.info(f"Worker process running {len(multiplex_tasks)} feed task(s)...")
             await asyncio.gather(*multiplex_tasks)
             
 
@@ -515,7 +516,7 @@ class StrategyRunner:
         self.aster_futures_ob_manager.set_event_bus(self.shared_event_bus)
         
         
-        logger.info("Setting up data feeds with multiplex architecture...")
+        self.logger.info("Setting up data feeds with multiplex architecture...")
         
         # Create kline feeds that register with shared client manager
         for i, token in enumerate(self.aster_futures_token_symbols):
@@ -536,7 +537,7 @@ class StrategyRunner:
             self.aster_futures_ob_manager.register_feed(ob_feed)
             ob_feeds.append(ob_feed)
         
-        logger.info(f"Initialized {len(self.aster_futures_kline_manager._active_feeds)} Aster kline feeds and {len(self.aster_futures_ob_manager._active_feeds)} order book feeds")
+        self.logger.info(f"Initialized {len(self.aster_futures_kline_manager._active_feeds)} Aster kline feeds and {len(self.aster_futures_ob_manager._active_feeds)} order book feeds")
         
         # Start the multiplex managers (begins WebSocket connection and buffering)
         await self.aster_futures_kline_manager.start()
@@ -545,11 +546,11 @@ class StrategyRunner:
         # Start multiplex reader/worker tasks (WebSocket now connecting and buffering events)
         multiplex_tasks = []
         if self.aster_futures_kline_manager._active_feeds:
-            logger.info(f"Starting Aster Futures Kline multiplex feeds ({len(self.aster_futures_kline_manager._active_feeds)} feeds)")
+            self.logger.info(f"Starting Aster Futures Kline multiplex feeds ({len(self.aster_futures_kline_manager._active_feeds)} feeds)")
             multiplex_tasks.append(asyncio.create_task(self.aster_futures_kline_manager.run_multiplex_feeds()))
         
         if self.aster_futures_ob_manager._active_feeds:
-            logger.info(f"Starting Aster Futures Order Book multiplex feeds ({len(self.aster_futures_ob_manager._active_feeds)} feeds)")
+            self.logger.info(f"Starting Aster Futures Order Book multiplex feeds ({len(self.aster_futures_ob_manager._active_feeds)} feeds)")
             multiplex_tasks.append(asyncio.create_task(self.aster_futures_ob_manager.run_multiplex_feeds()))
         
         # Give WebSocket a moment to connect and start buffering events
@@ -558,13 +559,13 @@ class StrategyRunner:
         # NOW fetch snapshots on all order book feeds
         # This will trigger _process_buffered_events() which finds the sync point
         if ob_feeds:
-            logger.info(f"Fetching initial snapshots for {len(ob_feeds)} Aster Perp order book feeds...")
+            self.logger.info(f"Fetching initial snapshots for {len(ob_feeds)} Aster Perp order book feeds...")
             snapshot_tasks = [feed.get_initial_snapshot() for feed in ob_feeds]
             await asyncio.gather(*snapshot_tasks)
-            logger.info(f"All Aster Perp order book snapshots fetched and synced")
+            self.logger.info(f"All Aster Perp order book snapshots fetched and synced")
             
         if multiplex_tasks:
-            logger.info(f"Aster Perps Worker process running {len(multiplex_tasks)} feed task(s)...")
+            self.logger.info(f"Aster Perps Worker process running {len(multiplex_tasks)} feed task(s)...")
             await asyncio.gather(*multiplex_tasks)
             
     
@@ -595,7 +596,7 @@ class StrategyRunner:
             else:
                 kline_manager_obj = self.aster_futures_kline_manager
         else:
-            logger.warning(f"[Runner] Unknown venue: {venue}, returning empty feeds")
+            self.logger.warning(f"[Runner] Unknown venue: {venue}, returning empty feeds")
             return {}
         
         # Collect all active feeds
@@ -604,7 +605,7 @@ class StrategyRunner:
             for sym, feed in kline_manager_obj._active_feeds.items():
                 all_feeds[sym] = feed
         
-        logger.debug(
+        self.logger.debug(
             f"[Runner] Collected {len(all_feeds)} feeds for {venue} {asset_type.value}"
         )
         
@@ -635,7 +636,7 @@ class StrategyRunner:
             portfolio = Portfolio(venue=exchange_enum, cfg=self.cfg)
             self._portfolio_dict[asset_type][exchange_enum] = portfolio
             self._start_snapshot_task(portfolio.save_snapshot, portfolio.name)
-            logger.info(
+            self.logger.info(
                 f"[Runner] {venue} {asset_type.value} Portfolio aggregator initialized"
             )
 
@@ -654,7 +655,7 @@ class StrategyRunner:
             portfolio=portfolio,
             cfg=self.cfg,
         )
-        logger.info(f"[Runner] Risk optimizer configured for {asset_type.value} {venue.value}")
+        self.logger.info(f"[Runner] Risk optimizer configured for {asset_type.value} {venue.value}")
 
 
 
@@ -680,7 +681,7 @@ class StrategyRunner:
         dv_str = exec_cfg.get("default_venue", "Binance")
         default_venue = _VENUE_MAP.get(str(dv_str), Venue.BINANCE)
 
-        logger.info(
+        self.logger.info(
             f"[Runner] Execution config for {asset_type.value} {venue.value}: "
             f"venue={default_venue.value}, order_type={default_order_type.value}"
         )
@@ -695,7 +696,7 @@ class StrategyRunner:
             asset_type=asset_type,
             venue=venue,
         )
-        logger.info(
+        self.logger.info(
             f"[Runner] {asset_type.value} {venue.value} Execution engine configured: "
         )
 
@@ -703,7 +704,7 @@ class StrategyRunner:
     async def _setup_pipeline(self) -> None:
         """Wire the full Stage 3-5 pipeline: Portfolio -> Risk -> Execution, centrally for all strategies"""
         
-        logger.info("[Runner] -- Setting up Stage 3-5 pipeline --")
+        self.logger.info("[Runner] -- Setting up Stage 3-5 pipeline --")
         
         # Setup both the spot and futures portfolios
         for asset_type in [AssetType.SPOT, AssetType.PERPETUAL]:
@@ -712,12 +713,12 @@ class StrategyRunner:
         # Risk Optimizer instead of a strategy based optimizer per exchange/portfolio based,
         # Should take in the portfolio config risk config to do the risk 
         # Here portoflio dict is set up already
-        logger.info(f"[Runner] Risk config: {self.cfg.risk}")
+        self.logger.info(f"[Runner] Risk config: {self.cfg.risk}")
         for asset_type in self._portfolio_dict:
             for exchange_enum, portfolio in self._portfolio_dict.get(asset_type, {}).items():
                 
-                # Setup Risk Layer per Portfolio (which is per (asset_type, venue)) — this is shared by all strategies trading that venue and asset type
-                self._setup_risk(portfolio, asset_type, exchange_enum)
+                # Setup Risk Layer per Portfolio (which is per (asset_type, venue)) - Deprecated for now as we not yet implemented PortfolioLevelOptimzer only ShadowBook level optimizers, but we keep the code here for when we want to implement the PortfolioLevelOptimizer in the future
+                # self._setup_risk(portfolio, asset_type, exchange_enum)
 
                 # Set up execution layer as well, this is set by each asset and exchange_enum
                 self._setup_execution(asset_type, exchange_enum)
@@ -741,7 +742,7 @@ class StrategyRunner:
         '''
         # ── Sub-account mode branch ──────────────────────────────────────────
         strat_cfg = self.cfg.strategies.get(strategy_id)
-        logger.info(
+        self.logger.info(
             f"[Runner] Setting up Sub-account mode for strategy {strategy_id} ({strategy_name})"
         )
         asset_type = AssetType[strat_cfg.asset_type.upper()]
@@ -757,6 +758,7 @@ class StrategyRunner:
         # 3. ShadowBook as real ledger (owns 100% of sub-account capital)
         shadow_book = ShadowBook(
             strategy_id=strategy_id,
+            strategy_name=strategy_name,
             venue=venue,
         )
         shadow_book.sync_from_exchange(private_exchange, feeds)
@@ -808,7 +810,7 @@ class StrategyRunner:
         self._start_snapshot_task(shadow_book.save_snapshot, f"shadow_book_{strategy_id}")
         self._strategy_dict[strategy_id] = strategy
 
-        logger.info(
+        self.logger.info(
             f"[Runner] Sub-account wiring complete: {strategy.__class__.__name__} "
             f"(id={strategy_id}) -> ShadowBook (real ledger) -> Optimizer -> ExecutionEngine"
         )
@@ -845,7 +847,7 @@ class StrategyRunner:
             event_bus=private_bus,                       # private bus for account events
         )
         await exchange.run()
-        logger.info(
+        self.logger.info(
             f"[Runner] Sub-account exchange created for strategy {strategy_config.strategy_id} "
             f"({venue.value})"
         )
@@ -867,7 +869,7 @@ class StrategyRunner:
             name=f"{tag} Snapshot Task",
         )
         self._snapshot_task_dict[tag].start()
-        logger.info(f"[Runner] {tag} snapshot task started (every {interval}s)")
+        self.logger.info(f"[Runner] {tag} snapshot task started (every {interval}s)")
 
 
 #############################################################################################################################################################
@@ -893,27 +895,27 @@ class StrategyRunner:
             strategy_name = strat_cfg.strategy_name
             strategy_ids.append(strategy_id)
             strategy_names.append(strategy_name)
-            strategy = load_strategy_class(strat_cfg.class_name)()  # -> Get the strategy instance
+            strategy = load_strategy_class(strat_cfg.class_name)(strategy_name=strategy_name, strategy_id=strategy_id)
             strategies.append(strategy)
         
         try:
-            logger.info("[Runner] ----------------------------------------------------------------------------------------")
-            logger.info("[Runner] Starting strategy runner................................")
-            logger.info("[Runner] ----------------------------------------------------------------------------------------")
+            self.logger.info("[Runner] ----------------------------------------------------------------------------------------")
+            self.logger.info("[Runner] Starting strategy runner................................")
+            self.logger.info("[Runner] ----------------------------------------------------------------------------------------")
             # ── CONFIGURING ──
             self._state = RunnerState.CONFIGURING
             self._setup_config()
 
             # Create shared event bus BEFORE exchanges so it can be injected
             self.shared_event_bus = EventBus() # EventBus for all Klines and OBs
-            logger.info("[Runner] EventBus created")
+            self.logger.info("[Runner] EventBus created")
 
             # ── CONNECTING ──
             self._state = RunnerState.CONNECTING
             self._setup_exchanges()
 
             # Inject event bus into client managers, we can manually adjust here for Aster + Binance 
-            logger.info("[Runner] EventBus injected into Binance kline + OB client managers")
+            self.logger.info("[Runner] EventBus injected into Binance kline + OB client managers")
 
             # Run exchange + feeds in single event loop
             try:
@@ -922,10 +924,10 @@ class StrategyRunner:
                 for asset_type, venues in self.exchange_connectors_dict.items():
                     for venue, exchange in venues.items():
                         if exchange:
-                            logger.info(f"  - {asset_type.value} | {venue.value}: {exchange.__class__.__name__} initializing run()")
+                            self.logger.info(f"  - {asset_type.value} | {venue.value}: {exchange.__class__.__name__} initializing run()")
                             await exchange.run()
                         else:
-                            logger.debug(f" - {asset_type.value} | {venue.value}: Not initialized")
+                            self.logger.debug(f" - {asset_type.value} | {venue.value}: Not initialized")
         
                  # ── SYNCING ──
                 self._state = RunnerState.SYNCING
@@ -933,30 +935,30 @@ class StrategyRunner:
                 # We setup the Pipeline for all exchange and asset_type pairing
                 await self._setup_pipeline()
                     
-                logger.info(f'Initialising wiring of components for all strategies. Strategies loaded: {list(self.cfg.strategies.keys())}')
+                self.logger.info(f'Initialising wiring of components for all strategies. Strategies loaded: {list(self.cfg.strategies.keys())}')
                 await asyncio.gather(*[
                     self.setup_strategy(strategy, strategy_id, strategy_name)
                     for strategy, strategy_id, strategy_name, 
                     in zip(strategies, strategy_ids, strategy_names)
                 ])
-                logger.info("[Runner] All components and strategies initialized. Starting event loops...")
+                self.logger.info("[Runner] All components and strategies initialized. Starting event loops...")
 
                 # Initializing of DataFeeds
                 coros = [self._setup_binance_data_feeds()]
                 
-                logger.info(f"[Runner] Launching strategy.run_forever() alongside data feeds")
+                self.logger.info(f"[Runner] Launching strategy.run_forever() alongside data feeds")
                 for strategy in strategies:
                     coros.append(strategy.run_forever())
                         
                 # ── RUNNING ──
                 self._state = RunnerState.RUNNING
-                logger.info(f"[Runner] Entering main event loop ({len(coros)} coroutines)")
+                self.logger.info(f"[Runner] Entering main event loop ({len(coros)} coroutines)")
                 await asyncio.gather(*coros)
 
             finally:
                 # ── STOPPING ──
                 self._state = RunnerState.STOPPING
-                logger.info("[Runner] Shutting down exchange and strategy...")
+                self.logger.info("[Runner] Shutting down exchange and strategy...")
 
                 for _, task in self._snapshot_task_dict.items():
                     task.stop()
@@ -965,26 +967,26 @@ class StrategyRunner:
                 # for asset_type, venues in self.exchange_connectors_dict.items():
                 #     for venue, exchange in venues.items():
                 #         if exchange:
-                #             logger.info(f"Stopping exchange c onnector for {asset_type.value} {venue.value}...")
+                #             self.logger.info(f"Stopping exchange c onnector for {asset_type.value} {venue.value}...")
                 #             try:
                 #                 await exchange.stop()
                 #             except Exception as e:
-                #                 logger.error(f"Error stopping exchange connector for {asset_type.value} {venue.value}: {e}", exc_info=True)
+                #                 self.logger.error(f"Error stopping exchange connector for {asset_type.value} {venue.value}: {e}", exc_info=True)
                                 
                 await asyncio.gather(*[strategy.stop() for strategy in strategies])
 
         except asyncio.CancelledError:
-            logger.warning("[Runner] Strategy cancelled by user")
+            self.logger.warning("[Runner] Strategy cancelled by user")
         except Exception as e:
             self._state = RunnerState.FAILED
-            logger.error(f"[Runner] Fatal error: {e}", exc_info=True)
+            self.logger.error(f"[Runner] Fatal error: {e}", exc_info=True)
             raise
         finally:
-            logger.info("Cleaning up...")
+            self.logger.info("Cleaning up...")
             await self._cleanup([])
             if self._state != RunnerState.FAILED:
                 self._state = RunnerState.STOPPED
-            logger.info(f"Strategy runner shutdown complete (state={self._state.name})")
+            self.logger.info(f"Strategy runner shutdown complete (state={self._state.name})")
     
 
     

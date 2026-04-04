@@ -34,8 +34,6 @@ if TYPE_CHECKING:
 
 import elysian_core.utils.logger as log
 
-logger = log.setup_custom_logger("root")
-
 class InvalidTransition(Exception):
     """Raised when a trigger is not valid for the current state."""
 
@@ -75,6 +73,7 @@ class BaseFSM:
         terminal_states: Optional[Set[Enum]] = None,
         name: Optional[str] = None,
     ):
+        self.logger = log.setup_custom_logger("root")
         self._state = initial_state
         self._event_bus = event_bus
         self._terminal_states: Set[Enum] = terminal_states or set()
@@ -159,7 +158,7 @@ class BaseFSM:
         # Inject old_state into ctx so callbacks can access the pre-transition state
         ctx["_fsm_old_state"] = old_state
 
-        logger.debug(
+        self.logger.debug(
             "[%s] %s --%s--> %s",
             self._name, old_state.name, event, next_state.name,
         )
@@ -167,7 +166,7 @@ class BaseFSM:
         if callback_name is not None:
             callback = getattr(self, callback_name, None)
             if callback is None:
-                logger.warning(
+                self.logger.warning(
                     "[%s] Callback '%s' not found — skipping",
                     self._name, callback_name,
                 )
@@ -199,6 +198,7 @@ class PeriodicTask:
         interval_s: float,
         name: str = "PeriodicTask",
     ):
+        self.logger = log.setup_custom_logger("root")
         self._callback = callback
         self._interval = interval_s
         self._name = name
@@ -232,4 +232,4 @@ class PeriodicTask:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.error("[%s] Error: %s", self._name, e, exc_info=True)
+                self.logger.error("[%s] Error: %s", self._name, e, exc_info=True)

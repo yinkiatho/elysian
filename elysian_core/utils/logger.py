@@ -7,6 +7,9 @@ loggers = {}
 SUCCESS_LEVEL = 21
 logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
 
+_utc_plus_8 = datetime.timezone(datetime.timedelta(hours=8))
+_run_timestamp: str = datetime.datetime.now(_utc_plus_8).strftime('%Y-%m-%d_%H-%M-%S')
+
 
 def success(self, message, *args, **kwargs):
     if self.isEnabledFor(SUCCESS_LEVEL):
@@ -50,11 +53,9 @@ def setup_custom_logger(name, log_level=logging.INFO):
     stream_handler.setFormatter(color_formatter)
 
     logger.setLevel(log_level)
-    utc_plus_8 = datetime.timezone(datetime.timedelta(hours=8))
-    
-    # Log file setup
-    timestamp = datetime.datetime.now(utc_plus_8).strftime('%Y-%m-%d_%H-%M-%S')
-    log = Path(f'{path}/logs/{timestamp}.log')
+
+    # Log file: logs/<run_timestamp>/<name>.log
+    log = Path(path) / 'logs' / _run_timestamp / f'{name}.log'
     log.parent.mkdir(parents=True, exist_ok=True)
     log.touch(exist_ok=True)
 

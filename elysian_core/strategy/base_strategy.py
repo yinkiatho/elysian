@@ -51,8 +51,6 @@ if TYPE_CHECKING:
     from elysian_core.core.shadow_book import ShadowBook
 
 
-logger = log.setup_custom_logger("root")
-
 _STABLECOINS = frozenset({"USDC", "USDT", "BUSD"})
 
 
@@ -77,10 +75,11 @@ class SpotStrategy:
         execution_engine: Optional["ExecutionEngine"] = None,
         cfg: Optional["AppConfig"] = None,
         asset_type: AssetType = AssetType.SPOT,
-        venue: Venue = Venue.BINANCE,
+        venue: Venue = Venue.BINANCE,   # Technically not needed but put here for symbols loading
         venues: Optional[Set[Venue]] = None,
         strategy_id: int = 0,
-        strategy_name: str = 'unknown_strategy'
+        strategy_name: str = 'unknown_strategy',
+        symbols: Set[str] = None
     ):
         self._exchanges = exchanges
         self._shared_event_bus = shared_event_bus
@@ -98,7 +97,9 @@ class SpotStrategy:
         self.venues: FrozenSet[Venue] = frozenset(venues) if venues is not None else frozenset({venue})
         self.strategy_id = strategy_id
         self.strategy_name = strategy_name
-        
+        self.logger = log.setup_custom_logger(f"{strategy_name}_{strategy_id}")
+        self._symbols = symbols or set()  # can be set explicitly or loaded from cfg in on_start
+
         # Lifecycle state
         self._state = StrategyState.CREATED
 
@@ -156,12 +157,19 @@ class SpotStrategy:
 
         """
         if self._state != StrategyState.CREATED:
-            logger.warning(f"[Strategy] start() called in state {self._state.name}, ignoring")
+            self.logger.warning(f"[Strategy] start() called in state {self._state.name}, ignoring")
             return
 
         self._state = StrategyState.STARTING
         self._loop = asyncio.get_running_loop()
+        
+        # Load symbols from cfg if not explicitly provided at construction
+        if self.strategy_config.symbols:
+            self._symbols = set(self.strategy_config.symbols)
+        elif self.cfg:
+            self._symbols = set(self.cfg.symbols.symbols_for(self.venue.value, self.asset_type.value))
 
+        # Event bus subscription
         self._shared_event_bus.subscribe(EventType.KLINE, self._dispatch_kline)
         self._shared_event_bus.subscribe(EventType.ORDERBOOK_UPDATE, self._dispatch_ob)
         self._private_event_bus.subscribe(EventType.ORDER_UPDATE, self._dispatch_order)
@@ -176,11 +184,11 @@ class SpotStrategy:
                 event_bus=self._private_event_bus,
                 name=f"{self.__class__.__name__}.RebalanceFSM",
             )
-            logger.info(f"[Strategy] RebalanceFSM initialized for {self.__class__.__name__}")
+            self.logger.info(f"[Strategy] RebalanceFSM initialized for {self.__class__.__name__}")
 
         await self.on_start()
         self._state = StrategyState.READY
-        logger.info(
+        self.logger.info(
             f"[Strategy] {self.__class__.__name__} started — "
             f"subscribed to 5 event types, "
             f"{len(self._exchanges)} exchanges, {len(self._feeds)} feeds"
@@ -195,7 +203,7 @@ class SpotStrategy:
         # NOTE: Portfolio.stop() is the StrategyRunner's job — the portfolio
         # is shared across strategies, so one strategy stopping must NOT
         # unsubscribe the shared portfolio from the event bus.
-        logger.info(f"[Strategy] {self.__class__.__name__} stopping...")
+        self.logger.info(f"[Strategy] {self.__class__.__name__} stopping...")
 
         # Signal run_forever() to unblock
         self._stop_event.set()
@@ -210,7 +218,7 @@ class SpotStrategy:
         self._executor.shutdown(wait=False)
         self._shadow_book.stop()
         self._state = StrategyState.STOPPED
-        logger.info(f"[Strategy] {self.__class__.__name__} stopped")
+        self.logger.info(f"[Strategy] {self.__class__.__name__} stopped")
 
     # ── Rebalance FSM controls ──────────────────────────────────────────────
 
@@ -244,7 +252,7 @@ class SpotStrategy:
         ``run_forever()`` or reactively from ``on_*`` hooks.
         """
         if self._rebalance_fsm is None:
-            logger.warning("[Strategy] request_rebalance called but no FSM configured")
+            self.logger.warning("[Strategy] request_rebalance called but no FSM configured")
             return False
         return await self._rebalance_fsm.request(**ctx)
 
@@ -256,7 +264,7 @@ class SpotStrategy:
             self._state = StrategyState.RUNNING
 
     async def _dispatch_kline(self, event: KlineEvent):
-        if event.venue not in self.venues:
+        if event.venue not in self.venues or event.symbol not in self.strategy_config.symbols:
             return
         # ShadowBook has its own KLINE subscription via the shared bus,
         # so mark prices are updated there — no manual forwarding needed.
@@ -264,7 +272,7 @@ class SpotStrategy:
         try:
             await self.on_kline(event)
         except Exception as e:
-            logger.error(f"SpotStrategy.on_kline error: {e}", exc_info=True)
+            self.logger.error(f"SpotStrategy.on_kline error: {e}", exc_info=True)
 
     async def _dispatch_ob(self, event: OrderBookUpdateEvent):
         if event.venue not in self.venues:
@@ -272,7 +280,7 @@ class SpotStrategy:
         try:
             await self.on_orderbook_update(event)
         except Exception as e:
-            logger.error(f"SpotStrategy.on_orderbook_update error: {e}", exc_info=True)
+            self.logger.error(f"SpotStrategy.on_orderbook_update error: {e}", exc_info=True)
 
     async def _dispatch_order(self, event: OrderUpdateEvent):
         '''
@@ -282,7 +290,7 @@ class SpotStrategy:
             await asyncio.gather(self.on_order_update(event),
                                  self._shadow_book._on_order_update(event))
         except Exception as e:
-            logger.error(f"SpotStrategy.on_order_update error: {e}", exc_info=True)
+            self.logger.error(f"SpotStrategy.on_order_update error: {e}", exc_info=True)
 
     async def _dispatch_balance(self, event: BalanceUpdateEvent):
         '''
@@ -294,7 +302,7 @@ class SpotStrategy:
             await asyncio.gather(self.on_balance_update(event),
                                  self._shadow_book._on_balance_update(event))
         except Exception as e:
-            logger.error(f"SpotStrategy.on_balance_update error: {e}", exc_info=True)
+            self.logger.error(f"SpotStrategy.on_balance_update error: {e}", exc_info=True)
 
     async def _dispatch_rebalance(self, event: RebalanceCompleteEvent):
         '''
@@ -306,7 +314,7 @@ class SpotStrategy:
             # Currently no on_rebalance_complete event for the shadow book, but we may want to add one in the future if we want to update the shadow book based on rebalance results (e.g. adjust positions based on fills, update PnL, etc.)
             # await self._shadow_book.on_rebalance_complete(event)
         except Exception as e:
-            logger.error(f"SpotStrategy.on_rebalance_complete error: {e}", exc_info=True)
+            self.logger.error(f"SpotStrategy.on_rebalance_complete error: {e}", exc_info=True)
 
     # ── Hook functions (override in subclass) ──────────────────────────────────
 

@@ -31,9 +31,6 @@ _STABLECOINS = frozenset({"USDT", "USDC", "BUSD"})
 if TYPE_CHECKING:
     from elysian_core.core.shadow_book import ShadowBook
 
-logger = log.setup_custom_logger("root")
-
-
 def _round_step(value: float, step: float) -> float:
     """Round *value* down to the nearest multiple of *step*."""
     if step <= 0:
@@ -59,6 +56,7 @@ class ExecutionEngine:
         venue: Venue = None
         
     ):
+        self.logger = log.setup_custom_logger("root")
         self._exchanges = exchanges
         self._portfolio = portfolio
         self._feeds = feeds
@@ -78,11 +76,11 @@ class ExecutionEngine:
     async def execute(self, validated: ValidatedWeights, **ctx) -> RebalanceResult:
         """Execute a full rebalance cycle from validated weights to exchange orders."""
         async with self._execute_lock:
-            logger.info(
+            self.logger.info(
                 f"[ExecutionEngine] Starting rebalance: {len(validated.weights)} symbols"
             )
             mark_prices = self._get_mark_prices()
-            logger.info(f"[ExecutionEngine] Mark prices snapshot: {len(mark_prices)} symbols")
+            self.logger.info(f"[ExecutionEngine] Mark prices snapshot: {len(mark_prices)} symbols")
 
             # Expose mark prices and portfolio value for downstream fill attribution
             ctx["_mark_prices"] = mark_prices
@@ -91,7 +89,7 @@ class ExecutionEngine:
             intents = self.compute_order_intents(validated, mark_prices, ctx.get('order_type', OrderType.MARKET))
 
             if not intents:
-                logger.info("[ExecutionEngine] No order intents generated — portfolio already aligned")
+                self.logger.info("[ExecutionEngine] No order intents generated — portfolio already aligned")
                 now_ms = int(time.time() * 1000)
                 return RebalanceResult(
                     intents=(), submitted=0, failed=0, timestamp=now_ms,
@@ -100,7 +98,7 @@ class ExecutionEngine:
             # Partition: sells first (free capital), then buys
             sells = [i for i in intents if i.side == Side.SELL]
             buys = [i for i in intents if i.side == Side.BUY]
-            logger.info(
+            self.logger.info(
                 f"[ExecutionEngine] Order plan: {len(sells)} sells, {len(buys)} buys "
                 f"(sells execute first)"
             )
@@ -131,12 +129,12 @@ class ExecutionEngine:
             )
 
             if failed > 0:
-                logger.warning(
+                self.logger.warning(
                     f"[ExecutionEngine] Rebalance complete with errors: "
                     f"{submitted} submitted, {failed} FAILED — {errors}"
                 )
             else:
-                logger.info(
+                self.logger.info(
                     f"[ExecutionEngine] Rebalance complete: "
                     f"{submitted}/{len(intents)} orders submitted successfully"
                 )
@@ -153,10 +151,10 @@ class ExecutionEngine:
         strategy_id = int(validated.original.strategy_id) if validated.original.strategy_id else 0
         total_value = self._portfolio.total_value(mark_prices)
         if total_value <= 0:
-            logger.warning("[ExecutionEngine] Portfolio total value <= 0, skipping")
+            self.logger.warning("[ExecutionEngine] Portfolio total value <= 0, skipping")
             return []
 
-        logger.info(f"[ExecutionEngine] Portfolio total value: {total_value:.2f}")
+        self.logger.info(f"[ExecutionEngine] Portfolio total value: {total_value:.2f}")
         intents: List[OrderIntent] = []
 
         price_overrides = validated.original.price_overrides or {}
@@ -165,7 +163,7 @@ class ExecutionEngine:
             # implicit (1 - sum(weights)).  If a strategy emits a stablecoin key
             # it is a bug; warn loudly and skip so no order is placed.
             if symbol in _STABLECOINS:
-                logger.warning(
+                self.logger.warning(
                     f"[ExecutionEngine] Stablecoin '{symbol}' found in validated weights "
                     f"(w={target_weight:.4f}) — cash is implicit, skipping. "
                     f"Check strategy.compute_weights() for stablecoin key emission."
@@ -175,13 +173,13 @@ class ExecutionEngine:
             # Use strategy-provided limit price if given, else fall back to mark price
             price = price_overrides.get(symbol) or mark_prices.get(symbol)
             if price is None or price <= 0:
-                logger.warning(f"[ExecutionEngine] No mark price for {symbol}, skipping")
+                self.logger.warning(f"[ExecutionEngine] No mark price for {symbol}, skipping")
                 continue
 
             venue = self._symbol_venue_map.get(symbol, self._default_venue)
             exchange = self._exchanges.get(venue)
             if exchange is None:
-                logger.warning(f"[ExecutionEngine] No exchange for venue {venue}, skipping {symbol}")
+                self.logger.warning(f"[ExecutionEngine] No exchange for venue {venue}, skipping {symbol}")
                 continue
 
             # Weight-delta filter: skip legs whose deviation is too small to matter.
@@ -190,7 +188,7 @@ class ExecutionEngine:
             current_weight = (current_qty * price) / total_value
             weight_delta = abs(target_weight - current_weight)
             if weight_delta < 0.001:
-                logger.debug(
+                self.logger.debug(
                     f"[ExecutionEngine] Skipping {symbol}: "
                     f"weight_delta={weight_delta:.4f} below 0.001 threshold"
                 )
@@ -206,12 +204,12 @@ class ExecutionEngine:
             abs_qty = _round_step(abs(delta_qty), step_size)
 
             if abs_qty <= 0:
-                logger.debug(f"[ExecutionEngine] Skipping {symbol}: rounded qty is 0")
+                self.logger.debug(f"[ExecutionEngine] Skipping {symbol}: rounded qty is 0")
                 continue
 
             side = Side.BUY if delta_qty > 0 else Side.SELL
 
-            logger.info(
+            self.logger.info(
                 f"[ExecutionEngine] Intent: {side.value} {symbol} "
                 f"qty={abs_qty:.6f} @ ~{price:.4f} "
                 f"(target_w={target_weight:.4f} current_w={current_weight:.4f} "
@@ -229,7 +227,7 @@ class ExecutionEngine:
                 strategy_id=strategy_id,
             ))
 
-        logger.info(f"[ExecutionEngine] Generated {len(intents)} order intents")
+        self.logger.info(f"[ExecutionEngine] Generated {len(intents)} order intents")
         return intents
 
     # ── Private ──────────────────────────────────────────────────────────────
@@ -243,11 +241,11 @@ class ExecutionEngine:
         """
         exchange = self._exchanges.get(intent.venue)
         if exchange is None:
-            logger.error(f"[ExecutionEngine] No exchange for {intent.venue}")
+            self.logger.error(f"[ExecutionEngine] No exchange for {intent.venue}")
             return None
 
         try:
-            logger.info(
+            self.logger.info(
                 f"[ExecutionEngine] Submitting {intent.order_type.value} {intent.side.value} "
                 f"{intent.symbol} qty={intent.quantity:.6f} on {intent.venue.value}"
             )
@@ -269,14 +267,14 @@ class ExecutionEngine:
                     strategy_id=intent.strategy_id
                 )
             else:
-                logger.error(
+                self.logger.error(
                     f"[ExecutionEngine] Unsupported order type {intent.order_type} for {intent.symbol}"
                 )
                 return None
 
             order_id = str(resp.get("orderId", "")) if resp else ""
             if order_id:
-                logger.info(
+                self.logger.info(
                     f"[ExecutionEngine] Order submitted OK: {intent.side.value} {intent.symbol} "
                     f"order_id={order_id}"
                 )
@@ -284,7 +282,7 @@ class ExecutionEngine:
             return None
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 f"[ExecutionEngine] Order FAILED: {intent.side.value} {intent.symbol} "
                 f"qty={intent.quantity:.6f} — {e}",
                 exc_info=True,
@@ -300,6 +298,6 @@ class ExecutionEngine:
                 if price and price > 0:
                     prices[symbol] = price
             except Exception as e:
-                logger.error(f'[ExecutionEngine] Unable to get mark price for {symbol}: {e}')
+                self.logger.error(f'[ExecutionEngine] Unable to get mark price for {symbol}: {e}')
                 continue
         return prices

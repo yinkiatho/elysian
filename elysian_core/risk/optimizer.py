@@ -21,9 +21,6 @@ import elysian_core.utils.logger as log
 if TYPE_CHECKING:
     from elysian_core.core.shadow_book import ShadowBook
 
-logger = log.setup_custom_logger("root")
-
-
 class PortfolioOptimizer:
     '''
     Portfolio risk optimizer that validates and adjusts strategy weight signals
@@ -45,6 +42,7 @@ class PortfolioOptimizer:
                         cfg: Optional[Any] = None):
         self._risk_config = risk_config
         self._portfolio = portfolio
+        self.logger = log.setup_custom_logger(f"{portfolio._strategy_name}_{portfolio._strategy_id}")
         self.cfg = cfg
         self._last_rebalance_ts: int = None  # per-strategy rate limiting
 
@@ -78,7 +76,7 @@ class PortfolioOptimizer:
         now_ms = int(time.time() * 1000)
         cfg = self._risk_config
 
-        logger.info(
+        self.logger.info(
             f"[Optimizer] Validating weights: {len(target.weights)} symbols, "
             f"sum={sum(target.weights.values()):.4f} ({target.weights})"
         )
@@ -89,12 +87,12 @@ class PortfolioOptimizer:
         # 1. Symbol filter
         pre_filter = len(weights)
         if len(weights) < pre_filter:
-            logger.info(f"[Optimizer] Symbol filter: {pre_filter} -> {len(weights)} symbols")
+            self.logger.info(f"[Optimizer] Symbol filter: {pre_filter} -> {len(weights)} symbols")
 
         # 2. Per-asset clip
         weights, clips = self._clip_per_asset(weights)
         if clips:
-            logger.info(f"[Optimizer] Clipped {len(clips)} symbols: {clips}")
+            self.logger.info(f"[Optimizer] Clipped {len(clips)} symbols: {clips}")
 
         # 3. Total exposure scaling
         weights = self._scale_exposure(weights)
@@ -107,7 +105,7 @@ class PortfolioOptimizer:
         weights = self._cap_turnover(weights, original=self._portfolio.current_weights())
         self._last_rebalance_ts = now_ms
 
-        logger.info(
+        self.logger.info(
             f"[Optimizer] Validated: {len(weights)} symbols, "
             f"sum={sum(weights.values()):.4f} ({weights})"
         )
@@ -152,7 +150,7 @@ class PortfolioOptimizer:
 
             if clamped != w:
                 clipped[sym] = w - clamped
-                logger.debug(
+                self.logger.debug(
                     f"[Optimizer] Clipped {sym}: {w:.4f} -> {clamped:.4f}"
                 )
             out[sym] = clamped
@@ -165,7 +163,7 @@ class PortfolioOptimizer:
         if gross <= cfg.max_total_exposure or gross == 0:
             return weights
         scale = cfg.max_total_exposure / gross
-        logger.debug(
+        self.logger.debug(
             f"[Optimizer] Scaling exposure: gross={gross:.4f} -> {cfg.max_total_exposure:.4f} "
             f"(factor={scale:.4f})"
         )
@@ -181,7 +179,7 @@ class PortfolioOptimizer:
             return weights
         
         scale = max_invested / total_long
-        logger.debug(
+        self.logger.debug(
             f"[Optimizer] Enforcing cash floor: invested={total_long:.4f} -> {max_invested:.4f}"
         )
         return {
@@ -209,7 +207,7 @@ class PortfolioOptimizer:
             return weights
 
         scale = cfg.max_turnover_per_rebalance / turnover
-        logger.debug(
+        self.logger.debug(
             f"[Optimizer] Capping turnover: {turnover:.4f} -> {cfg.max_turnover_per_rebalance:.4f}"
         )
         # Scale the *delta* rather than the absolute weight.  Move each weight
