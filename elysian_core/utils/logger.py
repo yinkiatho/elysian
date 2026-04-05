@@ -2,6 +2,7 @@ import logging
 import datetime
 import pathlib
 from pathlib import Path
+import sys
 
 loggers = {}
 SUCCESS_LEVEL = 21
@@ -49,7 +50,7 @@ def setup_custom_logger(name, log_level=logging.INFO):
 
     # Stream handler with colored output
     color_formatter = ColoredFormatter(fmt='%(asctime)s - %(levelname)s - %(module)s - %(filename)s:%(lineno)d - %(message)s')
-    stream_handler = logging.StreamHandler()
+    stream_handler = logging.StreamHandler(stream=open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1, closefd=False))
     stream_handler.setFormatter(color_formatter)
 
     logger.setLevel(log_level)
@@ -60,7 +61,7 @@ def setup_custom_logger(name, log_level=logging.INFO):
     log.parent.mkdir(parents=True, exist_ok=True)
     log.touch(exist_ok=True)
 
-    file_handler = logging.FileHandler(log)
+    file_handler = logging.FileHandler(log, encoding='utf-8')
     file_handler.setFormatter(formatter)
     file_handler.setLevel(log_level)
 

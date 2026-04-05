@@ -209,6 +209,7 @@ class RebalanceFSM(BaseFSM):
             metadata={},
             strategy_id=self._strategy.strategy_id,
             venue=self._optimizer.venue,
+            liquidate=bool(ctx.get("convert_all_base", False)),
         )
 
         try:

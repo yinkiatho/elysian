@@ -600,17 +600,16 @@ class StrategyRunner:
             self.logger.warning(f"[Runner] Unknown venue: {venue}, returning empty feeds")
             return {}
         
-        # Collect all active feeds
-        all_feeds = {}
+        # Return a live reference to _active_feeds so the ExecutionEngine always sees
+        # the current feed state without needing to be re-wired after startup.
         if kline_manager_obj and hasattr(kline_manager_obj, '_active_feeds'):
-            for sym, feed in kline_manager_obj._active_feeds.items():
-                all_feeds[sym] = feed
-        
-        self.logger.debug(
-            f"[Runner] Collected {len(all_feeds)} feeds for {venue} {asset_type.value}"
-        )
-        
-        return all_feeds
+            self.logger.debug(
+                f"[Runner] Collected {len(kline_manager_obj._active_feeds)} feeds for {venue} {asset_type.value}"
+            )
+            return kline_manager_obj._active_feeds
+
+        self.logger.debug(f"[Runner] No feeds available for {venue} {asset_type.value}")
+        return {}
 
 
     async def _setup_portfolio(self, asset_type: AssetType) -> None:
@@ -761,6 +760,7 @@ class StrategyRunner:
             strategy_id=strategy_id,
             strategy_name=strategy_name,
             venue=venue,
+            strategy_config=strat_cfg,
         )
         shadow_book.sync_from_exchange(private_exchange, feeds)
         shadow_book.start(

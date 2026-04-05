@@ -19,11 +19,13 @@ decide target weights.  This is the primary interface between a strategy
 and "what it owns".
 """
 
+import datetime
 import time
+import asyncio
 from collections import deque
 from typing import Deque, Dict, List, Optional, Set
-
-from elysian_core.core.enums import OrderStatus, OrderType, Side, Venue
+from elysian_core.db.models import CexTrade
+from elysian_core.core.enums import AssetType, OrderStatus, OrderType, Side, Venue
 from elysian_core.core.events import EventType
 from elysian_core.core.order import ActiveLimitOrder, ActiveOrder, Order
 from elysian_core.core.portfolio import Fill
@@ -31,6 +33,7 @@ from elysian_core.core.position import Position
 from elysian_core.core.signals import OrderIntent
 from elysian_core.db.models import PortfolioSnapshot
 from elysian_core.core.events import BalanceUpdateEvent, OrderUpdateEvent
+from elysian_core.config.app_config import StrategyConfig
 import elysian_core.utils.logger as log
 
 _STABLECOINS = frozenset({"USDT", "USDC", "BUSD"})
@@ -50,11 +53,21 @@ class ShadowBook:
 
     def __init__(self, strategy_id: int,
                        venue: Venue = Venue.BINANCE,
-                       strategy_name: str = ""):
+                       strategy_name: str = "",
+                       strategy_config: Optional[StrategyConfig] = None):
         self._strategy_id = strategy_id
         self._strategy_name = strategy_name or f"strategy_{strategy_id}"
         self.logger = log.setup_custom_logger(f"{self._strategy_name}_{strategy_id}")
         self._venue = venue
+
+        # Symbols this strategy is allowed to track; None means track all
+        symbols = (strategy_config.symbols or []) if strategy_config else []
+        self._tracked_symbols: Optional[frozenset] = frozenset(symbols) if symbols else None
+        self._asset_type: AssetType = (
+            AssetType[strategy_config.asset_type.upper()]
+            if strategy_config and strategy_config.asset_type
+            else AssetType.SPOT
+        )
 
         # Position state
         self._positions: Dict[str, Position] = {}
@@ -118,8 +131,9 @@ class ShadowBook:
         for asset, qty in exchange._balances.items():
             if asset in _STABLECOINS or qty <= 0:
                 continue
+            
             symbol = exchange.base_asset_to_symbol(asset)
-            if symbol is None:
+            if symbol is None or (self._tracked_symbols and symbol not in self._tracked_symbols):
                 continue
             entry_price = 0.0
             feed = feeds.get(symbol)
@@ -248,6 +262,12 @@ class ShadowBook:
                 self._exchange.base_asset_to_symbol(event.asset)
                 if self._exchange else event.asset
             )
+            if symbol is None or (self._tracked_symbols and symbol not in self._tracked_symbols):
+                self.logger.debug(
+                    f"[ShadowBook-{self._strategy_id}] BalanceUpdate: {event.asset} -> symbol={symbol} not tracked, skipping"
+                )
+                self._refresh_derived()
+                return
             curr = self._positions.get(symbol)
             old_qty = curr.quantity if curr else 0.0
             if curr is None:
@@ -363,7 +383,9 @@ class ShadowBook:
                     )
             self._active_orders.pop(order_id, None)
             self._completed_order_ids.add(order_id)
-
+            
+            # Recording the trade to db here
+            asyncio.create_task(self._async_record_trade(active))
     # ── Read — Identity ───────────────────────────────────────────────────
 
     @property
@@ -591,6 +613,53 @@ class ShadowBook:
             f"total_comm={self.total_commission:.4f}"
         )
 
+    async def _async_record_trade(self, active: ActiveOrder) -> None:
+        '''
+        Trade recording to db after order reaches terminal status (FILLED/CANCELED/REJECTED/EXPIRED).
+        - Skip terminal orders with no fill — cancelled/rejected/expired with 0 qty have no trade to record
+        - ie. we dont log cancelled trades with 0 fills, but we do log cancelled trades with partial fills
+        '''
+        
+        if active.filled_qty <= 0:
+            self.logger.debug(
+                f"[ShadowBook-{self._strategy_id}] Skipping record_trade for "
+                f"{active.symbol} {active.status.value} order {active.id} — no fills"
+            )
+            return
+
+        comm_asset = active.commission_asset or ""
+        ts = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
+        try:
+            CexTrade.create(
+                datetime=ts,
+                strategy_id=self._strategy_id,
+                strategy_name=self._strategy_name,
+                venue=self._venue,
+                asset_type=self._asset_type,
+                symbol=active.symbol,
+                side=active.side,
+                base_amount=active.filled_qty,
+                quote_amount=active.filled_qty * active.avg_fill_price,
+                price=active.avg_fill_price,
+                commission_asset=comm_asset,
+                total_commission=active.commission,
+                total_commission_quote=(
+                    active.commission * active.avg_fill_price
+                    if comm_asset.upper() not in _STABLECOINS
+                    else active.commission
+                ),
+                order_id=str(active.id),
+                status=active.status,
+                order_side=active.side,
+                order_type=active.order_type,
+            )
+            self.logger.info(
+                f"[ShadowBook-{self._strategy_id}] Trade recorded: "
+                f"{active.symbol} {active.side.value} {active.filled_qty} @ {active.avg_fill_price}"
+            )
+        except Exception as e:
+            self.logger.error(f"[ShadowBook-{self._strategy_id}] record_trade error: {e}")
+
     def mark_to_market(self, mark_prices: Dict[str, float]):
         """Manual mark price update (mirrors Portfolio.mark_to_market)."""
         self._mark_prices.update(mark_prices)
@@ -610,7 +679,7 @@ class ShadowBook:
         In sub-account mode, returns early — handled by _on_balance_update on private bus.
         """
         # Technically not needed, base_strategy class calls the shadow_book.on_balance_update(event)
-        return 
+        return
 
         # ── Locked balance — LIMIT order reservations ─────────────────────────
         #

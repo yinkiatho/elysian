@@ -87,7 +87,6 @@ class BinanceSpotExchange(SpotExchangeConnector):
         self.user_data_manager = user_data_manager or BinanceUserDataClientManager(api_key, api_secret)
         if event_bus:
             self.user_data_manager.set_event_bus(event_bus)
-
     
     # ── Initialisation ────────────────────────────────────────────────────────
     async def initialize(self):
@@ -352,8 +351,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
         symbol: str,
         side: Side,
         quantity: float, # Denoted in terms of base asset ie. 0.1 ETH
-        strategy_id: int, 
-        strategy_name: str,
+        strategy_id: int,
         use_quote_order_qty: bool = False,
     ):
         """
@@ -386,35 +384,17 @@ class BinanceSpotExchange(SpotExchangeConnector):
                 resp = await fn(symbol=symbol, quoteOrderQty=qty, strategyId=strategy_id)
                 
 
-            # For market orders, we assume immediate fills and we process the market response immediately
+            # For market orders, log the REST response fill summary.
+            # Authoritative fill recording happens in ShadowBook when the
+            # order reaches FILLED via the user-data stream.
             avg_price, total_comm = self._average_fill_price(resp)
-            total_quote_quantity = float(resp["cummulativeQuoteQty"])
             total_base_quantity = float(resp.get("executedQty", 0))
-            order_id = int(resp["orderId"])
-            status = str(resp["status"])
-            side_str = str(resp["side"])
-            order_type = OrderType.MARKET
             comm_asset = resp["fills"][0]["commissionAsset"] if resp.get("fills") else ""
 
             self.logger.success(
-                f"[{symbol}] Filled: {side_str} {total_base_quantity} @ {avg_price:.6f} "
+                f"[{symbol}] Filled: {side.value} {total_base_quantity} @ {avg_price:.6f} "
                 f"comm={total_comm} {comm_asset}"
             )
-            asyncio.create_task(self._record_trade(
-                base_asset=base_asset,
-                quote_asset=quote_asset,
-                base_amount_executed=total_base_quantity,
-                quote_amount_executed=total_quote_quantity,
-                order_type=order_type,
-                price=avg_price,
-                commission=total_comm,
-                order_id=order_id,
-                status=status,
-                side_str=side_str,
-                comm_asset=comm_asset,
-                strategy_id=strategy_id,
-                strategy_name=strategy_name
-            ))
             return resp
 
         except BinanceAPIException as e:
@@ -424,42 +404,6 @@ class BinanceSpotExchange(SpotExchangeConnector):
             
 
 
-
-    async def _record_trade(self, base_asset: str, quote_asset: str, base_amount_executed: float, quote_amount_executed: float, 
-                                  order_type: OrderType, price: float, commission: float, order_id: int, 
-                                  status: str, side_str: str, comm_asset: str, strategy_id: int, strategy_name: str):
-        """
-        Record a trade in the database. This is called after a market order is filled.
-        """
-        ts = datetime.datetime.now(self._utc8)
-        try:
-            CexTrade.create(
-                id=ts.strftime("%Y-%m-%d_%H-%M-%S") + "_" + self.cfg.meta.version_name,
-                datetime=ts,
-                strategy_id=strategy_id,
-                strategy_name=strategy_name,
-                venue=Venue.BINANCE,
-                asset_type=AssetType.SPOT,
-                symbol=base_asset + quote_asset,
-                side=Side.BUY if side_str.lower() == "buy" else Side.SELL,
-                base_amount=base_amount_executed,
-                quote_amount=quote_amount_executed,
-                price=price,
-                commission_asset=comm_asset,
-                total_commission=commission,
-                total_commission_quote=commission * price if comm_asset.upper() not in self._STABLECOINS else commission,
-                order_id=str(order_id),
-                status=_BINANCE_STATUS.get(status, OrderStatus.OPEN),
-                order_side=_BINANCE_SIDE.get(side_str, Side.BUY),
-                order_type=order_type
-            )
-                
-            self.logger.info(f"Trade recorded at {ts.strftime('%Y-%m-%d_%H-%M-%S')}")
-        except Exception as e:
-            self.logger.error(f"_record_trade DB error: {e}")
-    
-    
-    
 
     # ──  Withdrawals ─────────────────────────────────────────────
     async def withdraw_asset(

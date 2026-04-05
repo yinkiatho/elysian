@@ -463,7 +463,7 @@ class SpotExchangeConnector(ABC):
                     )
                     return False
             else:
-                if self._balances.get(base_asset, 0.0) < abs(quantity):
+                if self._balances.get(base_asset, 0.0) < abs(quantity) - 1e-9:
                     self.logger.error(
                         f"[{symbol}] Insufficient {base_asset} to SELL {quantity}"
                     )

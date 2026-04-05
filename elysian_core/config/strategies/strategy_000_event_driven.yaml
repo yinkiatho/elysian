@@ -33,13 +33,13 @@ venues:
 max_heavy_workers: 8
 
 # Symbols — leave empty to load from config.json for this venue+asset_type
-symbols: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
+symbols: ['BNBUSDT']
 
 # ── Risk Management for PortfolioOptimizer (StrategyShadowBook level) ──────────────────────────────────────────────
 # Only list fields you want to change; omitted fields inherit from venue/global.
 risk:
   # ── Per-asset weight bounds ──
-  max_weight_per_asset: 0.25          # no single asset > 25% of portfolio
+  max_weight_per_asset: 1.0          # no single asset > 25% of portfolio
   min_weight_per_asset: 0.0           # floor per asset (0 = long-only is fine)
 
   # ── Portfolio-level exposure ──
@@ -47,14 +47,14 @@ risk:
   min_cash_weight: 0.05              # always keep >= 5% in cash/stablecoins
 
   # ── Turnover control ──
-  max_turnover_per_rebalance: 0.5     # max sum(|delta_w|) per rebalance cycle
+  max_turnover_per_rebalance: 2.0     # max sum(|delta_w|) per rebalance cycle
 
   # ── Leverage & shorts (futures expansion) ──
   max_leverage: 1.0                   # max gross leverage (1.0 = spot-only)
   max_short_weight: 0.0              # max short weight per asset (0 = no shorts)
 
   # ── Notional filters ──
-  min_order_notional: 10.0            # skip orders below $10 notional
+  min_order_notional: 5.0            # skip orders below $5 notional
   max_order_notional: 100000.0        # cap single order at $100k
 
   # ── Delta threshold ──

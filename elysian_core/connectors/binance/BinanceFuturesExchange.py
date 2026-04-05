@@ -524,20 +524,6 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
                 f"comm={total_comm} {comm_asset}"
             )
 
-            asyncio.create_task(self._record_trade(
-                base_asset=base_asset,
-                quote_asset=quote_asset,
-                base_amount_executed=total_base_quantity,
-                quote_amount_executed=total_quote_quantity,
-                order_type=OrderType.MARKET,
-                price=avg_price,
-                commission=total_comm,
-                order_id=order_id,
-                status=status,
-                side_str=side_str,
-                comm_asset=comm_asset,
-            ))
-
         except BinanceAPIException as e:
             self.logger.error(f"[{symbol}] place_market_order API error: {e}")
         except Exception as e:
@@ -622,47 +608,6 @@ class BinanceFuturesExchange(FuturesExchangeConnector):
             self.logger.info(f"[{symbol}] Position closed: {resp}")
         except Exception as e:
             self.logger.error(f"[{symbol}] Failed to close position: {e}")
-
-    # ── Trade Recording ───────────────────────────────────────────────────────
-    async def _record_trade(
-        self,
-        base_asset: str,
-        quote_asset: str,
-        base_amount_executed: float,
-        quote_amount_executed: float,
-        order_type: OrderType,
-        price: float,
-        commission: float,
-        order_id: int,
-        status: str,
-        side_str: str,
-        comm_asset: str,
-    ):
-        ts = datetime.datetime.now(self._utc8)
-        try:
-            CexTrade.create(
-                id=ts.strftime("%Y-%m-%d_%H-%M-%S") + "_" + self.cfg.meta.version_name,
-                datetime=ts,
-                strategy_id=self.strategy_id,
-                strategy_name=self.strategy_name,
-                venue=Venue.BINANCE,
-                asset_type=AssetType.PERPETUAL,
-                symbol=base_asset + quote_asset,
-                side=Side.BUY if side_str.lower() == "buy" else Side.SELL,
-                base_amount=base_amount_executed,
-                quote_amount=quote_amount_executed,
-                price=price,
-                commission_asset=comm_asset,
-                total_commission=commission,
-                total_commission_quote=commission * price if comm_asset.upper() not in _STABLECOINS else commission,
-                order_id=str(order_id),
-                status=_BINANCE_STATUS.get(status, OrderStatus.OPEN),
-                order_side=_BINANCE_SIDE.get(side_str, Side.BUY),
-                order_type=order_type,
-            )
-            self.logger.info(f"Futures trade recorded at {ts.strftime('%Y-%m-%d_%H-%M-%S')}")
-        except Exception as e:
-            self.logger.error(f"_record_trade DB error: {e}")
 
     # ── Run ───────────────────────────────────────────────────────────────────
     async def run(self):

@@ -44,6 +44,8 @@ class EventDrivenStrategy(SpotStrategy):
         self._rolling_returns_series = {}
         self._last_marked_time = None
         self._symbol_availability_status = {}
+        
+        self.trade_counter = 0
 
 
     async def on_start(self):
@@ -88,9 +90,9 @@ class EventDrivenStrategy(SpotStrategy):
                 self._symbol_availability_status[event.symbol] = True
                  
         # Check for full availability and past rebalance interval and trigger
-        # if all(self._symbol_availability_status.values()) and (self._last_marked_time is None or time.monotonic() - self._last_marked_time > self._rebalance_interval):
-        #     self._last_marked_time = time.monotonic()
-        #     await self.request_rebalance()
+        if all(self._symbol_availability_status.values()) and (self._last_marked_time is None or time.monotonic() - self._last_marked_time > self._rebalance_interval):
+            self._last_marked_time = time.monotonic()
+            await self.request_rebalance()
             
             
     async def run_forever(self):
@@ -114,6 +116,7 @@ class EventDrivenStrategy(SpotStrategy):
         r = event.result
         if r.errors:
             self.logger.warning(f"[EqualWeight] Rebalance had errors: {r.errors}")
+            
         # Post-rebalance portfolio state snapshot
         if self._shadow_book is not None:
             book = self._shadow_book
@@ -128,72 +131,92 @@ class EventDrivenStrategy(SpotStrategy):
                 f"active_orders={list(book.active_orders.keys())} "
                 f"submitted={r.submitted} failed={r.failed}"
             )
-
-
+            
+            
     def compute_weights(self, **ctx) -> dict:
-        """
-        For each symbol:
-            1. Compute the latest return (e.g., 1‑period return).
-            2. Compute rolling mean and rolling standard deviation (lookback = 20).
-            3. Calculate z‑score = (latest_return - rolling_mean) / rolling_std.
-            4. If z‑score > threshold (0.5) → positive signal = z‑score.
-            Else → signal = 0 (stay out).
-            5. Scale each signal by 1 / rolling_std (inverse volatility).
-            6. Normalise the resulting weights so that their sum = target_allocation (0.9).
-        Returns a dict {symbol: weight} – missing symbols imply zero weight.
-        
-        # Importantly if Asset_type is Spot, we cannot be short ie. no negative weights
-        """
         # --- Kill switch (go 100% cash) ---
         if ctx.get('convert_all_base', False):
             self.logger.info("Kill signal received => returning zero weights (100% cash)")
             return {sym: 0.0 for sym in self._symbols}
-
-        # --- Parameters ---
-        LOOKBACK = 20          # periods for rolling mean/std
-        Z_THRESHOLD = 0.5      # minimum z‑score to enter a trade
-        TARGET_ALLOC = 0.9     # sum of weights (10% cash buffer)
-
-        signals = {}           # raw z‑scores (positive only)
-        vol_estimates = {}     # rolling std for each symbol
-
-        for sym in self._symbols:
-            returns = self._returns_series.get(sym)
-            if returns is None or len(returns) < LOOKBACK + 1:
-                self.logger.debug(f"Insufficient return data for {sym}")
-                continue
-
-            current_return = returns[-1]
-            rolling_mean = np.mean(returns[-LOOKBACK:])  
-            rolling_std = np.std(returns[-LOOKBACK:])
+        
+        if self.trade_counter % 2 == 0:
+            self.trade_counter += 1
+            weights = {sym: 0.0 for sym in self._symbols}
+        else:
+            self.trade_counter += 1
+            weights = {sym: 1.0 / len(self._symbols) for sym in self._symbols}
             
-            if rolling_std == 0:
-                continue
-
-            z_score = (current_return - rolling_mean) / rolling_std
-            self.logger.debug(
-                f"[compute_weights] {sym}: return={current_return:.6f} "
-                f"mean={rolling_mean:.6f} std={rolling_std:.6f} z={z_score:.4f}"
-            )
-            if z_score >= Z_THRESHOLD: # Only take positive signals for long-only strategy
-                signals[sym] = z_score
-                vol_estimates[sym] = rolling_std
-
-        if not signals:
-            self.logger.info("No positive signals above threshold, staying in cash")
-            return {}
-
-        # --- Inverse volatility scaling (risk parity) ---
-        inv_vol = {sym: 1.0 / vol_estimates[sym] for sym in signals}
-        total_inv_vol = sum(inv_vol.values())
-        raw_weights = {sym: inv_vol[sym] / total_inv_vol for sym in signals}
-        adjusted_weights = {sym: raw_weights[sym] * signals[sym] for sym in signals}
-        total_adj = sum(adjusted_weights.values())
+        self.logger.info(f"Computed weights: {weights}")
+        return weights
         
-        if total_adj == 0:
-            return {}
+
+    # def compute_weights(self, **ctx) -> dict:
+    #     """
+    #     For each symbol:
+    #         1. Compute the latest return (e.g., 1‑period return).
+    #         2. Compute rolling mean and rolling standard deviation (lookback = 20).
+    #         3. Calculate z‑score = (latest_return - rolling_mean) / rolling_std.
+    #         4. If z‑score > threshold (0.5) → positive signal = z‑score.
+    #         Else → signal = 0 (stay out).
+    #         5. Scale each signal by 1 / rolling_std (inverse volatility).
+    #         6. Normalise the resulting weights so that their sum = target_allocation (0.9).
+    #     Returns a dict {symbol: weight} – missing symbols imply zero weight.
         
-        final_weights = {sym: w / total_adj * TARGET_ALLOC for sym, w in adjusted_weights.items()}
-        self.logger.info(f"Final weights: {final_weights} (sum = {sum(final_weights.values()):.2f})")
+    #     # Importantly if Asset_type is Spot, we cannot be short ie. no negative weights
+    #     """
+    #     # --- Kill switch (go 100% cash) ---
+    #     if ctx.get('convert_all_base', False):
+    #         self.logger.info("Kill signal received => returning zero weights (100% cash)")
+    #         return {sym: 0.0 for sym in self._symbols}
+
+    #     # --- Parameters ---
+    #     LOOKBACK = 20          # periods for rolling mean/std
+    #     Z_THRESHOLD = 0.5      # minimum z‑score to enter a trade
+    #     TARGET_ALLOC = 0.9     # sum of weights (10% cash buffer)
+
+    #     signals = {}           # raw z‑scores (positive only)
+    #     vol_estimates = {}     # rolling std for each symbol
+
+    #     for sym in self._symbols:
+    #         returns = self._returns_series.get(sym)
+    #         if returns is None or len(returns) < LOOKBACK + 1:
+    #             self.logger.debug(f"Insufficient return data for {sym}")
+    #             continue
+
+    #         current_return = returns[-1]
+    #         rolling_mean = np.mean(returns[-LOOKBACK:])  
+    #         rolling_std = np.std(returns[-LOOKBACK:])
+            
+    #         if rolling_std == 0:
+    #             continue
+
+    #         z_score = (current_return - rolling_mean) / rolling_std
+    #         self.logger.debug(
+    #             f"[compute_weights] {sym}: return={current_return:.6f} "
+    #             f"mean={rolling_mean:.6f} std={rolling_std:.6f} z={z_score:.4f}"
+    #         )
+    #         if z_score >= Z_THRESHOLD: # Only take positive signals for long-only strategy
+    #             signals[sym] = z_score
+    #             vol_estimates[sym] = rolling_std
+
+    #     if not signals:
+    #         self.logger.info("No positive signals above threshold, staying in cash")
+    #         return {}
+
+    #     # --- Inverse volatility scaling (risk parity) ---
+    #     inv_vol = {sym: 1.0 / vol_estimates[sym] for sym in signals}
+    #     total_inv_vol = sum(inv_vol.values())
+    #     raw_weights = {sym: inv_vol[sym] / total_inv_vol for sym in signals}
+    #     adjusted_weights = {sym: raw_weights[sym] * signals[sym] for sym in signals}
+    #     total_adj = sum(adjusted_weights.values())
         
-        return final_weights
+    #     if total_adj == 0:
+    #         return {}
+        
+    #     final_weights = {sym: w / total_adj * TARGET_ALLOC for sym, w in adjusted_weights.items()}
+    #     self.logger.info(f"Final weights: {final_weights} (sum = {sum(final_weights.values()):.2f})")
+        
+    #     return final_weights
+    
+    
+    

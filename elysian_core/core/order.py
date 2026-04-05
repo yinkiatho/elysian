@@ -54,9 +54,42 @@ class Order:
 
         Uses warn-mode: logs invalid transitions but always applies them
         because the exchange is the source of truth.
+        Dispatches named on_enter_* hooks after the status is set.
         """
         validate_order_transition(self.status, new_status, order_id=self.id)
         self.status = new_status
+        if new_status == OrderStatus.FILLED:
+            self.on_enter_filled()
+        elif new_status == OrderStatus.PARTIALLY_FILLED:
+            self.on_enter_partially_filled()
+        elif new_status == OrderStatus.CANCELLED:
+            self.on_enter_cancelled()
+        elif new_status == OrderStatus.REJECTED:
+            self.on_enter_rejected()
+        elif new_status == OrderStatus.EXPIRED:
+            self.on_enter_expired()
+
+    # ── State entry hooks (no-ops; override in subclasses) ────────────────
+
+    def on_enter_filled(self) -> None:
+        """Called when order enters FILLED state. Override in subclasses."""
+        pass
+
+    def on_enter_partially_filled(self) -> None:
+        """Called when order enters PARTIALLY_FILLED state."""
+        pass
+
+    def on_enter_cancelled(self) -> None:
+        """Called when order enters CANCELLED state."""
+        pass
+
+    def on_enter_rejected(self) -> None:
+        """Called when order enters REJECTED state."""
+        pass
+
+    def on_enter_expired(self) -> None:
+        """Called when order enters EXPIRED state."""
+        pass
 
     def update_fill(self, filled_qty: float, fill_price: float):
         """Update fill quantities and weighted average price.

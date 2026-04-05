@@ -14,7 +14,7 @@ Pipeline per rebalance cycle:
   7. Return RebalanceResult
 
 """
-
+import math
 import asyncio
 import time
 from elysian_core.core.shadow_book import ShadowBook
@@ -34,7 +34,10 @@ def _round_step(value: float, step: float) -> float:
     """Round *value* down to the nearest multiple of *step*."""
     if step <= 0:
         return value
-    return (int(value / step)) * step
+    # Use decimal precision matching step_size to avoid float multiplication noise
+    # e.g. int(0.009/0.001)*0.001 = 9*0.001 = 0.009000000000000001
+    precision = max(0, -int(math.floor(math.log10(step))))
+    return round((int(value / step)) * step, precision)
 
 
 class ExecutionEngine:
@@ -157,7 +160,7 @@ class ExecutionEngine:
         strategy_id = int(validated.original.strategy_id) if validated.original.strategy_id else 0
         total_value = self._portfolio.total_value(mark_prices)
         if total_value <= 0:
-            self.logger.warning("[ExecutionEngine] Portfolio total value <= 0, skipping")
+            self.logger.warning(f"[ExecutionEngine] Portfolio total value {total_value} <= 0, skipping")
             return []
 
         self.logger.info(
@@ -264,7 +267,6 @@ class ExecutionEngine:
                     side=intent.side,
                     quantity=intent.quantity,
                     strategy_id=intent.strategy_id,
-                    strategy_name="",
                 )
             elif intent.order_type == OrderType.LIMIT and intent.price is not None:
                 resp = await exchange.place_limit_order(

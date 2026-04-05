@@ -80,7 +80,19 @@ class PortfolioOptimizer:
             f"[Optimizer] Validating weights: {len(target.weights)} symbols, "
             f"sum={sum(target.weights.values()):.4f} ({target.weights})"
         )
-        
+
+        # Liquidate signal — bypass all risk constraints and return zero weights as-is
+        if target.liquidate:
+            self.logger.info("[Optimizer] Liquidate flag set — bypassing all risk constraints")
+            self._last_rebalance_ts = now_ms
+            return ValidatedWeights(
+                original=target,
+                weights=dict(target.weights),
+                clipped={},
+                rejected=False,
+                timestamp=now_ms,
+            )
+
         weights = dict(target.weights)  # mutable copy
         clips: Dict[str, float] = {}
 
