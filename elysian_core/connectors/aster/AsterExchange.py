@@ -13,7 +13,7 @@ import argparse
 import requests
 
 from elysian_core.connectors.base import SpotExchangeConnector
-from elysian_core.connectors.AsterDataConnectors import (
+from elysian_core.connectors.aster.AsterDataConnectors import (
     AsterKlineClientManager,
     AsterOrderBookClientManager,
     AsterUserDataClientManager,

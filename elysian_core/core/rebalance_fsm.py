@@ -154,6 +154,19 @@ class RebalanceFSM(BaseFSM):
         Enriches ctx with ``target_weights`` for downstream stages.
         """
         await self._publish_cycle_event("signal", **ctx)
+
+        # Portfolio state snapshot before compute
+        book = getattr(self._strategy, '_shadow_book', None)
+        if book is not None:
+            self.logger.info(
+                f"[{self._name}] === STAGE 3 START (compute_weights) === "
+                f"NAV={book.nav:.4f} cash={book.cash:.4f} "
+                f"free_cash={book.free_cash:.4f} locked_cash={book._locked_cash:.4f} "
+                f"positions={list(book.active_positions.keys())} "
+                f"weights={book.weights} "
+                f"active_orders={list(book.active_orders.keys())}"
+            )
+
         try:
             result = self._strategy.compute_weights(**ctx)
             if asyncio.iscoroutine(result):
@@ -173,7 +186,11 @@ class RebalanceFSM(BaseFSM):
         # Tag context with strategy_id for downstream stages
         ctx["strategy_id"] = self._strategy.strategy_id
         ctx["target_weights"] = weights
-        self.logger.info("[%s] Weights computed: %d symbols", self._name, len(weights))
+        self.logger.info(
+            "[%s] Weights computed: %d symbols — %s",
+            self._name, len(weights),
+            {s: f"{w:.4f}" for s, w in weights.items()},
+        )
 
         await self.trigger("weights_ready", **ctx)
 
@@ -210,8 +227,12 @@ class RebalanceFSM(BaseFSM):
 
         ctx["validated_weights"] = validated
         self.logger.info(
-            "[%s] Stage 4 passed: %d symbols after risk adjustment",
+            "[%s] === STAGE 4 PASSED: %d symbols after risk adjustment === "
+            "target=%s validated=%s clipped=%s",
             self._name, len(validated.weights),
+            {s: f"{w:.4f}" for s, w in weights.items()},
+            {s: f"{w:.4f}" for s, w in validated.weights.items()},
+            validated.clipped or {},
         )
         await self.trigger("accepted", **ctx)
 
@@ -224,6 +245,19 @@ class RebalanceFSM(BaseFSM):
         await self._publish_cycle_event("accepted", **ctx)
 
         validated = ctx.get("validated_weights")
+
+        # Portfolio state snapshot before execution
+        book = getattr(self._strategy, '_shadow_book', None)
+        if book is not None:
+            self.logger.info(
+                f"[{self._name}] === STAGE 5 START (execute) === "
+                f"NAV={book.nav:.4f} cash={book.cash:.4f} "
+                f"free_cash={book.free_cash:.4f} "
+                f"positions={list(book.active_positions.keys())} "
+                f"current_weights={book.weights} "
+                f"target_weights={({s: f'{w:.4f}' for s, w in validated.weights.items()} if validated else 'None')}"
+            )
+
         try:
             result = await self._execution_engine.execute(validated, **ctx)
         except Exception as e:
@@ -245,9 +279,12 @@ class RebalanceFSM(BaseFSM):
         self._last_result = result
         ctx["rebalance_result"] = result
         self.logger.info(
-            "[%s] Rebalance result: %d submitted, %d failed",
+            "[%s] === STAGE 5 COMPLETE: %d submitted, %d failed === %s",
             self._name, result.submitted, result.failed,
+            {oid: f"{i.side.value} {i.symbol} qty={i.quantity:.6f}" for oid, i in (result.submitted_orders or {}).items()},
         )
+        if result.errors:
+            self.logger.warning("[%s] Execution errors: %s", self._name, result.errors)
 
         # Publish RebalanceCompleteEvent for strategy hooks
         if self._event_bus:

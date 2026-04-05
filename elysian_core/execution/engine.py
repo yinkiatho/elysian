@@ -17,6 +17,7 @@ Pipeline per rebalance cycle:
 
 import asyncio
 import time
+from elysian_core.core.shadow_book import ShadowBook
 from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
 from elysian_core.connectors.base import AbstractDataFeed, SpotExchangeConnector
@@ -28,8 +29,6 @@ import elysian_core.utils.logger as log
 
 _STABLECOINS = frozenset({"USDT", "USDC", "BUSD"})
 
-if TYPE_CHECKING:
-    from elysian_core.core.shadow_book import ShadowBook
 
 def _round_step(value: float, step: float) -> float:
     """Round *value* down to the nearest multiple of *step*."""
@@ -40,13 +39,12 @@ def _round_step(value: float, step: float) -> float:
 
 class ExecutionEngine:
     '''
-    Currently designed for one execution engine per venue
+    Currently designed for one execution engine per strategy
     '''
-
     def __init__(
         self,
         exchanges: Dict[Venue, SpotExchangeConnector],
-        portfolio: Union[Portfolio, "ShadowBook"],
+        portfolio: Union[Portfolio, ShadowBook],
         feeds: Dict[str, AbstractDataFeed],
         default_venue: Venue = Venue.BINANCE,
         default_order_type: OrderType = OrderType.MARKET,
@@ -56,9 +54,15 @@ class ExecutionEngine:
         venue: Venue = None
         
     ):
-        self.logger = log.setup_custom_logger("root")
+        if isinstance(portfolio, Portfolio):
+            self.logger = log.setup_custom_logger("root")
+        elif isinstance(portfolio, ShadowBook):
+            self.logger = log.setup_custom_logger(f"{portfolio._strategy_name}_{portfolio._strategy_id}")
+        else:
+            raise ValueError("Unsupported portfolio type")
+
         self._exchanges = exchanges
-        self._portfolio = portfolio
+        self._portfolio = portfolio   # Portfolio here is a ShadowBook instance
         self._feeds = feeds
         self._default_venue = default_venue
         self._default_order_type = default_order_type
@@ -66,8 +70,7 @@ class ExecutionEngine:
         self.cfg = cfg
         self.asset_type = asset_type
         self.venue = venue
-        # order_id -> strategy_id mapping: populated on placement, read by ShadowBooks for routing
-        self._order_strategy_map: Dict[str, int] = {}
+        
         # Lock to prevent concurrent execute() calls from multiple strategy FSMs
         self._execute_lock = asyncio.Lock()
 
@@ -76,11 +79,15 @@ class ExecutionEngine:
     async def execute(self, validated: ValidatedWeights, **ctx) -> RebalanceResult:
         """Execute a full rebalance cycle from validated weights to exchange orders."""
         async with self._execute_lock:
+            total_value_pre = self._portfolio.total_value()
             self.logger.info(
-                f"[ExecutionEngine] Starting rebalance: {len(validated.weights)} symbols"
+                f"[ExecutionEngine] Starting rebalance: {len(validated.weights)} symbols "
+                f"portfolio_nav={total_value_pre:.4f} cash={self._portfolio.cash:.4f}"
             )
             mark_prices = self._get_mark_prices()
-            self.logger.info(f"[ExecutionEngine] Mark prices snapshot: {len(mark_prices)} symbols")
+            self.logger.info(
+                f"[ExecutionEngine] Mark prices snapshot: {len(mark_prices)} symbols — {mark_prices}"
+            )
 
             # Expose mark prices and portfolio value for downstream fill attribution
             ctx["_mark_prices"] = mark_prices
@@ -112,7 +119,6 @@ class ExecutionEngine:
                 if order_id:
                     submitted += 1
                     self._portfolio.lock_for_order(order_id, intent)
-                    self._order_strategy_map[order_id] = intent.strategy_id
                     submitted_orders_map[order_id] = intent
                 else:
                     failed += 1
@@ -154,7 +160,9 @@ class ExecutionEngine:
             self.logger.warning("[ExecutionEngine] Portfolio total value <= 0, skipping")
             return []
 
-        self.logger.info(f"[ExecutionEngine] Portfolio total value: {total_value:.2f}")
+        self.logger.info(
+            f"[ExecutionEngine] Portfolio total value: {total_value:.4f} cash={self._portfolio.cash:.4f}"
+        )
         intents: List[OrderIntent] = []
 
         price_overrides = validated.original.price_overrides or {}

@@ -53,6 +53,7 @@ def setup_custom_logger(name, log_level=logging.INFO):
     stream_handler.setFormatter(color_formatter)
 
     logger.setLevel(log_level)
+    logger.propagate = False
 
     # Log file: logs/<run_timestamp>/<name>.log
     log = Path(path) / 'logs' / _run_timestamp / f'{name}.log'

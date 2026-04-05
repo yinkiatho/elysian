@@ -71,12 +71,13 @@ class TestOrderUpdateFill:
         o.update_fill(0.5, 50000.0)
         assert o.filled_qty == pytest.approx(0.5)
         assert o.avg_fill_price == pytest.approx(50000.0)
-        assert o.status == OrderStatus.PARTIALLY_FILLED
+        assert o.status == OrderStatus.OPEN  # update_fill does not transition status
 
     def test_update_fill_to_full(self):
         o = _order(quantity=1.0, filled_qty=0.0, avg_fill_price=0.0, status=OrderStatus.OPEN)
         o.update_fill(1.0, 50000.0)
-        assert o.status == OrderStatus.FILLED
+        assert o.filled_qty == pytest.approx(1.0)
+        assert o.status == OrderStatus.OPEN  # caller must call transition_to separately
 
     def test_update_fill_weighted_average(self):
         o = _order(quantity=1.0, filled_qty=0.0, avg_fill_price=0.0, status=OrderStatus.OPEN)

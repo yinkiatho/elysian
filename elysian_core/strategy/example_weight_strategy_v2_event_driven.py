@@ -88,9 +88,9 @@ class EventDrivenStrategy(SpotStrategy):
                 self._symbol_availability_status[event.symbol] = True
                  
         # Check for full availability and past rebalance interval and trigger
-        if all(self._symbol_availability_status.values()) and (self._last_marked_time is None or time.monotonic() - self._last_marked_time > self._rebalance_interval):
-            self._last_marked_time = time.monotonic()
-            await self.request_rebalance()
+        # if all(self._symbol_availability_status.values()) and (self._last_marked_time is None or time.monotonic() - self._last_marked_time > self._rebalance_interval):
+        #     self._last_marked_time = time.monotonic()
+        #     await self.request_rebalance()
             
             
     async def run_forever(self):
@@ -114,6 +114,20 @@ class EventDrivenStrategy(SpotStrategy):
         r = event.result
         if r.errors:
             self.logger.warning(f"[EqualWeight] Rebalance had errors: {r.errors}")
+        # Post-rebalance portfolio state snapshot
+        if self._shadow_book is not None:
+            book = self._shadow_book
+            self.logger.info(
+                f"[EqualWeight] Post-rebalance snapshot: "
+                f"NAV={book.nav:.4f} cash={book.cash:.4f} "
+                f"free_cash={book.free_cash:.4f} locked_cash={book._locked_cash:.4f} "
+                f"positions={({s: f'qty={p.quantity:.6f} entry={p.avg_entry_price:.4f}' for s, p in book.active_positions.items()})} "
+                f"weights={({s: f'{w:.4f}' for s, w in book.weights.items()})} "
+                f"realized_pnl={book.realized_pnl:.4f} unrealized_pnl={book.unrealized_pnl():.4f} "
+                f"total_commission={book.total_commission:.4f} "
+                f"active_orders={list(book.active_orders.keys())} "
+                f"submitted={r.submitted} failed={r.failed}"
+            )
 
 
     def compute_weights(self, **ctx) -> dict:
@@ -157,6 +171,10 @@ class EventDrivenStrategy(SpotStrategy):
                 continue
 
             z_score = (current_return - rolling_mean) / rolling_std
+            self.logger.debug(
+                f"[compute_weights] {sym}: return={current_return:.6f} "
+                f"mean={rolling_mean:.6f} std={rolling_std:.6f} z={z_score:.4f}"
+            )
             if z_score >= Z_THRESHOLD: # Only take positive signals for long-only strategy
                 signals[sym] = z_score
                 vol_estimates[sym] = rolling_std

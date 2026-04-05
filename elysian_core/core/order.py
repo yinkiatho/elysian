@@ -59,18 +59,20 @@ class Order:
         self.status = new_status
 
     def update_fill(self, filled_qty: float, fill_price: float):
+        """Update fill quantities and weighted average price.
+
+        Does NOT transition status — callers must call transition_to() with the
+        authoritative exchange status after calling this method.
+        """
         prev_filled = self.filled_qty
         if filled_qty <= prev_filled:
             return
         self.filled_qty = filled_qty
-        # running weighted average fill price
         if filled_qty > 0:
             self.avg_fill_price = (
                 (prev_filled * self.avg_fill_price + (filled_qty - prev_filled) * fill_price)
                 / filled_qty
             )
-        new_status = OrderStatus.FILLED if filled_qty >= self.quantity else OrderStatus.PARTIALLY_FILLED
-        self.transition_to(new_status)
         self.last_updated_timestamp = int(datetime.datetime.now().timestamp() * 1000)
         
         
@@ -101,12 +103,13 @@ class ActiveOrder(Order):
         if delta > 0:
             self.update_fill(
                 event_order.filled_qty,
-                event_order.last_fill_price or event_order.avg_fill_price,
+                event_order.last_fill_price
             )
             self._prev_filled = event_order.filled_qty
-        if event_order.status != self.status:
-            self.transition_to(event_order.status)
-        self.commission = event_order.commission
+        
+        # Transitions to next status if event_order is'ahead'
+        self.transition_to(event_order.status)
+        self.commission += event_order.commission  # accumulate per-execution commission (Binance field "n")
         self.commission_asset = event_order.commission_asset
         self.last_updated_timestamp = event_order.last_updated_timestamp
         return delta

@@ -235,8 +235,13 @@ class ShadowBook:
     async def _on_balance_update(self, event: BalanceUpdateEvent):
         """Handle balance updates from the private sub-account event bus."""
         if event.asset in _STABLECOINS:
+            old_cash = self._cash
             self._cash_dict[event.asset] = self._cash_dict.get(event.asset, 0.0) + event.delta
             self._cash = sum(self._cash_dict.values())
+            self.logger.info(
+                f"[ShadowBook-{self._strategy_id}] BalanceUpdate: {event.asset} "
+                f"delta={event.delta:+.4f} cash {old_cash:.4f} -> {self._cash:.4f}"
+            )
         else:
             # Map raw asset (e.g. "ETH") to trading symbol (e.g. "ETHUSDT")
             symbol = (
@@ -244,6 +249,7 @@ class ShadowBook:
                 if self._exchange else event.asset
             )
             curr = self._positions.get(symbol)
+            old_qty = curr.quantity if curr else 0.0
             if curr is None:
                 self._positions[symbol] = Position(symbol=symbol, venue=self._venue, quantity=event.delta,
                                                    avg_entry_price=self._mark_prices.get(symbol, 0.0),
@@ -258,6 +264,10 @@ class ShadowBook:
                     total_commission=curr.total_commission,
                     locked_quantity=curr.locked_quantity,
                 )
+            self.logger.info(
+                f"[ShadowBook-{self._strategy_id}] BalanceUpdate: {event.asset} ({symbol}) "
+                f"delta={event.delta:+.6f} qty {old_qty:.6f} -> {old_qty + event.delta:.6f}"
+            )
         self._refresh_derived()
 
     async def _on_order_update(self, event: OrderUpdateEvent):
@@ -287,10 +297,24 @@ class ShadowBook:
                 venue=order.venue or self._venue, strategy_id=order.strategy_id,
             )
             self._active_orders[order_id] = active
+            self.logger.info(
+                f"[ShadowBook-{self._strategy_id}] NEW ORDER tracked: "
+                f"{order.side.value} {order.symbol} qty={order.quantity:.6f} "
+                f"type={order.order_type.value} order_id={order_id} "
+                f"active_orders_count={len(self._active_orders)}"
+            )
 
         delta_filled = active.sync_from_event(order)
 
         if delta_filled > 0:
+            fill_price = order.last_fill_price if order.last_fill_price > 0 else order.avg_fill_price
+            self.logger.info(
+                f"[ShadowBook-{self._strategy_id}] FILL: {order.side.value} {order.symbol} "
+                f"delta_filled={delta_filled:.6f} @ {fill_price:.4f} "
+                f"total_filled={order.filled_qty:.6f}/{order.quantity:.6f} "
+                f"order_id={order_id} commission={order.commission:.6f} {order.commission_asset}"
+            )
+
             # Release lock proportional to this fill increment
             if isinstance(active, ActiveLimitOrder):
                 cash_rel, qty_rel = active.release_partial(delta_filled)
@@ -299,9 +323,13 @@ class ShadowBook:
                     pos = self._positions.get(order.symbol)
                     if pos is not None:
                         pos.locked_quantity = max(0.0, pos.locked_quantity - qty_rel)
+                self.logger.debug(
+                    f"[ShadowBook-{self._strategy_id}] Lock released: "
+                    f"cash_rel={cash_rel:.4f} qty_rel={qty_rel:.6f} "
+                    f"locked_cash={self._locked_cash:.4f}"
+                )
 
             qty_delta = delta_filled if order.side == Side.BUY else -delta_filled
-            fill_price = order.last_fill_price if order.last_fill_price > 0 else order.avg_fill_price
             self.apply_fill(
                 symbol=order.symbol,
                 base_asset=event.base_asset,
@@ -314,6 +342,12 @@ class ShadowBook:
             )
 
         if active.is_terminal:
+            self.logger.info(
+                f"[ShadowBook-{self._strategy_id}] ORDER TERMINAL: {order_id} "
+                f"status={order.status.value} symbol={order.symbol} "
+                f"filled={order.filled_qty:.6f}/{order.quantity:.6f} "
+                f"avg_fill_price={order.avg_fill_price:.4f}"
+            )
             # Drain any remaining reservation (handles partial-fill-then-cancel)
             if isinstance(active, ActiveLimitOrder):
                 cash_rem, qty_rem = active.release_all()
@@ -322,6 +356,11 @@ class ShadowBook:
                     pos = self._positions.get(order.symbol)
                     if pos is not None:
                         pos.locked_quantity = max(0.0, pos.locked_quantity - qty_rem)
+                if cash_rem > 0 or qty_rem > 0:
+                    self.logger.info(
+                        f"[ShadowBook-{self._strategy_id}] Remaining lock drained: "
+                        f"cash_rem={cash_rem:.4f} qty_rem={qty_rem:.6f}"
+                    )
             self._active_orders.pop(order_id, None)
             self._completed_order_ids.add(order_id)
 
@@ -514,6 +553,7 @@ class ShadowBook:
         # updated in parallel. _cash is authoritative; _cash_dict is the
         # breakdown. Non-stablecoin commissions (BNB etc.) are tracked only
         # in _total_commission_dict and do NOT reduce the stablecoin balance.
+        old_cash = self._cash
         notional = abs(qty_delta) * price
         if qty_delta > 0:  # BUY: spend quote asset
             self._cash -= notional
@@ -541,10 +581,14 @@ class ShadowBook:
             timestamp=int(time.time() * 1000),
         ))
 
-        self.logger.debug(
-            f"[ShadowBook-{self._strategy_id}] Fill: {side.value} {symbol} "
+        self.logger.info(
+            f"[ShadowBook-{self._strategy_id}] apply_fill: {side.value} {symbol} "
             f"qty={abs(qty_delta):.6f} @ {price:.4f} "
-            f"(pos {old_qty:.6f} -> {new_qty:.6f})"
+            f"pos {old_qty:.6f} -> {new_qty:.6f} "
+            f"cash {old_cash:.4f} -> {self._cash:.4f} "
+            f"notional={notional:.4f} commission={commission:.6f} {commission_asset or ''} | "
+            f"NAV={self._nav:.4f} realized_pnl={self._realized_pnl:.4f} "
+            f"total_comm={self.total_commission:.4f}"
         )
 
     def mark_to_market(self, mark_prices: Dict[str, float]):
@@ -610,6 +654,13 @@ class ShadowBook:
             pos = self._positions.get(intent.symbol)
             if pos is not None:
                 pos.locked_quantity += active.reserved_qty
+
+        self.logger.info(
+            f"[ShadowBook-{self._strategy_id}] lock_for_order: {intent.side.value} {intent.symbol} "
+            f"order_id={order_id} qty={intent.quantity:.6f} @ {intent.price} "
+            f"reserved_cash={active.reserved_cash:.4f} reserved_qty={active.reserved_qty:.6f} "
+            f"locked_cash={self._locked_cash:.4f} free_cash={self.free_cash:.4f}"
+        )
 
     @property
     def free_cash(self) -> float:
@@ -680,6 +731,7 @@ class ShadowBook:
         }
 
         try:
+            print(f"[ShadowBook-{self._strategy_id}]:\n" + '\n'.join(f"{k}: {v}" for k, v in self.snapshot().items()))
             PortfolioSnapshot.create(
                 strategy_id=self._strategy_id,
                 venue=self._venue,

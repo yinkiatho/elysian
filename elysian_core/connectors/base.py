@@ -10,6 +10,7 @@ import collections
 import datetime
 import pandas as pd
 from elysian_core.core.enums import Side, OrderStatus, Venue
+from elysian_core.config.app_config import StrategyConfig   
 from elysian_core.core.order import Order
 from elysian_core.core.market_data import OrderBook
 import elysian_core.utils.logger as log
@@ -372,9 +373,13 @@ class SpotExchangeConnector(ABC):
                        symbols: List[str],
                        file_path: Optional[str] = None,
                        kline_manager: Optional[KlineClientManager]= None,
-                       ob_manager: Optional[OrderBookClientManager] = None):
-        self.logger = log.setup_custom_logger("root")
-        # Initit
+                       ob_manager: Optional[OrderBookClientManager] = None,
+                       strategy_config: Optional[StrategyConfig] = None):
+        
+        if strategy_config:
+            self.logger = log.setup_custom_logger(f"{strategy_config.strategy_name}_{strategy_config.strategy_id}")
+        else:
+            self.logger = log.setup_custom_logger("root")
         self._api_key = api_key
         self._api_secret = api_secret
         self._symbols = symbols

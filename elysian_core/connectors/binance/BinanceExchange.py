@@ -18,7 +18,7 @@ from elysian_core.core.enums import OrderStatus, Side, TradeType, _BINANCE_SIDE,
 from elysian_core.core.order import Order   
 from elysian_core.core.market_data import Kline, OrderBook, BinanceOrderBook
 from elysian_core.db.database import DATABASE
-from elysian_core.connectors.BinanceDataConnectors import (
+from elysian_core.connectors.binance.BinanceDataConnectors import (
     BinanceKlineClientManager,
     BinanceOrderBookClientManager,
     BinanceKlineFeed,
@@ -26,6 +26,7 @@ from elysian_core.connectors.BinanceDataConnectors import (
     BinanceUserDataClientManager,
 )
 from elysian_core.db.models import CexTrade
+from elysian_core.config.app_config import StrategyConfig
 import elysian_core.utils.logger as log
 import argparse
 
@@ -68,6 +69,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
         ob_manager: Optional[BinanceOrderBookClientManager] = None,
         user_data_manager: Optional[BinanceUserDataClientManager] = None,
         event_bus=None,
+        strategy_config: Optional[StrategyConfig] = None
     ):
 
         super().__init__(
@@ -77,15 +79,13 @@ class BinanceSpotExchange(SpotExchangeConnector):
             symbols=symbols,
             file_path=file_path,
             kline_manager=kline_manager,
-            ob_manager=ob_manager
+            ob_manager=ob_manager,
+            strategy_config=strategy_config
         )
 
-        # user data
+        # user data — owns event bus publishing and event parsing
         self.user_data_manager = user_data_manager or BinanceUserDataClientManager(api_key, api_secret)
-
-        # Event bus for strategy hooks
-        self._event_bus = event_bus
-        if event_bus and self.user_data_manager:
+        if event_bus:
             self.user_data_manager.set_event_bus(event_bus)
 
     
@@ -97,9 +97,8 @@ class BinanceSpotExchange(SpotExchangeConnector):
         for sym in self._symbols:
             await self._fetch_symbol_info(sym)
             
-        # Pass the token_infos to the UserDataClientManager
-        if self.user_data_manager:
-            self.user_data_manager.set_token_info(self._token_infos)
+        # Pass token info to manager so it can populate base/quote in OrderUpdateEvent
+        self.user_data_manager.set_token_info(self._token_infos)
 
         # start user-data listener
         try:
@@ -129,7 +128,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
                                      "quote_asset": info["quoteAsset"], 
                                      "base_asset_precision": info["baseAssetPrecision"], 
                                      "quote_asset_precision": info["quoteAssetPrecision"]}
-        self.logger.info(f"[{symbol}] step={step_size} min_notional={min_notional}")
+        #self.logger.info(f"[{symbol}] step={step_size} min_notional={min_notional}")
 
 
     # ── Account ───────────────────────────────────────────────────────────────
@@ -140,122 +139,60 @@ class BinanceSpotExchange(SpotExchangeConnector):
             self._balances[b["asset"]] = float(b["free"])
 
 
-    def _handle_user_data(self, msg: dict):
-        """Callback invoked by the user-data manager when an event arrives."""
-        et = msg.get("e")
-        if et == "balanceUpdate":
-            asset = msg.get("a")
-            delta = float(msg.get("d", 0))
+    def _handle_user_data(self, event: dict) -> None:
+        """Callback receiving normalized events from BinanceUserDataClientManager.
+        
+        Only responsible for state updates (_balances, _open_orders).
+        Parsing and event bus publishing are handled by the manager.
+        """
+        t = event["type"]
+        if t == "balance_update":
+            asset, delta = event["asset"], event["delta"]
             self._balances[asset] = self._balances.get(asset, 0.0) + delta
             self.logger.info(f"[{asset}] balance update delta={delta:.6f} new={self._balances[asset]:.6f}")
-            
-        elif et == "outboundAccountPosition":
-            for bal in msg.get("B", []):
-                asset = bal.get("a")
-                free = float(bal.get("f", 0))
-                locked = float(bal.get("l", 0))
-                self._balances[asset] = free + locked
-            self.logger.info("outboundAccountPosition update applied to balances")
-        
-        
-        # other event types could be handled here (executionReport, etc.)
-        elif et == "executionReport":
-            self.logger.info(f"Received execution report @ {datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))}")
-            self._handle_execution_report(msg)
-            
-    def _handle_execution_report(self, msg: dict):
-        """
-        Handles the execution report user data streams, mainly updates all orders.
-        
-        Key fields:
-        i  -> Order ID
-        s  -> Symbol
-        X  -> Current order status (NEW, PARTIALLY_FILLED, FILLED, CANCELED, REJECTED, EXPIRED)
-        x  -> Execution type
-        z  -> Cumulative filled quantity
-        Z  -> Cumulative quote asset transacted quantity (Z/z = avg price)
-        L  -> Last executed price
-        l  -> Last executed quantity
-        n  -> Commission amount
-        N  -> Commission asset
-        """
-        order_id = str(msg.get("i"))
-        symbol   = msg.get("s")
-        status   = msg.get("X")  # current order status
-        exec_type = msg.get("x") # execution type
-        strategy_id = msg.get('strategyId')
-        internal_status = _BINANCE_STATUS.get(status)
-        if internal_status is None:
-            self.logger.warning(f"[{symbol}] Unknown order status '{status}' for order {order_id}")
-            return
 
+        elif t == "account_position":
+            for b in event["balances"]:
+                self._balances[b["asset"]] = b["free"] + b["locked"]
+            self.logger.info("outboundAccountPosition update applied to balances")
+
+        elif t == "execution_report":
+            self.logger.info(f"Received execution report @ {datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))}")
+            self._handle_execution_report(event["order"], event["exec_type"])
+            
+    def _handle_execution_report(self, order: Order, exec_type: str) -> None:
+        """Update _open_orders from a parsed Order received via the user-data callback."""
+        symbol, order_id = order.symbol, order.id
         symbol_orders = self._open_orders.get(symbol, {})
 
-        # ── NEW order arriving for the first time ────────────────────────────────
+        # ── NEW order ────────────────────────────────────────────────────────────
         if exec_type == "NEW" and order_id not in symbol_orders:
-            side      = Side.BUY if msg.get("S") == "BUY" else Side.SELL
-            raw_type  = msg.get("o", "LIMIT")
-            if raw_type.lower() == OrderType.MARKET.value.lower():
-                order_type = OrderType.MARKET
-            elif raw_type.lower() == OrderType.LIMIT.value.lower():
-                order_type = OrderType.LIMIT
-            else:
-                order_type = OrderType.OTHERS
-                
-
-            order = Order(
-                id          = order_id,
-                symbol      = symbol,
-                side        = side,
-                order_type  = order_type,
-                quantity    = float(msg.get("q", 0)),
-                price       = float(msg.get("p", 0)) or None,
-                status      = internal_status,
-                timestamp   = datetime.datetime.fromtimestamp(
-                                msg.get("O", 0) / 1000,
-                                tz=datetime.timezone.utc
-                            ),
-                venue       = Venue.BINANCE,
-                commission      = float(msg.get("n", 0)),
-                commission_asset = msg.get("N"),
-                last_updated_timestamp = int(msg.get('E')),
-                strategy_id=strategy_id
-            )
             self._open_orders[symbol][order_id] = order
-            self.logger.info(f"[{symbol}] New order registered: {order}")
+            self.logger.info(f"[BinanceExchange] [{symbol}] New order registered: {order}")
             return
 
         # ── Update existing order ─────────────────────────────────────────────────
-        else:
-            order = symbol_orders.get(order_id)
-            if order is None:
-                self.logger.warning(f"[{symbol}] executionReport for unknown order {order_id} (status={status}), skipping")
-                return
+        existing = symbol_orders.get(order_id)
+        if existing is None:
+            self.logger.warning(f"[{symbol}] executionReport for unknown order {order_id}, skipping")
+            return
 
-            cum_filled_qty = float(msg.get("z", 0))
-            cum_quote_qty  = float(msg.get("Z", 0))
-            last_price     = float(msg.get("L", 0))
+        # Use Binance's cumulative fields as the authoritative source — don't recompute
+        if order.filled_qty > existing.filled_qty:
+            existing.filled_qty = order.filled_qty # z  — cumulative filled qty
+            existing.avg_fill_price = order.avg_fill_price # Z/z — cumulative avg price (authoritative)
+            existing.last_fill_price = order.last_fill_price # L — last executed price
 
-            # Compute avg fill price from cumulative fields (more accurate than last price)
-            avg_price = (cum_quote_qty / cum_filled_qty) if cum_filled_qty > 0 else last_price
+        # n is per-execution commission (not cumulative) — accumulate across partial fills
+        existing.commission += order.commission
+        existing.commission_asset = order.commission_asset or existing.commission_asset
+        existing.last_updated_timestamp = order.last_updated_timestamp
+        existing.transition_to(order.status)  # X — Binance is source of truth for status
+        self.logger.info(f"[BinanceExchange] [{symbol}] Order updated: {existing}")
 
-            if cum_filled_qty > order.filled_qty:
-                order.update_fill(cum_filled_qty, avg_price)
-
-            # Commission is cumulative per execution; take the latest
-            order.commission += float(msg.get("n", 0))
-            order.commission_asset = msg.get("N") or order.commission_asset
-
-            # Validate and apply status from exchange (source of truth).
-            # transition_to logs a warning on invalid transitions but always applies.
-            # Pass the new status here and if validate correct then own order object will transition to that new status
-            order.transition_to(internal_status)  
-            self.logger.info(f"[{symbol}] Order updated: {order}")
-
-            # ── Remove terminal orders from open-orders registry ─────────────────────
-            if order.is_terminal:
-                self._open_orders[symbol].pop(order_id, None)
-                self.logger.info(f"[{symbol}] Order {order_id} removed from open orders (status={status})")
+        if existing.is_terminal:
+            self._open_orders[symbol].pop(order_id, None)
+            self.logger.info(f"[BinanceExchange] [{symbol}] Order {order_id} removed from open orders")
         
         
     async def monitor_balances(self, poll_interval = 10):

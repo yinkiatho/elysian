@@ -3,35 +3,35 @@ import asyncio
 import os
 import datetime
 import sys
-from elysian_core.connectors.BinanceExchange import (
+from elysian_core.connectors.binance.BinanceExchange import (
     BinanceSpotExchange
 )
 
-from elysian_core.connectors.BinanceDataConnectors import (
+from elysian_core.connectors.binance.BinanceDataConnectors import (
     BinanceKlineFeed,
     BinanceOrderBookFeed,
     BinanceKlineClientManager,
     BinanceOrderBookClientManager
 )
 
-from elysian_core.connectors.BinanceFuturesDataConnectors import (
+from elysian_core.connectors.binance.BinanceFuturesDataConnectors import (
     BinanceFuturesOrderBookFeed,
     BinanceFuturesKlineFeed,
     BinanceFuturesKlineClientManager,
     BinanceFuturesOrderBookClientManager,
 )
-from elysian_core.connectors.BinanceFuturesExchange import BinanceFuturesExchange
+from elysian_core.connectors.binance.BinanceFuturesExchange import BinanceFuturesExchange
 
-from elysian_core.connectors.AsterDataConnectors import (
+from elysian_core.connectors.aster.AsterDataConnectors import (
     AsterKlineFeed,
     AsterOrderBookFeed,
     AsterKlineClientManager,
     AsterOrderBookClientManager
 )
 
-from elysian_core.connectors.AsterExchange import AsterSpotExchange
+from elysian_core.connectors.aster.AsterExchange import AsterSpotExchange
 
-from elysian_core.connectors.AsterPerpDataConnectors import (
+from elysian_core.connectors.aster.AsterPerpDataConnectors import (
     AsterPerpKlineClientManager,
     AsterPerpOrderBookClientManager,
     AsterPerpKlineFeed,
@@ -40,6 +40,7 @@ from elysian_core.connectors.AsterPerpDataConnectors import (
 # TODO: AsterPerpExchange source was deleted — re-add when perp connector is rebuilt
 # from elysian_core.connectors.AsterExchange import AsterPerpExchange
 # from elysian_core.connectors.VolatilityBarbClient import VolatilityBarbClientLocal, RedisConfig
+
 from elysian_core.utils.logger import setup_custom_logger
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
@@ -637,7 +638,7 @@ class StrategyRunner:
             self._portfolio_dict[asset_type][exchange_enum] = portfolio
             self._start_snapshot_task(portfolio.save_snapshot, portfolio.name)
             self.logger.info(
-                f"[Runner] {venue} {asset_type.value} Portfolio aggregator initialized"
+                f"[Runner] {venue} {asset_type.value} Super Account Portfolio Aggregator initialized"
             )
 
     def _setup_risk(self, portfolio: Portfolio, asset_type: AssetType, venue: Venue) -> None:
@@ -845,6 +846,7 @@ class StrategyRunner:
             kline_manager=self.binance_kline_manager,    # shared, unauthenticated
             ob_manager=self.binance_ob_manager,          # shared, unauthenticated
             event_bus=private_bus,                       # private bus for account events
+            strategy_config=strategy_config,                   # pass full strategy config for any custom needs (e.g., execution overrides
         )
         await exchange.run()
         self.logger.info(

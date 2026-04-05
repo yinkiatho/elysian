@@ -10,7 +10,7 @@ from binance.exceptions import BinanceAPIException
 from binance.helpers import round_step_size
 
 from elysian_core.connectors.base import FuturesExchangeConnector
-from elysian_core.connectors.BinanceFuturesDataConnectors import (
+from elysian_core.connectors.binance.BinanceFuturesDataConnectors import (
     BinanceFuturesKlineClientManager,
     BinanceFuturesOrderBookClientManager,
     BinanceFuturesUserDataClientManager,

@@ -1,5 +1,4 @@
 import asyncio
-import collections
 import datetime
 import hashlib
 import hmac
@@ -8,24 +7,19 @@ import statistics
 import time
 from datetime import datetime as dt
 from typing import Any, Dict, List, Optional, Callable
-from urllib.parse import urlencode
 
 import requests
 import websockets
 import json
 from binance import AsyncClient, BinanceSocketManager
 from binance.exceptions import BinanceAPIException
-from binance.helpers import round_step_size
 
 from elysian_core.connectors.base import AbstractDataFeed, KlineClientManager, OrderBookClientManager
-from elysian_core.core.enums import OrderStatus, Side, TradeType, _BINANCE_SIDE, _BINANCE_STATUS, AssetType, Venue, OrderType
+from elysian_core.core.enums import Venue, Side, _BINANCE_STATUS, OrderType
 from elysian_core.core.order import Order
 from elysian_core.core.market_data import Kline, OrderBook, BinanceOrderBook
 from elysian_core.core.events import KlineEvent, OrderBookUpdateEvent, OrderUpdateEvent, BalanceUpdateEvent
-from elysian_core.db.database import DATABASE
-from elysian_core.db.models import CexTrade
 import elysian_core.utils.logger as log
-import argparse
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -605,11 +599,13 @@ class BinanceUserDataClientManager:
         self._ws: Optional[Any] = None
         self._reader_task: Optional[asyncio.Task] = None
         self._subscribers: List[Callable[[dict], None]] = []
-        self._event_bus = None  # Optional EventBus — set via set_event_bus()
-        self.token_infos = {}  # Cache for token info (e.g., decimals) keyed by symbol
-        
-        
-    def set_token_info(self, token_infos: dict):
+        self._event_bus = None
+        self.token_infos: dict = {}
+
+    def set_event_bus(self, event_bus) -> None:
+        self._event_bus = event_bus
+
+    def set_token_info(self, token_infos: dict) -> None:
         self.token_infos = token_infos
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -724,36 +720,21 @@ class BinanceUserDataClientManager:
                         if event is None:
                             continue
 
-                        # Existing sync callbacks (e.g. BinanceSpotExchange._handle_user_data)
+                        # Parse raw WS event into a normalized dict
+                        parsed = self._parse_user_data_event(event)
+                        if parsed is None:
+                            continue
+
+                        # State update: callbacks receive normalized data, not raw WS fields
                         for cb in self._subscribers:
                             try:
-                                cb(event)
+                                cb(parsed)
                             except Exception as e:
                                 self.logger.error(f"BinanceUserDataClientManager: callback error: {e}")
 
-                        # Async event bus dispatch for strategy hooks
+                        # Event bus publish
                         if self._event_bus is not None:
-                            et = event.get("e")
-                            ts = int(event.get("E", time.time() * 1000))
-                            if et == "executionReport":
-                                order = self._parse_execution_to_order(event)
-                                if order:
-                                    await self._event_bus.publish(OrderUpdateEvent(
-                                        symbol=event.get("s"),
-                                        base_asset=self.token_infos.get(event.get("s"), {}).get("baseAsset", ""),
-                                        quote_asset=self.token_infos.get(event.get("s"), {}).get("quoteAsset", ""),
-                                        venue=Venue.BINANCE,
-                                        order=order,
-                                        timestamp=ts,
-                                    ))
-                            elif et == "balanceUpdate":
-                                await self._event_bus.publish(BalanceUpdateEvent(
-                                    asset=event.get("a"),
-                                    venue=Venue.BINANCE,
-                                    delta=float(event.get("d", 0)),
-                                    new_balance=0.0,
-                                    timestamp=ts,
-                                ))
+                            await self._dispatch_to_event_bus(parsed)
 
             except asyncio.CancelledError:
                 break
@@ -782,53 +763,103 @@ class BinanceUserDataClientManager:
         except ValueError:
             pass
 
-    def set_event_bus(self, event_bus):
-        """Inject an EventBus for pushing typed events to strategy hooks."""
-        self._event_bus = event_bus
 
-    # ── Event parsing helpers ──────────────────────────────────────────────────
+    # ── Event parsing ─────────────────────────────────────────────────────────
+    def _parse_user_data_event(self, event: dict) -> Optional[dict]:
+        """Parse a raw WS event dict into a normalized structure for callbacks."""
+        et = event.get("e")
+        ts = int(event.get("E", int(time.time() * 1000)))
+
+        if et == "balanceUpdate":
+            return {
+                "type": "balance_update",
+                "asset": event.get("a"),
+                "delta": float(event.get("d", 0)),
+                "ts": ts,
+            }
+        elif et == "outboundAccountPosition":
+            return {
+                "type": "account_position",
+                "balances": [
+                    {"asset": b.get("a"), "free": float(b.get("f", 0)), "locked": float(b.get("l", 0))}
+                    for b in event.get("B", [])
+                ],
+                "ts": ts,
+            }
+        elif et == "executionReport":
+            order = self._parse_execution_report(event)
+            if order is None:
+                return None
+            return {
+                "type": "execution_report",
+                "order": order,
+                "exec_type": event.get("x"),
+                "ts": ts,
+            }
+        return None
+
+    async def _dispatch_to_event_bus(self, parsed: dict) -> None:
+        """Publish a typed event to the event bus based on parsed event type."""
+        t = parsed["type"]
+        ts = parsed["ts"]
+        if t == "balance_update":
+            await self._event_bus.publish(BalanceUpdateEvent(
+                asset=parsed["asset"],
+                venue=Venue.BINANCE,
+                delta=parsed["delta"],
+                new_balance=0.0,
+                timestamp=ts,
+            ))
+        elif t == "execution_report":
+            order = parsed["order"]
+            symbol = order.symbol
+            await self._event_bus.publish(OrderUpdateEvent(
+                symbol=symbol,
+                base_asset=self.token_infos.get(symbol, {}).get("base_asset", ""),
+                quote_asset=self.token_infos.get(symbol, {}).get("quote_asset", ""),
+                venue=Venue.BINANCE,
+                order=order,
+                timestamp=ts,
+            ))
 
     @staticmethod
-    def _parse_execution_to_order(msg: dict) -> Optional[Order]:
-        """Parse a raw executionReport dict into an Order dataclass for event emission.
-
-        Field mappings mirror BinanceSpotExchange._handle_execution_report.
-        """
+    def _parse_execution_report(msg: dict) -> Optional[Order]:
+        """Parse a raw executionReport WS event into an Order object."""
         status = _BINANCE_STATUS.get(msg.get("X"))
         if status is None:
             return None
 
-        strategy_id = msg.get('j', None)
         side = Side.BUY if msg.get("S") == "BUY" else Side.SELL
-        raw_type = msg.get("o", "LIMIT")
-        if raw_type.upper() == "MARKET":
+        raw_type = msg.get("o", "LIMIT").upper()
+        if raw_type == "MARKET":
             order_type = OrderType.MARKET
-        elif raw_type.upper() == "LIMIT":
+        elif raw_type == "LIMIT":
             order_type = OrderType.LIMIT
         else:
             order_type = OrderType.OTHERS
 
         cum_filled = float(msg.get("z", 0))
-        cum_quote = float(msg.get("Z", 0))
-        avg_price = (cum_quote / cum_filled) if cum_filled > 0 else float(msg.get("L", 0))
+        cum_quote  = float(msg.get("Z", 0))
+        avg_price  = (cum_quote / cum_filled) if cum_filled > 0 else float(msg.get("L", 0))
 
         return Order(
-            id=str(msg.get("i")),
-            symbol=msg.get("s"),
-            side=side,
-            order_type=order_type,
-            quantity=float(msg.get("q", 0)),
-            price=float(msg.get("p", 0)) or None,
-            status=status,
-            avg_fill_price=avg_price,
-            last_fill_price=float(msg.get("L", 0)),
-            filled_qty=cum_filled,
-            timestamp=datetime.datetime.fromtimestamp(
-                msg.get("O", 0) / 1000, tz=datetime.timezone.utc
-            ),
-            venue=Venue.BINANCE,
-            commission=float(msg.get("n", 0)),
-            commission_asset=msg.get("N"),
-            last_updated_timestamp=int(msg.get("E", 0)),
-            strategy_id=strategy_id
-        )
+                    id = str(msg.get("i")),
+                    symbol = msg.get("s"),
+                    side = side,
+                    order_type = order_type,
+                    quantity = float(msg.get("q", 0)),
+                    price = float(msg.get("p", 0)) or None,
+                    status = status,
+                    avg_fill_price = avg_price,
+                    last_fill_price = float(msg.get("L", 0)),
+                    filled_qty = cum_filled,
+                    timestamp = datetime.datetime.fromtimestamp(
+                                                msg.get("O", 0) / 1000, tz=datetime.timezone.utc
+                                            ),
+                    venue = Venue.BINANCE,
+                    commission = float(msg.get("n", 0)),
+                    commission_asset = msg.get("N"),
+                    last_updated_timestamp = int(msg.get("E", 0)),
+                    strategy_id = msg.get("j"),
+                )
+
