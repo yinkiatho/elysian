@@ -41,7 +41,7 @@ from elysian_core.connectors.aster.AsterPerpDataConnectors import (
 # from elysian_core.connectors.AsterExchange import AsterPerpExchange
 # from elysian_core.connectors.VolatilityBarbClient import VolatilityBarbClientLocal, RedisConfig
 
-from elysian_core.utils.logger import setup_custom_logger
+from elysian_core.utils.logger import setup_custom_logger, shutdown_discord, init_discord_logging
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
 from elysian_core.core.event_bus import EventBus
@@ -55,7 +55,9 @@ from elysian_core.config.app_config import AppConfig, load_app_config, load_stra
 from elysian_core.strategy.base_strategy import SpotStrategy
 from elysian_core.core.shadow_book import ShadowBook
 from elysian_core.db.models import create_tables
+from dotenv import load_dotenv
 
+load_dotenv()
 
 # Add parent directory to path so imports work when running this script directly
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -65,8 +67,6 @@ from elysian_core.strategy.example_weight_strategy_v2_event_driven import EventD
     
 if sys.platform.startswith('win'):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-        
-logger = setup_custom_logger('root')
 
 class StrategyRunner:
     """Main strategy runner class that orchestrates all trading components."""
@@ -95,7 +95,9 @@ class StrategyRunner:
         if config_yaml is not None:
             trading_config_yaml = config_yaml
 
-        self.logger = setup_custom_logger('root')
+        
+        
+        self.logger = setup_custom_logger('root', False)
         self.logger.info(
             f'Kickstarted StrategyRunner with trading_config={trading_config_yaml}, '
             f'strategy_yamls={strategy_config_yamls}, json={config_json} at PWD: {os.getcwd()}'
@@ -216,7 +218,7 @@ class StrategyRunner:
     
     async def _cleanup(self, tasks_groups: list) -> None:
         """Cleanup function to properly shutdown all tasks and client managers."""
-        self.logger.info("Starting cleanup...")
+        self.logger.info("Starting cleanup tasks ........")
         
         # Stop shared client managers first
         await self.binance_kline_manager.stop()
@@ -227,6 +229,9 @@ class StrategyRunner:
         await self.aster_ob_manager.stop()
         await self.aster_futures_kline_manager.stop()
         await self.aster_futures_ob_manager.stop()
+        
+        # Shut down discrod
+        await shutdown_discord()
         
         for tasks in tasks_groups:
             for task in tasks:
@@ -890,6 +895,14 @@ class StrategyRunner:
         asyncio event loop.  Heavy compute is offloaded via
         ``strategy.run_heavy()``.
         """
+        # Initialize Discord logging 
+        token = os.getenv('DISCORD_TOKEN')
+        guild_id_str = os.getenv('DISCORD_GUILD_ID')
+        if token and guild_id_str:
+            await init_discord_logging(token=token, guild_id=int(guild_id_str))
+        else:
+            self.logger.warning("Warning: Discord logging not configured (missing env variables)")
+        
         
         # Premake the Strategies, ids and strategy_names
         strategies, strategy_ids, strategy_names = [], [], []
@@ -974,7 +987,7 @@ class StrategyRunner:
                 #                 await exchange.stop()
                 #             except Exception as e:
                 #                 self.logger.error(f"Error stopping exchange connector for {asset_type.value} {venue.value}: {e}", exc_info=True)
-                                
+                
                 await asyncio.gather(*[strategy.stop() for strategy in strategies])
 
         except asyncio.CancelledError:
@@ -1009,8 +1022,6 @@ async def cleanup(tasks_groups):
             await asyncio.gather(*tasks, return_exceptions=True)
 
 
-
-
     
 async def run_test_strategy(
     trading_config_yaml: str = 'elysian_core/config/trading_config.yaml',
@@ -1041,8 +1052,6 @@ if __name__ == "__main__":
 
     if sys.platform.startswith('win'):
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
-    logger.info("Running in TEST-STRATEGY mode")
     
     trading_config_yaml = 'elysian_core/config/trading_config.yaml'
     strategy_config_yamls = [

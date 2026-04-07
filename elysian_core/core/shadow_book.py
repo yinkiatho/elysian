@@ -131,7 +131,6 @@ class ShadowBook:
         for asset, qty in exchange._balances.items():
             if asset in _STABLECOINS or qty <= 0:
                 continue
-            
             symbol = exchange.base_asset_to_symbol(asset)
             if symbol is None or (self._tracked_symbols and symbol not in self._tracked_symbols):
                 continue
@@ -585,8 +584,7 @@ class ShadowBook:
             self._cash_dict[quote_asset] = self._cash_dict.get(quote_asset, 0.0) + notional
 
         # Stablecoin commissions reduce the cash balance; non-stablecoin
-        # commissions (e.g. BNB) are paid from a separate BNB balance and
-        # do not affect the quote-asset cash.
+        # commissions (e.g. BNB) are paid from a separate BNB balance and do not affect the quote-asset cash.
         if commission_asset in _STABLECOINS and commission > 0:
             self._cash -= commission
             self._cash_dict[commission_asset] = (
