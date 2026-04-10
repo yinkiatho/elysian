@@ -418,14 +418,16 @@ def load_app_config(
     else:
         load_dotenv()
 
+    # These are for MAIN ACCOUNT CONFIGS AND KEYS
     secrets = SecretsConfig(
+        
         binance=ExchangeSecrets(
-            api_key=os.getenv("BINANCE_API_KEY_0", ""),
-            api_secret=os.getenv("BINANCE_API_SECRET_0", ""),
+            api_key=os.getenv("BINANCE_API_KEY", ""),
+            api_secret=os.getenv("BINANCE_API_SECRET", ""),
         ),
         aster=ExchangeSecrets(
-            api_key=os.getenv("ASTER_API_KEY_0", ""),
-            api_secret=os.getenv("ASTER_API_SECRET_0", ""),
+            api_key=os.getenv("ASTER_API_KEY", ""),
+            api_secret=os.getenv("ASTER_API_SECRET", ""),
         ),
         binance_wallet_address=os.getenv("BINANCE_WALLET_ADDRESS", ""),
         postgres_user=os.getenv("POSTGRES_USER", ""),

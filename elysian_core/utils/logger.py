@@ -95,7 +95,7 @@ async def shutdown_discord():
         _discord_bot_manager = None
          
     
-def setup_custom_logger(name, log_level=logging.INFO, enable_discord=True):
+def setup_custom_logger(name, log_level=logging.INFO):
     if loggers.get(name):
         return loggers[name]
 
@@ -103,7 +103,7 @@ def setup_custom_logger(name, log_level=logging.INFO, enable_discord=True):
     loggers[name] = logger
 
     path = pathlib.Path(__file__).parent.resolve()
-    
+
     # Include filename and line number in the formatter
     formatter = logging.Formatter(fmt='%(asctime)s - %(levelname)s - %(module)s - %(filename)s:%(lineno)d - %(message)s')
 
@@ -127,9 +127,9 @@ def setup_custom_logger(name, log_level=logging.INFO, enable_discord=True):
     # Add both handlers
     logger.addHandler(stream_handler)
     logger.addHandler(file_handler)
-    
-    # Discord handler
-    if enable_discord and _discord_bot_manager is not None:
+
+    # Discord handler — only active if init_discord_logging() was called (controlled by app_config.yaml)
+    if _discord_bot_manager is not None:
         _add_discord_handler_to_logger(logger)
-        
+
     return logger

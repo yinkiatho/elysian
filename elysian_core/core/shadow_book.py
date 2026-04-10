@@ -109,6 +109,15 @@ class ShadowBook:
         self._cash_dict: Dict[str, float] = {}
         self._private_event_bus = None         # per-strategy bus for user data events
 
+        # Maps base_asset → trading symbol for positions currently held.
+        # Used to resolve commission_asset → position for non-stablecoin fee deduction.
+        self._asset_symbol_map: Dict[str, str] = {}
+
+        # Tracks non-stablecoin commission quantities deducted from position qty.
+        # Excluded from total_commission() to avoid double-counting in net_pnl
+        # (the cost is already reflected via the reduced position value in NAV).
+        self._position_deducted_comm: Dict[str, float] = {}
+
 
     # ── Initialization ────────────────────────────────────────────────────
     def sync_from_exchange(self, exchange, feeds: Optional[Dict] = None):
@@ -175,13 +184,7 @@ class ShadowBook:
 
         self._refresh_derived()
         self._peak_equity = max(self._peak_equity, self._nav)
-        self.logger.info(
-            f"[ShadowBook-{self._strategy_id}] Synced from exchange: "
-            f"cash={self._cash:.2f} ({self._cash_dict}), "
-            f"{len(self._positions)} positions, "
-            f"{len(self._mark_prices)} mark prices, "
-            f"{len(self._active_orders)} open orders"
-        )
+        self.logger.info(f"[ShadowBook-{self._strategy_id}] Snapshot after sync:\n{self.log_snapshot()}")
 
     def init_from_portfolio_cash(
         self, portfolio_cash: float, mark_prices: Optional[Dict[str, float]] = None,
@@ -243,6 +246,15 @@ class ShadowBook:
         """Update mark prices from kline close price and refresh derived metrics."""
         if event.venue == self._venue and event.kline.close and event.kline.close > 0:
             self._mark_prices[event.symbol] = event.kline.close
+            # Patch avg_entry_price for positions synced at startup before feeds had data.
+            # Using current mark price as cost basis avoids inflated unrealized/realized PnL.
+            pos = self._positions.get(event.symbol)
+            if pos is not None and pos.avg_entry_price == 0.0 and pos.quantity > 0:
+                pos.avg_entry_price = event.kline.close
+                self.logger.info(
+                    f"[ShadowBook-{self._strategy_id}] Patched avg_entry_price for "
+                    f"{event.symbol} to {event.kline.close:.6f} (was 0.0 at sync-time)"
+                )
             self._refresh_derived()
 
     async def _on_balance_update(self, event: BalanceUpdateEvent):
@@ -280,7 +292,7 @@ class ShadowBook:
                     quantity=curr.quantity + event.delta,
                     avg_entry_price=curr.avg_entry_price,
                     realized_pnl=curr.realized_pnl,
-                    total_commission=curr.total_commission,
+                    commission_by_asset=dict(curr.commission_by_asset),
                     locked_quantity=curr.locked_quantity,
                 )
             self.logger.info(
@@ -482,7 +494,7 @@ class ShadowBook:
         return self._cash / nav if nav > 0 else 1.0
 
     def net_pnl(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
-        return self._realized_pnl + self.unrealized_pnl(mark_prices) - self.total_commission
+        return self._realized_pnl + self.unrealized_pnl(mark_prices) - self.total_commission(mark_prices)
 
     @property
     def fills(self) -> List[Fill]:
@@ -492,11 +504,20 @@ class ShadowBook:
     def realized_pnl(self) -> float:
         return self._realized_pnl
 
-    @property
-    def total_commission(self) -> float:
-        total_com = sum(self.mark_prices.get(symbol, 1.0) * 
-                        quantity for symbol, quantity in self._total_commission_dict.items())
-        return total_com
+    def total_commission(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
+        """Total commissions converted to USDT.
+
+        Excludes amounts already reflected in position qty reductions
+        (_position_deducted_comm) to avoid double-counting in net_pnl.
+        Uses _asset_symbol_map to correctly resolve raw asset names (e.g. 'BNB')
+        to their trading-pair mark price (e.g. 'BNBUSDT').
+        """
+        prices = mark_prices if mark_prices is not None else self._mark_prices
+        resolve = lambda asset: prices.get(self._asset_symbol_map.get(asset, asset), prices.get(asset, 1.0))
+        return sum(map(
+            lambda item: max(0.0, item[1] - self._position_deducted_comm.get(item[0], 0.0)) * resolve(item[0]),
+            self._total_commission_dict.items()
+        ))
 
     @property
     def peak_equity(self) -> float:
@@ -526,6 +547,9 @@ class ShadowBook:
         Cash is adjusted here because _on_balance_update only handles
         deposits/withdrawals, not trade fills.
         """
+        # Keep base_asset → symbol map current so commission deductions can resolve positions.
+        self._asset_symbol_map[base_asset] = symbol
+
         if abs(qty_delta) < 1e-12:
             return
 
@@ -556,24 +580,47 @@ class ShadowBook:
                 # Position flipped direction
                 pos.avg_entry_price = price
 
-        # Commission tracking — always record in dict keyed by asset.
-        # Position.total_commission is a raw quantity (not USDT-converted);
-        # total_commission property does the USDT conversion via mark_prices.
-        pos.total_commission += commission
+        
+        # Commission tracking — record in per-position dict and strategy-level dict.
         if commission_asset is not None and commission > 0:
+            pos.commission_by_asset[commission_asset] = (
+                pos.commission_by_asset.get(commission_asset, 0.0) + commission
+            )
             self._total_commission_dict[commission_asset] = (
                 self._total_commission_dict.get(commission_asset, 0.0) + commission
             )
+
+            # Non-stablecoin commissions reduce the real asset balance on the exchange
+            # (via outboundAccountPosition). Mirror this by reducing the corresponding
+            # ShadowBook position so qty stays in sync with the real balance.
+            # Record in _position_deducted_comm so total_commission() excludes these
+            # amounts from net_pnl (they are already reflected via reduced position value).
+            if commission_asset not in _STABLECOINS:
+                comm_symbol = self._asset_symbol_map.get(commission_asset)
+                if comm_symbol and comm_symbol in self._positions:
+                    fee_pos = self._positions[comm_symbol]
+                    fee_pos.quantity = max(0.0, fee_pos.quantity - commission)
+                    self._position_deducted_comm[commission_asset] = (
+                        self._position_deducted_comm.get(commission_asset, 0.0) + commission
+                    )
+                    if fee_pos.is_flat():
+                        self._positions.pop(comm_symbol, None)
+                else:
+                    raise ValueError(
+                        f"Commission asset {commission_asset} not found in positions for deduction"
+                    )
+            elif commission_asset in _STABLECOINS and commission > 0:
+                self._cash -= commission
+                self._cash_dict[commission_asset] = (
+                    self._cash_dict.get(commission_asset, 0.0) - commission
+                )
+
 
         self._positions[symbol] = pos
         if pos.is_flat():
             self._positions.pop(symbol, None)
 
         # ── Cash adjustment ───────────────────────────────────────────────
-        # Both _cash (total) and _cash_dict (per-stablecoin breakdown) are
-        # updated in parallel. _cash is authoritative; _cash_dict is the
-        # breakdown. Non-stablecoin commissions (BNB etc.) are tracked only
-        # in _total_commission_dict and do NOT reduce the stablecoin balance.
         old_cash = self._cash
         notional = abs(qty_delta) * price
         if qty_delta > 0:  # BUY: spend quote asset
@@ -582,15 +629,7 @@ class ShadowBook:
         else:              # SELL: receive quote asset
             self._cash += notional
             self._cash_dict[quote_asset] = self._cash_dict.get(quote_asset, 0.0) + notional
-
-        # Stablecoin commissions reduce the cash balance; non-stablecoin
-        # commissions (e.g. BNB) are paid from a separate BNB balance and do not affect the quote-asset cash.
-        if commission_asset in _STABLECOINS and commission > 0:
-            self._cash -= commission
-            self._cash_dict[commission_asset] = (
-                self._cash_dict.get(commission_asset, 0.0) - commission
-            )
-
+        
         self._refresh_derived()
 
         # Audit trail
@@ -604,13 +643,14 @@ class ShadowBook:
         self.logger.info(
             f"[ShadowBook-{self._strategy_id}] apply_fill: {side.value} {symbol} "
             f"qty={abs(qty_delta):.6f} @ {price:.4f} "
-            f"pos {old_qty:.6f} -> {new_qty:.6f} "
+            f"pos {old_qty:.6f} -> {pos.quantity:.6f} "
             f"cash {old_cash:.4f} -> {self._cash:.4f} "
             f"notional={notional:.4f} commission={commission:.6f} {commission_asset or ''} | "
             f"NAV={self._nav:.4f} realized_pnl={self._realized_pnl:.4f} "
-            f"total_comm={self.total_commission:.4f}"
+            f"total_comm={self.total_commission():.4f}"
         )
-
+        
+        self.logger.info(f"[ShadowBook-{self._strategy_id}] Snapshot:\n{self.log_snapshot()}")
     async def _async_record_trade(self, active: ActiveOrder) -> None:
         '''
         Trade recording to db after order reaches terminal status (FILLED/CANCELED/REJECTED/EXPIRED).
@@ -777,7 +817,7 @@ class ShadowBook:
             "cash": self._cash,
             "nav": self._nav,
             "realized_pnl": self._realized_pnl,
-            "total_commission": self.total_commission,
+            "total_commission": self.total_commission(),
             "peak_equity": self._peak_equity,
             "max_drawdown": self._max_drawdown,
             "positions": {sym: str(pos) for sym, pos in self._positions.items()},
@@ -791,7 +831,7 @@ class ShadowBook:
                 "qty": pos.quantity,
                 "avg_entry": pos.avg_entry_price,
                 "realized_pnl": pos.realized_pnl,
-                "commission": pos.total_commission,
+                "commission_by_asset": dict(pos.commission_by_asset),
             }
             for sym, pos in self._positions.items()
             if not pos.is_flat()
@@ -806,7 +846,7 @@ class ShadowBook:
                 cash=self._cash,
                 unrealized_pnl=self.unrealized_pnl(),
                 realized_pnl=self._realized_pnl,
-                total_commission=self.total_commission,
+                total_commission=self.total_commission(),
                 peak_equity=self._peak_equity,
                 max_drawdown=self._max_drawdown,
                 current_drawdown=self.current_drawdown(),
@@ -827,6 +867,53 @@ class ShadowBook:
                 f"[ShadowBook-{self._strategy_id}] Failed to save snapshot: {e}",
                 exc_info=True,
             )
+
+    def log_snapshot(self) -> str:
+        """Return a formatted multi-line snapshot string for log comparison.
+
+        Designed to be easy to diff across rebalance cycles:
+        - fixed-width columns, one metric per line
+        - per-position block with mark price, PnL, and commission breakdown
+        - raw commission totals shown separately from the double-deduction-adjusted total
+        """
+        mark = self._mark_prices
+        unrealized = self.unrealized_pnl(mark)
+        net = self._realized_pnl + unrealized - self.total_commission(mark)
+        raw_comm_usdt = sum(
+            qty * mark.get(self._asset_symbol_map.get(a, a), mark.get(a, 1.0))
+            for a, qty in self._total_commission_dict.items()
+        )
+
+        lines = [
+            f"┌─ ShadowBook-{self._strategy_id} {'─' * 50}",
+            f"│  {'NAV':<20} {self._nav:>12.4f} USDT",
+            f"│  {'Cash':<20} {self._cash:>12.4f} USDT  (free={self.free_cash:.4f})",
+            f"│  {'Realized PnL':<20} {self._realized_pnl:>+12.4f} USDT",
+            f"│  {'Unrealized PnL':<20} {unrealized:>+12.4f} USDT",
+            f"│  {'Net PnL':<20} {net:>+12.4f} USDT",
+            f"│  {'Commission (raw)':<20} {raw_comm_usdt:>12.4f} USDT  "
+            f"({', '.join(f'{qty:.6f} {a}' for a, qty in self._total_commission_dict.items()) or 'none'})",
+            f"│  {'Peak Equity':<20} {self._peak_equity:>12.4f} USDT",
+            f"│  {'Max Drawdown':<20} {self._max_drawdown:>12.4%}  (current={self.current_drawdown():.4%})",
+            f"│  {'Active Orders':<20} {list(self._active_orders.keys()) or '[]'}",
+            f"├─ Positions ({len(self.active_positions)}) {'─' * 43}",
+        ]
+
+        if not self.active_positions:
+            lines.append("│  (flat)")
+        for sym, pos in self.active_positions.items():
+            mp = mark.get(sym, pos.avg_entry_price)
+            upnl = pos.unrealized_pnl(mp)
+            comm_str = ", ".join(f"{qty:.6f} {a}" for a, qty in pos.commission_by_asset.items()) or "none"
+            w = self._weights.get(sym, 0.0)
+            lines += [
+                f"│  {sym:<12}  qty={pos.quantity:>10.6f}  entry={pos.avg_entry_price:>10.4f}  "
+                f"mark={mp:>10.4f}  upnl={upnl:>+8.4f}  rpnl={pos.realized_pnl:>+8.4f}  "
+                f"w={w:.4f}  comm=[{comm_str}]",
+            ]
+
+        lines.append(f"└─{'─' * 62}")
+        return "\n".join(lines)
 
     def __repr__(self) -> str:
         active = len(self.active_positions)

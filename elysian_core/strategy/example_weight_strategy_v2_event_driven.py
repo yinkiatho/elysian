@@ -119,17 +119,9 @@ class EventDrivenStrategy(SpotStrategy):
             
         # Post-rebalance portfolio state snapshot
         if self._shadow_book is not None:
-            book = self._shadow_book
             self.logger.info(
-                f"[EqualWeight] Post-rebalance snapshot: "
-                f"NAV={book.nav:.4f} cash={book.cash:.4f} "
-                f"free_cash={book.free_cash:.4f} locked_cash={book._locked_cash:.4f} "
-                f"positions={({s: f'qty={p.quantity:.6f} entry={p.avg_entry_price:.4f}' for s, p in book.active_positions.items()})} "
-                f"weights={({s: f'{w:.4f}' for s, w in book.weights.items()})} "
-                f"realized_pnl={book.realized_pnl:.4f} unrealized_pnl={book.unrealized_pnl():.4f} "
-                f"total_commission={book.total_commission:.4f} "
-                f"active_orders={list(book.active_orders.keys())} "
-                f"submitted={r.submitted} failed={r.failed}"
+                f"[EqualWeight] Post-rebalance (submitted={r.submitted} failed={r.failed}):\n"
+                f"{self._shadow_book.log_snapshot()}"
             )
             
             
@@ -139,7 +131,7 @@ class EventDrivenStrategy(SpotStrategy):
             self.logger.info("Kill signal received => returning zero weights (100% cash)")
             return {sym: 0.0 for sym in self._symbols}
         
-        if self.trade_counter % 2 == 0:
+        if self.trade_counter % 2 == 1:
             self.trade_counter += 1
             weights = {sym: 0.0 for sym in self._symbols}
         else:

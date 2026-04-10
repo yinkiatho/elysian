@@ -10,6 +10,10 @@
 
 version_name: "v0.0.0_test"
 
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging:
+  enable_discord: false         # set true to enable Discord logging via DISCORD_TOKEN + DISCORD_GUILD_ID
+
 # ── Active venues per asset type ─────────────────────────────────────────────
 spot:
   venues:

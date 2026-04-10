@@ -851,7 +851,7 @@ class StrategyRunner:
             kline_manager=self.binance_kline_manager,    # shared, unauthenticated
             ob_manager=self.binance_ob_manager,          # shared, unauthenticated
             event_bus=private_bus,                       # private bus for account events
-            strategy_config=strategy_config,                   # pass full strategy config for any custom needs (e.g., execution overrides
+            strategy_config=strategy_config,             # pass full strategy config for any custom needs (e.g., execution overrides
         )
         await exchange.run()
         self.logger.info(
@@ -895,13 +895,15 @@ class StrategyRunner:
         asyncio event loop.  Heavy compute is offloaded via
         ``strategy.run_heavy()``.
         """
-        # Initialize Discord logging 
-        token = os.getenv('DISCORD_TOKEN')
-        guild_id_str = os.getenv('DISCORD_GUILD_ID')
-        if token and guild_id_str:
-            await init_discord_logging(token=token, guild_id=int(guild_id_str))
-        else:
-            self.logger.warning("Warning: Discord logging not configured (missing env variables)")
+        # Initialize Discord logging (controlled by trading_config.yaml logging.enable_discord)
+        enable_discord = self.cfg.extra.get('logging', {}).get('enable_discord', False)
+        if enable_discord:
+            token = os.getenv('DISCORD_TOKEN')
+            guild_id_str = os.getenv('DISCORD_GUILD_ID')
+            if token and guild_id_str:
+                await init_discord_logging(token=token, guild_id=int(guild_id_str))
+            else:
+                self.logger.warning("Warning: Discord logging not configured (missing env variables)")
         
         
         # Premake the Strategies, ids and strategy_names

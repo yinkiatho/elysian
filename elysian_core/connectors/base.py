@@ -14,7 +14,7 @@ from elysian_core.config.app_config import StrategyConfig
 from elysian_core.core.order import Order
 from elysian_core.core.market_data import OrderBook
 import elysian_core.utils.logger as log
-
+import pylru
 class AbstractDataFeed(ABC):
     """
     Base class for all exchange order-book feeds.
@@ -395,6 +395,9 @@ class SpotExchangeConnector(ABC):
         self._open_orders: Dict[str, collections.OrderedDict[str, Order]] = collections.defaultdict(collections.OrderedDict)
         self._token_infos: Dict[str, dict] = {}
         self._utc8 = datetime.timezone(datetime.timedelta(hours=8))
+        
+        # Orders Tracking
+        self._past_orders = pylru.lrucache(1000)  # order_id → Order, for fills tracking and health checks
                 
         
     # ── Feed accessors ────────────────────────────────────────────────────────

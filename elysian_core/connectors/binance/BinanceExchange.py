@@ -29,7 +29,7 @@ from elysian_core.db.models import CexTrade
 from elysian_core.config.app_config import StrategyConfig
 import elysian_core.utils.logger as log
 import argparse
-
+import pylru
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # ────────────────────────────────────────────────────────────────────────────── BinanceExchange ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -82,6 +82,8 @@ class BinanceSpotExchange(SpotExchangeConnector):
             ob_manager=ob_manager,
             strategy_config=strategy_config
         )
+        
+        self.strategy_id = strategy_config.strategy_id if strategy_config else 'MAIN'
 
         # user data — owns event bus publishing and event parsing
         self.user_data_manager = user_data_manager or BinanceUserDataClientManager(api_key, api_secret)
@@ -148,15 +150,15 @@ class BinanceSpotExchange(SpotExchangeConnector):
         if t == "balance_update":
             asset, delta = event["asset"], event["delta"]
             self._balances[asset] = self._balances.get(asset, 0.0) + delta
-            self.logger.info(f"[{asset}] balance update delta={delta:.6f} new={self._balances[asset]:.6f}")
+            self.logger.info(f"[BinanceExchange_{self.strategy_id}] [{asset}] balance update delta={delta:.6f} new={self._balances[asset]:.6f}")
 
         elif t == "account_position":
             for b in event["balances"]:
                 self._balances[b["asset"]] = b["free"] + b["locked"]
-            self.logger.info("outboundAccountPosition update applied to balances")
+            self.logger.info(f"[BinanceExchange_{self.strategy_id}] outboundAccountPosition update applied to balances")
 
         elif t == "execution_report":
-            self.logger.info(f"Received execution report @ {datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))}")
+            self.logger.info(f"[BinanceExchange_{self.strategy_id}] Received execution report @ {datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))}")
             self._handle_execution_report(event["order"], event["exec_type"])
             
     def _handle_execution_report(self, order: Order, exec_type: str) -> None:
@@ -166,8 +168,12 @@ class BinanceSpotExchange(SpotExchangeConnector):
 
         # ── NEW order ────────────────────────────────────────────────────────────
         if exec_type == "NEW" and order_id not in symbol_orders:
-            self._open_orders[symbol][order_id] = order
-            self.logger.info(f"[BinanceExchange] [{symbol}] New order registered: {order}")
+            if order_id in self._past_orders:
+                self.logger.warning(f"[{symbol}] Received NEW execution report for recently closed order {order_id}, re-adding to open orders")
+                raise ValueError(f"[BinanceExchange_{self.strategy_id}] Received NEW execution report for recently closed order {order_id}")
+            else:
+                self._open_orders[symbol][order_id] = order
+                self.logger.info(f"[BinanceExchange_{self.strategy_id}] [{symbol}] New order registered: {order}")
             return
 
         # ── Update existing order ─────────────────────────────────────────────────
@@ -187,11 +193,12 @@ class BinanceSpotExchange(SpotExchangeConnector):
         existing.commission_asset = order.commission_asset or existing.commission_asset
         existing.last_updated_timestamp = order.last_updated_timestamp
         existing.transition_to(order.status)  # X — Binance is source of truth for status
-        self.logger.info(f"[BinanceExchange] [{symbol}] Order updated: {existing}")
+        self.logger.info(f"[BinanceExchange_{self.strategy_id}] [{symbol}] Order updated: {existing}")
 
         if existing.is_terminal:
-            self._open_orders[symbol].pop(order_id, None)
-            self.logger.info(f"[BinanceExchange] [{symbol}] Order {order_id} removed from open orders")
+            closed_order = self._open_orders[symbol].pop(order_id, None)
+            self._past_orders[order_id] = closed_order
+            self.logger.info(f"[BinanceExchange_{self.strategy_id}] [{symbol}] Order {order_id} removed from open orders")
         
         
     async def monitor_balances(self, poll_interval = 10):
@@ -222,7 +229,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
         resp = await asyncio.to_thread(_sync_fetch)
         if resp.status_code == 200:
             return resp.json()["address"]
-        self.logger.error(f"get_deposit_address failed: {resp.status_code} {resp.json()}")
+        self.logger.error(f"[BinanceExchange_{self.strategy_id}] get_deposit_address failed: {resp.status_code} {resp.json()}")
         return None
     
     
@@ -266,12 +273,12 @@ class BinanceSpotExchange(SpotExchangeConnector):
                 strategy_id=strategy_id
             )
             self._open_orders[symbol][order_id] = order_obj
-            self.logger.info(f"Limit order placed: {order_id}")
+            self.logger.info(f"[BinanceExchange_{self.strategy_id}] Limit order placed: {order_id}")
             return order
         except BinanceAPIException as e:
-            self.logger.error(f"[{symbol}] place_limit_order API error: {e}")
+            self.logger.error(f"[BinanceExchange_{self.strategy_id}] [{symbol}] place_limit_order API error: {e}")
         except Exception as e:
-            self.logger.error(f"[{symbol}] place_limit_order error: {e}")
+            self.logger.error(f"[BinanceExchange_{self.strategy_id}] [{symbol}] place_limit_order error: {e}")
 
 
 
@@ -279,9 +286,9 @@ class BinanceSpotExchange(SpotExchangeConnector):
         """Cancel an active order by id."""
         try:
             result = await self._client.cancel_order(symbol=symbol, orderId=order_id)
-            self.logger.info(f"[{symbol}] Order {order_id} cancelled: {result}")
+            self.logger.info(f"[BinanceExchange_{self.strategy_id}] [{symbol}] Order {order_id} cancelled: {result}")
         except Exception as e:
-            self.logger.error(f"[{symbol}] cancel_order error: {e}")
+            self.logger.error(f"[BinanceExchange_{self.strategy_id}] [{symbol}] cancel_order error: {e}")
             
             
             
@@ -289,12 +296,12 @@ class BinanceSpotExchange(SpotExchangeConnector):
         """Refresh open orders for a specific symbol."""
         try:
             open_orders = await self._client.get_open_orders(symbol=symbol)
-            #self.logger.info(f"[{symbol}] Open orders: {open_orders}")
+            #self.logger.info(f"[BinanceExchange_{self.strategy_id}] [{symbol}] Open orders: {open_orders}")
             return open_orders
         except Exception as e:
-            self.logger.error(f"[{symbol}] get_open_orders error: {e}")
-            
-            
+            self.logger.error(f"[BinanceExchange_{self.strategy_id}] [{symbol}] get_open_orders error: {e}")
+
+
     async def get_all_open_orders(self):
         """Refresh open orders for all symbols."""
         all_orders = await self._client.get_open_orders()
@@ -342,7 +349,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
             self._open_orders[symbol][order_id] = order
             #self.logger.info(f"[{symbol}] Loaded open order: {order}")
 
-        self.logger.info(f"Refreshed open orders: {sum(len(v) for v in self._open_orders.values())} orders across {len(self._open_orders)} symbols")
+        self.logger.info(f"[BinanceExchange_{self.strategy_id}] Refreshed open orders: {sum(len(v) for v in self._open_orders.values())} orders across {len(self._open_orders)} symbols")
 
 
 
