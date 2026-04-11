@@ -915,7 +915,7 @@ class ShadowBook:
             lines.append(f"├─ Fill Audits (last {min(num_fills_show, len(fills))} of {len(fills)}) {'─' * 38}")
             # Show most recent fills first (deque maxlen retains newest at right)
             for fill in reversed(fills[-num_fills_show:]):
-                ts = fill.timestamp_str()
+                ts = fill.timestamp_str
                 # Format timestamp as milliseconds (or convert to readable if needed)
                 comm_str = f"{fill.commission:.6f} {fill.commission_asset}" if fill.commission else "none"
                 lines.append(
