@@ -108,11 +108,15 @@ class EventDrivenStrategy(SpotStrategy):
             )
             return
 
-        self._rebalance_fsm._cooldown_s = self._rebalance_interval
         await self._stop_event.wait()
 
 
     async def on_rebalance_complete(self, event: RebalanceCompleteEvent):
+        '''
+        Recevives the RebalanceCompleteEvent after the Engine completes the loop to send out orders
+        Does not mean that all fills are completed, just that the rebalance cycle is done and we have the result summary from the execution engine. 
+        '''
+        
         r = event.result
         if r.errors:
             self.logger.warning(f"[EqualWeight] Rebalance had errors: {r.errors}")
@@ -126,9 +130,10 @@ class EventDrivenStrategy(SpotStrategy):
             
             
     def compute_weights(self, **ctx) -> dict:
+        
         # --- Kill switch (go 100% cash) ---
         if ctx.get('convert_all_base', False):
-            self.logger.info("Kill signal received => returning zero weights (100% cash)")
+            self.logger.warning("Kill signal received => returning zero weights (100% cash)")
             return {sym: 0.0 for sym in self._symbols}
         
         if self.trade_counter % 2 == 1:

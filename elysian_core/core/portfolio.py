@@ -18,6 +18,9 @@ from elysian_core.config.app_config import AppConfig
 from elysian_core.db.models import PortfolioSnapshot
 from elysian_core.core.position import Position
 import elysian_core.utils.logger as log
+from datetime import datetime, timezone, timedelta
+
+UTC8 = timezone(timedelta(hours=8))
 
 if TYPE_CHECKING:
     from elysian_core.core.shadow_book import ShadowBook
@@ -38,7 +41,12 @@ class Fill:
     commission_asset: str = ""
     timestamp: int = 0          # epoch ms
     order_id: str = ""
-
+    
+    @property
+    def timestamp_str(self) -> str:
+        """Return UTC+8 datetime string: 'YYYY-MM-DD HH:MM:SS +0800'."""
+        dt = datetime.fromtimestamp(self.timestamp / 1000, tz=timezone.utc).astimezone(UTC8)
+        return dt.strftime("%Y-%m-%d %H:%M:%S %z")
 
 # ── Portfolio ─────────────────────────────────────────────────────────────────
 

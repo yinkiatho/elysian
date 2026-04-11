@@ -33,7 +33,7 @@ venues:
 max_heavy_workers: 8
 
 # Symbols — leave empty to load from config.json for this venue+asset_type
-symbols: ['BNBUSDT']
+symbols: ['SUIUSDT', "ETHUSDT"]
 
 # ── Risk Management for PortfolioOptimizer (StrategyShadowBook level) ──────────────────────────────────────────────
 # Only list fields you want to change; omitted fields inherit from venue/global.

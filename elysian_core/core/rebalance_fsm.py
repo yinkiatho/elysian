@@ -89,6 +89,12 @@ class RebalanceFSM(BaseFSM):
         (RebalanceState.EXECUTING,  "failed"):        (RebalanceState.ERROR,      "_on_enter_error"),
         (RebalanceState.COOLDOWN,   "cooldown_done"): (RebalanceState.IDLE,       None),
         (RebalanceState.ERROR,      "retry"):         (RebalanceState.IDLE,       None),
+
+        # Explicit COOLDOWN/ERROR → SUSPENDED so the pending timer handle is cancelled.
+        # These override the wildcard below for these two states.
+        (RebalanceState.COOLDOWN,   "suspend"):       (RebalanceState.SUSPENDED,  "_on_enter_suspended"),
+        (RebalanceState.ERROR,      "suspend"):       (RebalanceState.SUSPENDED,  "_on_enter_suspended"),
+
         # Suspend / resume from any non-terminal state
         ("*",                       "suspend"):       (RebalanceState.SUSPENDED,  "_on_enter_suspended"),
         (RebalanceState.SUSPENDED,  "resume"):        (RebalanceState.IDLE,       "_on_resume"),
@@ -260,7 +266,7 @@ class RebalanceFSM(BaseFSM):
             )
 
         try:
-            result = await self._execution_engine.execute(validated, **ctx)
+            result = await self._execution_engine.execute(validated, **ctx)  # <== Receives the RebalanceResult from the ExecutionEngine
         except Exception as e:
             self.logger.error("[%s] execution_engine.execute error: %s", self._name, e, exc_info=True)
             await self.trigger("failed", error=e, **ctx)

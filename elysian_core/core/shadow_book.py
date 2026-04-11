@@ -117,9 +117,168 @@ class ShadowBook:
         # Excluded from total_commission() to avoid double-counting in net_pnl
         # (the cost is already reflected via the reduced position value in NAV).
         self._position_deducted_comm: Dict[str, float] = {}
+        
+    #  ─────────────────────────────────────────────────── ─────────────────────────────────────────────────── ───────────────────────────────────────────────────
+    # ── Read — Identity ─────────────────────────────────────────────────── ───────────────────────────────────────────────────
+    #  ─────────────────────────────────────────────────── ─────────────────────────────────────────────────── ───────────────────────────────────────────────────
 
+    @property
+    def active_orders(self) -> Dict[str, ActiveOrder]:
+        """Live active orders for this strategy, keyed by order_id."""
+        return dict(self._active_orders)
 
-    # ── Initialization ────────────────────────────────────────────────────
+    @property
+    def outstanding_orders(self) -> Dict[str, ActiveOrder]:
+        """Alias for active_orders (backward compatibility)."""
+        return self.active_orders
+
+    @property
+    def strategy_id(self) -> int:
+        return self._strategy_id
+
+    # ── Read — Positions & Cash ───────────────────────────────────────────
+
+    def position(self, symbol: str) -> Position:
+        """Return this strategy's position for *symbol*, or a flat placeholder."""
+        return self._positions.get(symbol, Position(symbol=symbol, venue=self._venue))
+
+    @property
+    def positions(self) -> Dict[str, Position]:
+        return dict(self._positions)
+
+    @property
+    def active_positions(self) -> Dict[str, Position]:
+        return {s: p for s, p in self._positions.items() if not p.is_flat()}
+
+    @property
+    def cash(self) -> float:
+        return self._cash
+
+    @property
+    def nav(self) -> float:
+        """Cached NAV from last mark price update."""
+        return self._nav
+
+    @property
+    def weights(self) -> Dict[str, float]:
+        """Cached weight vector from last mark price update."""
+        return dict(self._weights)
+
+    @property
+    def mark_prices(self) -> Dict[str, float]:
+        return dict(self._mark_prices)
+
+    #  ─────────────────────────────────────────────────── ─────────────────────────────────────────────────── ───────────────────────────────────────────────────
+    # ── Read — Valuation ────────────────────────────────────────────────── ─────────────────────────────────────────────────── ───────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────── ─────────────────────────────────────────────────── ───────────────────────────────────────────────────
+    
+    def total_value(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
+        """NAV = cash + sum(position_notional)."""
+        prices = mark_prices if mark_prices is not None else self._mark_prices
+        pos_value = sum(
+            pos.quantity * prices.get(pos.symbol, pos.avg_entry_price)
+            for pos in self._positions.values()
+        )
+        return self._cash + pos_value
+
+    def current_weights(self, mark_prices: Optional[Dict[str, float]] = None) -> Dict[str, float]:
+        """Compute the live weight vector for this strategy's positions."""
+        prices = mark_prices if mark_prices is not None else self._mark_prices
+        nav = self.total_value(prices)
+        if nav <= 0:
+            return {}
+        return {
+            sym: (pos.quantity * prices.get(sym, pos.avg_entry_price)) / nav
+            for sym, pos in self._positions.items()
+            if not pos.is_flat() and prices.get(sym, pos.avg_entry_price) > 0
+        }
+
+    def unrealized_pnl(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
+        prices = mark_prices if mark_prices is not None else self._mark_prices
+        return sum(
+            pos.unrealized_pnl(prices[pos.symbol])
+            for pos in self._positions.values()
+            if pos.symbol in prices
+        )
+        
+    def gross_exposure(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
+        return sum(abs(w) for w in self.current_weights(mark_prices).values())
+
+    def net_exposure(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
+        return sum(self.current_weights(mark_prices).values())
+
+    def long_exposure(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
+        return sum(w for w in self.current_weights(mark_prices).values() if w > 0)
+
+    def short_exposure(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
+        return sum(abs(w) for w in self.current_weights(mark_prices).values() if w < 0)
+
+    def cash_weight(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
+        nav = self.total_value(mark_prices)
+        return self._cash / nav if nav > 0 else 1.0
+
+    def net_pnl(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
+        return self._realized_pnl + self.unrealized_pnl(mark_prices) - self.total_commission(mark_prices)
+
+    @property
+    def fills(self) -> List[Fill]:
+        return list(self._fills)
+
+    @property
+    def realized_pnl(self) -> float:
+        return self._realized_pnl
+
+    def total_commission(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
+        """Total commissions converted to USDT.
+
+        Excludes amounts already reflected in position qty reductions
+        (_position_deducted_comm) to avoid double-counting in net_pnl.
+        Uses _asset_symbol_map to correctly resolve raw asset names (e.g. 'BNB')
+        to their trading-pair mark price (e.g. 'BNBUSDT').
+        """
+        # If asset is not in marked prices this will return None and break, as intended
+        prices = mark_prices if mark_prices is not None else self._mark_prices
+        resolve = lambda asset: prices.get(self._asset_symbol_map.get(asset, asset), prices.get(asset)) 
+        return sum(map(
+            lambda item: max(0.0, item[1] - self._position_deducted_comm.get(item[0], 0.0)) * resolve(item[0]),
+            self._total_commission_dict.items()
+        ))
+
+    @property
+    def peak_equity(self) -> float:
+        return self._peak_equity
+
+    @property
+    def max_drawdown(self) -> float:
+        return self._max_drawdown
+
+    def current_drawdown(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
+        nav = self.total_value(mark_prices)
+        if self._peak_equity <= 0:
+            return 0.0
+        return max(0.0, (self._peak_equity - nav) / self._peak_equity)
+    
+    @property
+    def free_cash(self) -> float:
+        """Cash available for new BUY orders (excludes LIMIT BUY reservations)."""
+        return max(0.0, self._cash - self._locked_cash)
+
+    def free_quantity(self, symbol: str) -> float:
+        """Base-asset quantity available for new SELL orders (excludes LIMIT SELL reservations)."""
+        return self.position(symbol).free_quantity
+
+    def update_mark_prices(self, prices: Dict[str, float]):
+        """Update mark prices and refresh derived metrics.
+
+        Called by the strategy's kline dispatch to keep the shadow book
+        in sync with live market data.
+        """
+        self._mark_prices.update(prices)
+        self._refresh_derived()
+
+    #  ────────────────────────────────────────────────────── ────────────────────────────────────────────────────── ──────────────────────────────────────────────────────
+    # ────────────────────────────────────────────────────── Initialization ────────────────────────────────────────────────────
+    #  ────────────────────────────────────────────────────── ────────────────────────────────────────────────────── ──────────────────────────────────────────────────────
     def sync_from_exchange(self, exchange, feeds: Optional[Dict] = None):
         """Initialize from real exchange state. Called once at startup for sub-account mode.
 
@@ -156,6 +315,7 @@ class ShadowBook:
             self._positions[symbol] = Position(
                 symbol=symbol, venue=self._venue, quantity=qty, avg_entry_price=entry_price
             )
+            self._asset_symbol_map[asset] = symbol
 
         # Mark prices from all remaining feeds
         for sym, feed in feeds.items():
@@ -200,8 +360,10 @@ class ShadowBook:
         self._refresh_derived()
         self._peak_equity = max(self._peak_equity, self._nav)
 
-    # ── Lifecycle — EventBus wiring ──────────────────────────────────────
 
+    # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # ── Lifecycle — EventBus wiring ────────────────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     def start(self, event_bus, private_event_bus=None):
         """Subscribe to event buses for fill attribution and mark price updates.
 
@@ -256,6 +418,18 @@ class ShadowBook:
                     f"{event.symbol} to {event.kline.close:.6f} (was 0.0 at sync-time)"
                 )
             self._refresh_derived()
+            
+            
+    def on_balance(self, event) -> None:
+        """Mirror Portfolio._on_balance(), scaled by allocation.
+
+        Called automatically by base_strategy._dispatch_balance() so that
+        deposits and withdrawals are reflected in the shadow book.
+        In sub-account mode, returns early — handled by _on_balance_update on private bus.
+        """
+        # Technically not needed, base_strategy class calls the shadow_book.on_balance_update(event)
+        return
+
 
     async def _on_balance_update(self, event: BalanceUpdateEvent):
         """Handle balance updates from the private sub-account event bus."""
@@ -370,6 +544,8 @@ class ShadowBook:
                 commission=order.commission,
                 commission_asset=order.commission_asset,
                 venue=event.venue,
+                order_id=order_id,
+                timestamp=order.last_updated_timestamp or int(time.time() * 1000)
             )
 
         if active.is_terminal:
@@ -397,146 +573,14 @@ class ShadowBook:
             
             # Recording the trade to db here
             asyncio.create_task(self._async_record_trade(active))
-    # ── Read — Identity ───────────────────────────────────────────────────
-
-    @property
-    def active_orders(self) -> Dict[str, ActiveOrder]:
-        """Live active orders for this strategy, keyed by order_id."""
-        return dict(self._active_orders)
-
-    @property
-    def outstanding_orders(self) -> Dict[str, ActiveOrder]:
-        """Alias for active_orders (backward compatibility)."""
-        return self.active_orders
-
-    @property
-    def strategy_id(self) -> int:
-        return self._strategy_id
-
-    # ── Read — Positions & Cash ───────────────────────────────────────────
-
-    def position(self, symbol: str) -> Position:
-        """Return this strategy's position for *symbol*, or a flat placeholder."""
-        return self._positions.get(symbol, Position(symbol=symbol, venue=self._venue))
-
-    @property
-    def positions(self) -> Dict[str, Position]:
-        return dict(self._positions)
-
-    @property
-    def active_positions(self) -> Dict[str, Position]:
-        return {s: p for s, p in self._positions.items() if not p.is_flat()}
-
-    @property
-    def cash(self) -> float:
-        return self._cash
-
-    @property
-    def nav(self) -> float:
-        """Cached NAV from last mark price update."""
-        return self._nav
-
-    @property
-    def weights(self) -> Dict[str, float]:
-        """Cached weight vector from last mark price update."""
-        return dict(self._weights)
-
-    @property
-    def mark_prices(self) -> Dict[str, float]:
-        return dict(self._mark_prices)
-
-
-    # ── Read — Valuation ──────────────────────────────────────────────────
     
-    def total_value(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
-        """NAV = cash + sum(position_notional)."""
-        prices = mark_prices if mark_prices is not None else self._mark_prices
-        pos_value = sum(
-            pos.quantity * prices.get(pos.symbol, pos.avg_entry_price)
-            for pos in self._positions.values()
-        )
-        return self._cash + pos_value
-
-    def current_weights(self, mark_prices: Optional[Dict[str, float]] = None) -> Dict[str, float]:
-        """Compute the live weight vector for this strategy's positions."""
-        prices = mark_prices if mark_prices is not None else self._mark_prices
-        nav = self.total_value(prices)
-        if nav <= 0:
-            return {}
-        return {
-            sym: (pos.quantity * prices.get(sym, pos.avg_entry_price)) / nav
-            for sym, pos in self._positions.items()
-            if not pos.is_flat() and prices.get(sym, pos.avg_entry_price) > 0
-        }
-
-    def unrealized_pnl(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
-        prices = mark_prices if mark_prices is not None else self._mark_prices
-        return sum(
-            pos.unrealized_pnl(prices[pos.symbol])
-            for pos in self._positions.values()
-            if pos.symbol in prices
-        )
-        
-    def gross_exposure(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
-        return sum(abs(w) for w in self.current_weights(mark_prices).values())
-
-    def net_exposure(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
-        return sum(self.current_weights(mark_prices).values())
-
-    def long_exposure(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
-        return sum(w for w in self.current_weights(mark_prices).values() if w > 0)
-
-    def short_exposure(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
-        return sum(abs(w) for w in self.current_weights(mark_prices).values() if w < 0)
-
-    def cash_weight(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
-        nav = self.total_value(mark_prices)
-        return self._cash / nav if nav > 0 else 1.0
-
-    def net_pnl(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
-        return self._realized_pnl + self.unrealized_pnl(mark_prices) - self.total_commission(mark_prices)
-
-    @property
-    def fills(self) -> List[Fill]:
-        return list(self._fills)
-
-    @property
-    def realized_pnl(self) -> float:
-        return self._realized_pnl
-
-    def total_commission(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
-        """Total commissions converted to USDT.
-
-        Excludes amounts already reflected in position qty reductions
-        (_position_deducted_comm) to avoid double-counting in net_pnl.
-        Uses _asset_symbol_map to correctly resolve raw asset names (e.g. 'BNB')
-        to their trading-pair mark price (e.g. 'BNBUSDT').
-        """
-        prices = mark_prices if mark_prices is not None else self._mark_prices
-        resolve = lambda asset: prices.get(self._asset_symbol_map.get(asset, asset), prices.get(asset, 1.0))
-        return sum(map(
-            lambda item: max(0.0, item[1] - self._position_deducted_comm.get(item[0], 0.0)) * resolve(item[0]),
-            self._total_commission_dict.items()
-        ))
-
-    @property
-    def peak_equity(self) -> float:
-        return self._peak_equity
-
-    @property
-    def max_drawdown(self) -> float:
-        return self._max_drawdown
-
-    def current_drawdown(self, mark_prices: Optional[Dict[str, float]] = None) -> float:
-        nav = self.total_value(mark_prices)
-        if self._peak_equity <= 0:
-            return 0.0
-        return max(0.0, (self._peak_equity - nav) / self._peak_equity)
-
-    # ── Write — Fill attribution ──────────────────────────────────────────
+    # ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # ── Write — Fill attribution ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     def apply_fill(self, symbol: str, base_asset: str, quote_asset: str, qty_delta: float, price: float,
                    commission: float = 0.0, commission_asset: Optional[str] = None,
-                   venue: Optional[Venue] = None):
+                   venue: Optional[Venue] = None, order_id: Optional[str] = None, 
+                   timestamp: Optional[int] = None):
         """Attribute a fill to this shadow book.
 
         Mirrors Portfolio.update_position() logic but operates on this
@@ -580,7 +624,12 @@ class ShadowBook:
                 # Position flipped direction
                 pos.avg_entry_price = price
 
-        
+        # Commit position BEFORE commission block so same-symbol lookups (e.g. BNB fee
+        # on BNBUSDT) can find it. Do NOT pop flat positions yet — a SELL-to-zero still
+        # needs to be visible for same-symbol commission deduction. The pop is deferred
+        # to after commission handling; the commission block has its own pop (line below).
+        self._positions[symbol] = pos
+
         # Commission tracking — record in per-position dict and strategy-level dict.
         if commission_asset is not None and commission > 0:
             pos.commission_by_asset[commission_asset] = (
@@ -615,8 +664,8 @@ class ShadowBook:
                     self._cash_dict.get(commission_asset, 0.0) - commission
                 )
 
-
-        self._positions[symbol] = pos
+        # Deferred flat-position cleanup: commission block may have further reduced qty
+        # (e.g. SELL-to-zero BNBUSDT + BNB commission). pop() is a no-op if already removed.
         if pos.is_flat():
             self._positions.pop(symbol, None)
 
@@ -637,7 +686,9 @@ class ShadowBook:
             symbol=symbol, venue=venue, side=side,
             quantity=abs(qty_delta), price=price,
             commission=commission,
-            timestamp=int(time.time() * 1000),
+            commission_asset=commission_asset,
+            timestamp=timestamp or int(time.time() * 1000),
+            order_id=order_id,
         ))
 
         self.logger.info(
@@ -647,10 +698,95 @@ class ShadowBook:
             f"cash {old_cash:.4f} -> {self._cash:.4f} "
             f"notional={notional:.4f} commission={commission:.6f} {commission_asset or ''} | "
             f"NAV={self._nav:.4f} realized_pnl={self._realized_pnl:.4f} "
-            f"total_comm={self.total_commission():.4f}"
+            f"comm_gross=({', '.join(f'{qty:.6f} {a}' for a, qty in self._total_commission_dict.items()) or 'none'}) "
+            f"net_comm_usdt={self.total_commission():.4f}"
         )
         
         self.logger.info(f"[ShadowBook-{self._strategy_id}] Snapshot:\n{self.log_snapshot()}")
+        
+        
+    
+
+    def mark_to_market(self, mark_prices: Dict[str, float]):
+        """Manual mark price update (mirrors Portfolio.mark_to_market)."""
+        self._mark_prices.update(mark_prices)
+        self._refresh_derived()
+
+    def set_cash(self, amount: float):
+        self._cash = amount
+
+    def adjust_cash(self, delta: float):
+        self._cash += delta
+
+    
+
+    def lock_for_order(self, order_id: str, intent: OrderIntent) -> None:
+        """Reserve balance for a submitted LIMIT order.  No-op for MARKET orders.
+
+        Creates an ActiveLimitOrder, initializes its reservation, and stores
+        it in _active_orders.  BUY locks cash, SELL locks base-asset quantity.
+        """
+        if intent.order_type != OrderType.LIMIT:
+            return
+        if order_id in self._active_orders:
+            return  # idempotent
+        if intent.side == Side.BUY and intent.price is None:
+            self.logger.warning(
+                f"[ShadowBook] lock_for_order: LIMIT BUY {order_id} has price=None, skipping lock"
+            )
+            return
+
+        active = ActiveLimitOrder(
+            id=order_id, symbol=intent.symbol, side=intent.side,
+            order_type=intent.order_type, quantity=intent.quantity,
+            price=intent.price, status=OrderStatus.PENDING,
+            venue=intent.venue or self._venue, strategy_id=intent.strategy_id,
+        )
+        active.initialize_reservation()
+        self._active_orders[order_id] = active
+
+        # BUY: lock quote-asset cash (USDT) = qty × price
+        self._locked_cash += active.reserved_cash
+
+        # SELL: lock base-asset quantity on the Position
+        if active.reserved_qty > 0:
+            pos = self._positions.get(intent.symbol)
+            if pos is not None:
+                pos.locked_quantity += active.reserved_qty
+
+        self.logger.info(
+            f"[ShadowBook-{self._strategy_id}] lock_for_order: {intent.side.value} {intent.symbol} "
+            f"order_id={order_id} qty={intent.quantity:.6f} @ {intent.price} "
+            f"reserved_cash={active.reserved_cash:.4f} reserved_qty={active.reserved_qty:.6f} "
+            f"locked_cash={self._locked_cash:.4f} free_cash={self.free_cash:.4f}"
+        )
+
+    def _refresh_derived(self):
+        """Recompute NAV, weights, peak equity, and drawdown."""
+        self._nav = self.total_value()
+        if self._nav > 0:
+            self._weights = {
+                sym: (pos.quantity * self._mark_prices.get(sym, pos.avg_entry_price)) / self._nav
+                for sym, pos in self._positions.items()
+                if not pos.is_flat()
+                and self._mark_prices.get(sym, pos.avg_entry_price) > 0
+            }
+        else:
+            self._weights = {}
+
+        if self._nav > self._peak_equity:
+            self._peak_equity = self._nav
+        if self._peak_equity > 0:
+            dd = (self._peak_equity - self._nav) / self._peak_equity
+            if dd > self._max_drawdown:
+                self._max_drawdown = dd
+
+
+
+    #  ─────────────────────────────────────────────────── ─────────────────────────────────────────────────── ─────────────────────────────────────────────────── ─────────────────────────────────────────────────── ───────────────────────────────────────────────────
+    # ─────────────────────────────────── Display & Utility Functions ─────────────────────────────────────────────────────────── ─────────────────────────────────────────────────── ───────────────────────────────────────────────────
+    #  ─────────────────────────────────────────────────── ─────────────────────────────────────────────────── ─────────────────────────────────────────────────── ─────────────────────────────────────────────────── ───────────────────────────────────────────────────
+    
     async def _async_record_trade(self, active: ActiveOrder) -> None:
         '''
         Trade recording to db after order reaches terminal status (FILLED/CANCELED/REJECTED/EXPIRED).
@@ -697,133 +833,102 @@ class ShadowBook:
             )
         except Exception as e:
             self.logger.error(f"[ShadowBook-{self._strategy_id}] record_trade error: {e}")
+            
 
-    def mark_to_market(self, mark_prices: Dict[str, float]):
-        """Manual mark price update (mirrors Portfolio.mark_to_market)."""
-        self._mark_prices.update(mark_prices)
-        self._refresh_derived()
+    def log_snapshot(self, num_fills_show: int = 10) -> str:
+        """Return a formatted multi-line snapshot string for log comparison.
 
-    def set_cash(self, amount: float):
-        self._cash = amount
-
-    def adjust_cash(self, delta: float):
-        self._cash += delta
-
-    def on_balance(self, event) -> None:
-        """Mirror Portfolio._on_balance(), scaled by allocation.
-
-        Called automatically by base_strategy._dispatch_balance() so that
-        deposits and withdrawals are reflected in the shadow book.
-        In sub-account mode, returns early — handled by _on_balance_update on private bus.
+        Enhanced version: includes locked cash, total exposure, position-deducted
+        commissions, per-order details, per-position free/locked quantity,
+        and the last 10 fill audits.
         """
-        # Technically not needed, base_strategy class calls the shadow_book.on_balance_update(event)
-        return
-
-        # ── Locked balance — LIMIT order reservations ─────────────────────────
-        #
-        # Both sides are locked:
-        #   BUY  → locks quote asset (cash) via _locked_cash & ActiveLimitOrder.reserved_cash
-        #   SELL → locks base asset qty via Position.locked_quantity & ActiveLimitOrder.reserved_qty
-        #
-        # free_cash = _cash - _locked_cash        (available quote for new BUY orders)
-        # free_quantity = pos.quantity - pos.locked_quantity  (available base for new SELL orders)
-
-    def lock_for_order(self, order_id: str, intent: OrderIntent) -> None:
-        """Reserve balance for a submitted LIMIT order.  No-op for MARKET orders.
-
-        Creates an ActiveLimitOrder, initializes its reservation, and stores
-        it in _active_orders.  BUY locks cash, SELL locks base-asset quantity.
-        """
-        if intent.order_type != OrderType.LIMIT:
-            return
-        if order_id in self._active_orders:
-            return  # idempotent
-        if intent.side == Side.BUY and intent.price is None:
-            self.logger.warning(
-                f"[ShadowBook] lock_for_order: LIMIT BUY {order_id} has price=None, skipping lock"
-            )
-            return
-
-        active = ActiveLimitOrder(
-            id=order_id, symbol=intent.symbol, side=intent.side,
-            order_type=intent.order_type, quantity=intent.quantity,
-            price=intent.price, status=OrderStatus.PENDING,
-            venue=intent.venue or self._venue, strategy_id=intent.strategy_id,
+        mark = self._mark_prices
+        unrealized = self.unrealized_pnl(mark)
+        net = self._realized_pnl + unrealized - self.total_commission(mark)
+        raw_comm_usdt = sum(
+            qty * mark.get(self._asset_symbol_map.get(a, a), mark.get(a, 1.0))
+            for a, qty in self._total_commission_dict.items()
         )
-        active.initialize_reservation()
-        self._active_orders[order_id] = active
-
-        # BUY: lock quote-asset cash (USDT) = qty × price
-        self._locked_cash += active.reserved_cash
-
-        # SELL: lock base-asset quantity on the Position
-        if active.reserved_qty > 0:
-            pos = self._positions.get(intent.symbol)
-            if pos is not None:
-                pos.locked_quantity += active.reserved_qty
-
-        self.logger.info(
-            f"[ShadowBook-{self._strategy_id}] lock_for_order: {intent.side.value} {intent.symbol} "
-            f"order_id={order_id} qty={intent.quantity:.6f} @ {intent.price} "
-            f"reserved_cash={active.reserved_cash:.4f} reserved_qty={active.reserved_qty:.6f} "
-            f"locked_cash={self._locked_cash:.4f} free_cash={self.free_cash:.4f}"
+        pos_deducted_usdt = sum(
+            qty * mark.get(self._asset_symbol_map.get(a, a), mark.get(a, 1.0))
+            for a, qty in self._position_deducted_comm.items()
+        )
+        total_exposure = sum(
+            pos.notional(mark.get(pos.symbol, pos.avg_entry_price))
+            for pos in self.active_positions.values()
         )
 
-    @property
-    def free_cash(self) -> float:
-        """Cash available for new BUY orders (excludes LIMIT BUY reservations)."""
-        return max(0.0, self._cash - self._locked_cash)
+        lines = [
+            f"┌─ ShadowBook-{self._strategy_id} ({self._strategy_name}) {'─' * 40}",
+            f"│  {'Strategy':<20} {self._strategy_name}  |  Venue: {self._venue.name}  |  Type: {self._asset_type.name}",
+            f"│  {'NAV':<20} {self._nav:>12.4f} USDT",
+            f"│  {'Cash':<20} {self._cash:>12.4f} USDT  (free={self.free_cash:.4f})",
+            f"│  {'Locked Cash':<20} {self._locked_cash:>12.4f} USDT",
+            f"│  {'Total Exposure':<20} {total_exposure:>12.4f} USDT",
+            f"│  {'Realized PnL':<20} {self._realized_pnl:>+12.4f} USDT",
+            f"│  {'Unrealized PnL':<20} {unrealized:>+12.4f} USDT",
+            f"│  {'Net PnL':<20} {net:>+12.4f} USDT",
+            f"│  {'Commission (raw)':<20} {raw_comm_usdt:>12.4f} USDT  "
+            f"({', '.join(f'{qty:.6f} {a}' for a, qty in self._total_commission_dict.items()) or 'none'})",
+            f"│  {'Position-Deducted Comm':<20} {pos_deducted_usdt:>12.4f} USDT  "
+            f"({', '.join(f'{qty:.6f} {a}' for a, qty in self._position_deducted_comm.items()) or 'none'})",
+            f"│  {'Peak Equity':<20} {self._peak_equity:>12.4f} USDT",
+            f"│  {'Max Drawdown':<20} {self._max_drawdown:>12.4%}  (current={self.current_drawdown():.4%})",
+        ]
 
-    def free_quantity(self, symbol: str) -> float:
-        """Base-asset quantity available for new SELL orders (excludes LIMIT SELL reservations)."""
-        return self.position(symbol).free_quantity
-
-    def update_mark_prices(self, prices: Dict[str, float]):
-        """Update mark prices and refresh derived metrics.
-
-        Called by the strategy's kline dispatch to keep the shadow book
-        in sync with live market data.
-        """
-        self._mark_prices.update(prices)
-        self._refresh_derived()
-
-    # ── Private ───────────────────────────────────────────────────────────
-
-    def _refresh_derived(self):
-        """Recompute NAV, weights, peak equity, and drawdown."""
-        self._nav = self.total_value()
-        if self._nav > 0:
-            self._weights = {
-                sym: (pos.quantity * self._mark_prices.get(sym, pos.avg_entry_price)) / self._nav
-                for sym, pos in self._positions.items()
-                if not pos.is_flat()
-                and self._mark_prices.get(sym, pos.avg_entry_price) > 0
-            }
+        # Active orders block
+        if self._active_orders:
+            lines.append(f"├─ Active Orders ({len(self._active_orders)}) {'─' * 46}")
+            for oid, order in self._active_orders.items():
+                if order.price is not None:  # ActiveLimitOrder
+                    reserved = getattr(order, 'reserved_cash', 0.0)
+                    lines.append(
+                        f"│    {oid:<12} {order.side.name:<6} qty={order.quantity:>10.6f} "
+                        f"price={order.price:>10.4f} reserved_cash={reserved:>10.4f}"
+                    )
+                else:  # ActiveOrder (market)
+                    lines.append(
+                        f"│    {oid:<12} {order.side.name:<6} qty={order.quantity:>10.6f} "
+                        f"(market)"
+                    )
         else:
-            self._weights = {}
+            lines.append(f"│  {'Active Orders':<20} []")
 
-        if self._nav > self._peak_equity:
-            self._peak_equity = self._nav
-        if self._peak_equity > 0:
-            dd = (self._peak_equity - self._nav) / self._peak_equity
-            if dd > self._max_drawdown:
-                self._max_drawdown = dd
+        # Positions block
+        lines.append(f"├─ Positions ({len(self.active_positions)}) {'─' * 43}")
+        if not self.active_positions:
+            lines.append("│  (flat)")
+        for sym, pos in self.active_positions.items():
+            mp = mark.get(sym, pos.avg_entry_price)
+            upnl = pos.unrealized_pnl(mp)
+            comm_str = ", ".join(f"{qty:.6f} {a}" for a, qty in pos.commission_by_asset.items()) or "none"
+            w = self._weights.get(sym, 0.0)
+            lines.append(
+                f"│  {sym:<12}  qty={pos.quantity:>10.6f} (free={pos.free_quantity:>10.6f} locked={pos.locked_quantity:>10.6f})  "
+                f"entry={pos.avg_entry_price:>10.4f}  mark={mp:>10.4f}  upnl={upnl:>+8.4f}  "
+                f"rpnl={pos.realized_pnl:>+8.4f}  w={w:.4f}  comm=[{comm_str}]"
+            )
 
-    # ── Display ───────────────────────────────────────────────────────────
+        # Fill audits block (last 10 fills, most recent first)
+        fills = list(self._fills)
+        if fills:
+            lines.append(f"├─ Fill Audits (last {min(num_fills_show, len(fills))} of {len(fills)}) {'─' * 38}")
+            # Show most recent fills first (deque maxlen retains newest at right)
+            for fill in reversed(fills[-num_fills_show:]):
+                ts = fill.timestamp_str()
+                # Format timestamp as milliseconds (or convert to readable if needed)
+                comm_str = f"{fill.commission:.6f} {fill.commission_asset}" if fill.commission else "none"
+                lines.append(
+                    f"│    {ts:<14} {fill.symbol:<8} {fill.side.name:<5} "
+                    f"qty={fill.quantity:>10.6f} price={fill.price:>10.4f} "
+                    f"comm=({comm_str:<12}) order={fill.order_id}"
+                )
+        else:
+            lines.append("│  Fill Audits: (none)")
 
-    def snapshot(self) -> dict:
-        return {
-            "strategy_id": self._strategy_id,
-            "cash": self._cash,
-            "nav": self._nav,
-            "realized_pnl": self._realized_pnl,
-            "total_commission": self.total_commission(),
-            "peak_equity": self._peak_equity,
-            "max_drawdown": self._max_drawdown,
-            "positions": {sym: str(pos) for sym, pos in self._positions.items()},
-            "weights": dict(self._weights),
-        }
-        
+        lines.append(f"└─{'─' * 80}")
+        return "\n".join(lines)
+    
     
     def save_snapshot(self):
         positions_json = {
@@ -831,14 +936,14 @@ class ShadowBook:
                 "qty": pos.quantity,
                 "avg_entry": pos.avg_entry_price,
                 "realized_pnl": pos.realized_pnl,
-                "commission_by_asset": dict(pos.commission_by_asset),
-            }
+                "comm_by_asset": dict(pos.commission_by_asset),
+                }
             for sym, pos in self._positions.items()
             if not pos.is_flat()
         }
 
         try:
-            print(f"[ShadowBook-{self._strategy_id}]:\n" + '\n'.join(f"{k}: {v}" for k, v in self.snapshot().items()))
+            self.logger.info(f"[ShadowBook-{self._strategy_id}] Saving snapshot to DB... \n{self.log_snapshot()}")
             PortfolioSnapshot.create(
                 strategy_id=self._strategy_id,
                 venue=self._venue,
@@ -846,7 +951,7 @@ class ShadowBook:
                 cash=self._cash,
                 unrealized_pnl=self.unrealized_pnl(),
                 realized_pnl=self._realized_pnl,
-                total_commission=self.total_commission(),
+                total_commission=self.total_commission,
                 peak_equity=self._peak_equity,
                 max_drawdown=self._max_drawdown,
                 current_drawdown=self.current_drawdown(),
@@ -867,53 +972,6 @@ class ShadowBook:
                 f"[ShadowBook-{self._strategy_id}] Failed to save snapshot: {e}",
                 exc_info=True,
             )
-
-    def log_snapshot(self) -> str:
-        """Return a formatted multi-line snapshot string for log comparison.
-
-        Designed to be easy to diff across rebalance cycles:
-        - fixed-width columns, one metric per line
-        - per-position block with mark price, PnL, and commission breakdown
-        - raw commission totals shown separately from the double-deduction-adjusted total
-        """
-        mark = self._mark_prices
-        unrealized = self.unrealized_pnl(mark)
-        net = self._realized_pnl + unrealized - self.total_commission(mark)
-        raw_comm_usdt = sum(
-            qty * mark.get(self._asset_symbol_map.get(a, a), mark.get(a, 1.0))
-            for a, qty in self._total_commission_dict.items()
-        )
-
-        lines = [
-            f"┌─ ShadowBook-{self._strategy_id} {'─' * 50}",
-            f"│  {'NAV':<20} {self._nav:>12.4f} USDT",
-            f"│  {'Cash':<20} {self._cash:>12.4f} USDT  (free={self.free_cash:.4f})",
-            f"│  {'Realized PnL':<20} {self._realized_pnl:>+12.4f} USDT",
-            f"│  {'Unrealized PnL':<20} {unrealized:>+12.4f} USDT",
-            f"│  {'Net PnL':<20} {net:>+12.4f} USDT",
-            f"│  {'Commission (raw)':<20} {raw_comm_usdt:>12.4f} USDT  "
-            f"({', '.join(f'{qty:.6f} {a}' for a, qty in self._total_commission_dict.items()) or 'none'})",
-            f"│  {'Peak Equity':<20} {self._peak_equity:>12.4f} USDT",
-            f"│  {'Max Drawdown':<20} {self._max_drawdown:>12.4%}  (current={self.current_drawdown():.4%})",
-            f"│  {'Active Orders':<20} {list(self._active_orders.keys()) or '[]'}",
-            f"├─ Positions ({len(self.active_positions)}) {'─' * 43}",
-        ]
-
-        if not self.active_positions:
-            lines.append("│  (flat)")
-        for sym, pos in self.active_positions.items():
-            mp = mark.get(sym, pos.avg_entry_price)
-            upnl = pos.unrealized_pnl(mp)
-            comm_str = ", ".join(f"{qty:.6f} {a}" for a, qty in pos.commission_by_asset.items()) or "none"
-            w = self._weights.get(sym, 0.0)
-            lines += [
-                f"│  {sym:<12}  qty={pos.quantity:>10.6f}  entry={pos.avg_entry_price:>10.4f}  "
-                f"mark={mp:>10.4f}  upnl={upnl:>+8.4f}  rpnl={pos.realized_pnl:>+8.4f}  "
-                f"w={w:.4f}  comm=[{comm_str}]",
-            ]
-
-        lines.append(f"└─{'─' * 62}")
-        return "\n".join(lines)
 
     def __repr__(self) -> str:
         active = len(self.active_positions)

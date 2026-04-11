@@ -204,6 +204,9 @@ class SpotStrategy:
         # is shared across strategies, so one strategy stopping must NOT
         # unsubscribe the shared portfolio from the event bus.
         self.logger.info(f"[Strategy] {self.__class__.__name__} stopping...")
+        
+        # Call the superclass on_stop() for any strategy-specific cleanup (e.g. convert all to cash, cancel orders, etc.)
+        await self.on_stop()
 
         # Signal run_forever() to unblock
         self._stop_event.set()
@@ -214,7 +217,7 @@ class SpotStrategy:
         self._private_event_bus.unsubscribe(EventType.BALANCE_UPDATE, self._dispatch_balance)
         self._private_event_bus.unsubscribe(EventType.REBALANCE_COMPLETE, self._dispatch_rebalance)
 
-        await self.on_stop()
+        
         self._executor.shutdown(wait=False)
         self._shadow_book.stop()
         self._state = StrategyState.STOPPED
