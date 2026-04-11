@@ -1,0 +1,165 @@
+# ── Elysian Trading System — docker-compose.yml ──────────────────────────────
+# Orchestrates the full Elysian stack:
+#   - elysian_strategy   : main trading process (one per strategy YAML)
+#   - postgres           : position / trade persistence
+#   - redis              : optional caching / pub-sub (future use)
+#
+# Quick start:
+#   cp .env.example .env   # fill in API keys + DB creds
+#   docker compose up --build
+#
+# Run a specific strategy only:
+#   docker compose up postgres elysian_strategy_0
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "3.9"
+
+# ── Named volumes ─────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  elysian_logs:
+    driver: local
+
+# ── Shared network ────────────────────────────────────────────────────────────
+networks:
+  elysian_net:
+    driver: bridge
+
+# ── Reusable anchor for strategy service defaults ─────────────────────────────
+x-strategy-defaults: &strategy-defaults
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      APP_ENV: production
+  env_file:
+    - .env
+  environment:
+    # Database — override individual vars if needed
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
+    REDIS_HOST: redis
+    REDIS_PORT: "6379"
+    NUMEXPR_MAX_THREADS: "4"
+    PYTHONUNBUFFERED: "1"
+  volumes:
+    - elysian_logs:/app/logs
+    - elysian_logs:/app/elysian_core/utils/logs
+  networks:
+    - elysian_net
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_started
+  restart: unless-stopped
+  # Ensure the container can open enough file descriptors for many WebSocket
+  # connections (each symbol pair opens its own stream).
+  ulimits:
+    nofile:
+      soft: 65536
+      hard: 65536
+
+# ── Services ──────────────────────────────────────────────────────────────────
+services:
+
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: elysian_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-elysian}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-elysian}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Optional: mount custom init SQL scripts
+      # - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "${POSTGRES_EXTERNAL_PORT:-5432}:5432"
+    networks:
+      - elysian_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-elysian} -d ${POSTGRES_DATABASE:-elysian}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: elysian_redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_EXTERNAL_PORT:-6379}:6379"
+    networks:
+      - elysian_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── Strategy 0: EventDrivenStrategy (Binance Spot) ─────────────────────────
+  elysian_strategy_0:
+    <<: *strategy-defaults
+    container_name: elysian_strategy_0
+    # API keys for this sub-account (strategy_id = 0)
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      BINANCE_API_KEY_0: ${BINANCE_API_KEY_0}
+      BINANCE_API_SECRET_0: ${BINANCE_API_SECRET_0}
+    command:
+      - python
+      - elysian_core/run_strategy.py
+    profiles:
+      - strategy_0
+      - all
+
+  # ── Strategy 1: PrintEventsStrategy (Binance Spot) ─────────────────────────
+  # Add as many strategy services as needed, one per strategy YAML.
+  elysian_strategy_1:
+    <<: *strategy-defaults
+    container_name: elysian_strategy_1
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      BINANCE_API_KEY_1: ${BINANCE_API_KEY_1}
+      BINANCE_API_SECRET_1: ${BINANCE_API_SECRET_1}
+    command:
+      - python
+      - elysian_core/run_strategy.py
+    profiles:
+      - strategy_1
+      - all
+
+  # ── Development override ───────────────────────────────────────────────────
+  # Run with: docker compose --profile dev up
+  elysian_dev:
+    <<: *strategy-defaults
+    container_name: elysian_dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_ENV: development
+    volumes:
+      # Mount source for live reloading during development
+      - .:/app
+      - elysian_logs:/app/logs
+    command: ["python", "-m", "elysian_core.run_strategy"]
+    profiles:
+      - dev
