@@ -51,7 +51,6 @@ if TYPE_CHECKING:
     from elysian_core.core.shadow_book import ShadowBook
 
 
-_STABLECOINS = frozenset({"USDC", "USDT", "BUSD"})
 
 
 class SpotStrategy:

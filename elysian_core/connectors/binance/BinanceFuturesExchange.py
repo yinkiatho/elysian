@@ -24,8 +24,6 @@ from elysian_core.db.models import CexTrade
 import elysian_core.utils.logger as log
 
 
-_STABLECOINS = frozenset({"USDC", "USDT", "BUSD"})
-
 # Map raw Binance futures order type strings → OrderType enum
 _BINANCE_ORDER_TYPE = {
     "LIMIT": OrderType.LIMIT,

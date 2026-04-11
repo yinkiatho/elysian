@@ -20,7 +20,11 @@ from elysian_core.core.order import Order
 from elysian_core.core.market_data import Kline, OrderBook, BinanceOrderBook
 from elysian_core.core.events import KlineEvent, OrderBookUpdateEvent, OrderUpdateEvent, BalanceUpdateEvent
 import elysian_core.utils.logger as log
+from elysian_core.utils.async_helpers import cancel_tasks
 
+_BINANCE_REST_HOST = "api.binance.com"
+_BINANCE_DEPTH_URL = f"https://{_BINANCE_REST_HOST}/api/v3/depth"
+_BINANCE_TIME_URL  = f"https://{_BINANCE_REST_HOST}/api/v3/time"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Shared Client Managers
@@ -50,7 +54,7 @@ class BinanceKlineClientManager(KlineClientManager):
             try:
                 # Pre-resolve DNS to avoid async DNS issues
                 loop = asyncio.get_running_loop()
-                await loop.getaddrinfo("api.binance.com", 443)
+                await loop.getaddrinfo(_BINANCE_REST_HOST, 443)
                 self.logger.debug("BinanceKlineClientManager: DNS pre-resolved successfully")
 
                 return await AsyncClient.create()
@@ -74,24 +78,8 @@ class BinanceKlineClientManager(KlineClientManager):
             return
 
         self._running = False
+        await cancel_tasks(self._reader_task, self._worker_tasks)
 
-        # Cancel reader and worker tasks
-        if self._reader_task and not self._reader_task.done():
-            self._reader_task.cancel()
-            try:
-                await self._reader_task
-            except asyncio.CancelledError:
-                pass
-
-        for task in self._worker_tasks:
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-
-        # Close socket and client
         if self._socket:
             await self._socket.__aexit__(None, None, None)
             self._socket = None
@@ -237,7 +225,7 @@ class BinanceOrderBookClientManager(OrderBookClientManager):
             try:
                 # Pre-resolve DNS to avoid async DNS issues
                 loop = asyncio.get_running_loop()
-                await loop.getaddrinfo("api.binance.com", 443)
+                await loop.getaddrinfo(_BINANCE_REST_HOST, 443)
                 self.logger.debug("BinanceOrderBookClientManager: DNS pre-resolved successfully")
 
                 return await AsyncClient.create()
@@ -262,24 +250,8 @@ class BinanceOrderBookClientManager(OrderBookClientManager):
             return
 
         self._running = False
+        await cancel_tasks(self._reader_task, self._worker_tasks)
 
-        # Cancel reader and worker tasks
-        if self._reader_task and not self._reader_task.done():
-            self._reader_task.cancel()
-            try:
-                await self._reader_task
-            except asyncio.CancelledError:
-                pass
-
-        for task in self._worker_tasks:
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-
-        # Close socket and client
         if self._socket:
             await self._socket.__aexit__(None, None, None)
             self._socket = None
@@ -477,7 +449,7 @@ class BinanceOrderBookFeed(AbstractDataFeed):
     async def _fetch_rest_snapshot(self, limit: int = 100) -> dict:
         def _sync_fetch():
             resp = requests.get(
-                "https://api.binance.com/api/v3/depth",
+                _BINANCE_DEPTH_URL,
                 params={"symbol": self._name, "limit": min(limit, 5000)},
             )
             resp.raise_for_status()
@@ -648,7 +620,7 @@ class BinanceUserDataClientManager:
     def _server_timestamp(self) -> int:
         """Fetch Binance server time to avoid clock skew errors (-1021)."""
         try:
-            resp = requests.get("https://api.binance.com/api/v3/time", timeout=5)
+            resp = requests.get(_BINANCE_TIME_URL, timeout=5)
             return resp.json()["serverTime"]
         except Exception:
             return int(time.time() * 1000)

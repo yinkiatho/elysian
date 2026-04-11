@@ -26,6 +26,7 @@ from elysian_core.core.order import Order
 from elysian_core.core.market_data import Kline, OrderBook
 from elysian_core.db.models import CexTrade
 import elysian_core.utils.logger as log
+from elysian_core.core.constants import STABLECOINS
 
 
 SPOT_BASE_ENDPOINT = "https://sapi.asterdex.com"
@@ -53,8 +54,6 @@ class AsterSpotExchange(SpotExchangeConnector):
         await exchange.run()
         await exchange.place_market_order(...)
     """
-
-    _STABLECOINS = frozenset({"USDC", "USDT", "BUSD"})
 
     def __init__(
         self,
@@ -551,7 +550,7 @@ class AsterSpotExchange(SpotExchangeConnector):
                 total_commission       = commission,
                 total_commission_quote = (
                     commission * price
-                    if comm_asset.upper() not in self._STABLECOINS
+                    if comm_asset.upper() not in STABLECOINS
                     else commission
                 ),
                 order_id    = str(order_id),

@@ -12,6 +12,7 @@ import websockets
 from elysian_core.connectors.base import AbstractDataFeed, KlineClientManager, OrderBookClientManager
 from elysian_core.core.market_data import Kline, OrderBook, AsterOrderBook
 import elysian_core.utils.logger as log
+from elysian_core.utils.async_helpers import cancel_tasks
 
 
 SPOT_BASE_ENDPOINT     = "https://sapi.asterdex.com"
@@ -48,21 +49,7 @@ class AsterKlineClientManager(KlineClientManager):
         if not self._running:
             return
         self._running = False
-
-        if self._reader_task and not self._reader_task.done():
-            self._reader_task.cancel()
-            try:
-                await self._reader_task
-            except asyncio.CancelledError:
-                pass
-
-        for task in self._worker_tasks:
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+        await cancel_tasks(self._reader_task, self._worker_tasks)
 
         if self._websocket:
             try:
@@ -228,21 +215,7 @@ class AsterOrderBookClientManager(OrderBookClientManager):
         if not self._running:
             return
         self._running = False
-
-        if self._reader_task and not self._reader_task.done():
-            self._reader_task.cancel()
-            try:
-                await self._reader_task
-            except asyncio.CancelledError:
-                pass
-
-        for task in self._worker_tasks:
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+        await cancel_tasks(self._reader_task, self._worker_tasks)
 
         if self._websocket:
             try:

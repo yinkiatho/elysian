@@ -19,6 +19,7 @@ from elysian_core.core.market_data import Kline, OrderBook, BinanceOrderBook
 
 from elysian_core.connectors.base import AbstractClientManager, KlineClientManager, OrderBookClientManager
 import elysian_core.utils.logger as log
+from elysian_core.utils.async_helpers import cancel_tasks
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Shared Client Managers
@@ -70,24 +71,8 @@ class BinanceFuturesKlineClientManager(KlineClientManager):
             return
 
         self._running = False
+        await cancel_tasks(self._reader_task, self._worker_tasks)
 
-        # Cancel reader and worker tasks
-        if self._reader_task and not self._reader_task.done():
-            self._reader_task.cancel()
-            try:
-                await self._reader_task
-            except asyncio.CancelledError:
-                pass
-
-        for task in self._worker_tasks:
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-
-        # Close socket and client
         if self._socket:
             await self._socket.__aexit__(None, None, None)
             self._socket = None
@@ -242,24 +227,8 @@ class BinanceFuturesOrderBookClientManager(OrderBookClientManager):
             return
 
         self._running = False
+        await cancel_tasks(self._reader_task, self._worker_tasks)
 
-        # Cancel reader and worker tasks
-        if self._reader_task and not self._reader_task.done():
-            self._reader_task.cancel()
-            try:
-                await self._reader_task
-            except asyncio.CancelledError:
-                pass
-
-        for task in self._worker_tasks:
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-
-        # Close socket and client
         if self._socket:
             await self._socket.__aexit__(None, None, None)
             self._socket = None

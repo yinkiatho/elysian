@@ -35,8 +35,7 @@ from elysian_core.db.models import PortfolioSnapshot
 from elysian_core.core.events import BalanceUpdateEvent, OrderUpdateEvent
 from elysian_core.config.app_config import StrategyConfig
 import elysian_core.utils.logger as log
-
-_STABLECOINS = frozenset({"USDT", "USDC", "BUSD"})
+from elysian_core.core.constants import STABLECOINS, FILL_HISTORY_MAXLEN, QTY_EPSILON
 
 class ShadowBook:
     """Per-strategy virtual position and cash ledger.
@@ -75,7 +74,7 @@ class ShadowBook:
 
         # Mark prices (updated via strategy's kline dispatch)
         # Stablecoins seeded at 1.0 so total_commission USDT conversion is correct
-        self._mark_prices: Dict[str, float] = {symbol: 1.0 for symbol in _STABLECOINS}
+        self._mark_prices: Dict[str, float] = {symbol: 1.0 for symbol in STABLECOINS}
 
         # PnL tracking
         self._realized_pnl: float = 0.0
@@ -83,7 +82,7 @@ class ShadowBook:
         self._total_commission_dict: Dict[str, float] = {}
 
         # Trade history (ring buffer, mirrors Portfolio._fills)
-        self._fills: Deque[Fill] = deque(maxlen=10_000)
+        self._fills: Deque[Fill] = deque(maxlen=FILL_HISTORY_MAXLEN)
 
         # Risk metrics (updated on every _refresh_derived)
         self._peak_equity: float = 0.0
@@ -236,13 +235,14 @@ class ShadowBook:
         Uses _asset_symbol_map to correctly resolve raw asset names (e.g. 'BNB')
         to their trading-pair mark price (e.g. 'BNBUSDT').
         """
-        # If asset is not in marked prices this will return None and break, as intended
         prices = mark_prices if mark_prices is not None else self._mark_prices
-        resolve = lambda asset: prices.get(self._asset_symbol_map.get(asset, asset), prices.get(asset)) 
-        return sum(map(
-            lambda item: max(0.0, item[1] - self._position_deducted_comm.get(item[0], 0.0)) * resolve(item[0]),
-            self._total_commission_dict.items()
-        ))
+        total = 0.0
+        for asset, gross_qty in self._total_commission_dict.items():
+            net_qty = max(0.0, gross_qty - self._position_deducted_comm.get(asset, 0.0))
+            symbol = self._asset_symbol_map.get(asset, asset)
+            price = prices.get(symbol) or prices.get(asset, 0.0)
+            total += net_qty * price
+        return total
 
     @property
     def peak_equity(self) -> float:
@@ -289,7 +289,7 @@ class ShadowBook:
         feeds = feeds or {}
 
         # Cash: stablecoin balances
-        for stable in _STABLECOINS:
+        for stable in STABLECOINS:
             bal = exchange.get_balance(stable)
             if bal > 0:
                 self._cash_dict[stable] = bal
@@ -297,7 +297,7 @@ class ShadowBook:
 
         # Positions: non-stablecoin balances — map base asset → trading symbol
         for asset, qty in exchange._balances.items():
-            if asset in _STABLECOINS or qty <= 0:
+            if asset in STABLECOINS or qty <= 0:
                 continue
             symbol = exchange.base_asset_to_symbol(asset)
             if symbol is None or (self._tracked_symbols and symbol not in self._tracked_symbols):
@@ -433,7 +433,7 @@ class ShadowBook:
 
     async def _on_balance_update(self, event: BalanceUpdateEvent):
         """Handle balance updates from the private sub-account event bus."""
-        if event.asset in _STABLECOINS:
+        if event.asset in STABLECOINS:
             old_cash = self._cash
             self._cash_dict[event.asset] = self._cash_dict.get(event.asset, 0.0) + event.delta
             self._cash = sum(self._cash_dict.values())
@@ -490,96 +490,101 @@ class ShadowBook:
             return  # guard against duplicate terminal events
 
         active = self._active_orders.get(order_id)
-
         if active is None:
-            # First time seeing this order — wrap in ActiveOrder for tracking.
-            # LIMIT orders created by lock_for_order() are already ActiveLimitOrder;
-            # this branch handles MARKET orders and externally-placed orders.
-            active = ActiveOrder(
-                id=order.id, symbol=order.symbol, side=order.side,
-                order_type=order.order_type, quantity=order.quantity,
-                price=order.price, status=OrderStatus.PENDING,
-                venue=order.venue or self._venue, strategy_id=order.strategy_id,
-            )
-            self._active_orders[order_id] = active
-            self.logger.info(
-                f"[ShadowBook-{self._strategy_id}] NEW ORDER tracked: "
-                f"{order.side.value} {order.symbol} qty={order.quantity:.6f} "
-                f"type={order.order_type.value} order_id={order_id} "
-                f"active_orders_count={len(self._active_orders)}"
-            )
+            active = self._register_new_order(order, order_id)
 
         delta_filled = active.sync_from_event(order)
-
         if delta_filled > 0:
-            fill_price = order.last_fill_price if order.last_fill_price > 0 else order.avg_fill_price
-            self.logger.info(
-                f"[ShadowBook-{self._strategy_id}] FILL: {order.side.value} {order.symbol} "
-                f"delta_filled={delta_filled:.6f} @ {fill_price:.4f} "
-                f"total_filled={order.filled_qty:.6f}/{order.quantity:.6f} "
-                f"order_id={order_id} commission={order.commission:.6f} {order.commission_asset}"
-            )
-
-            # Release lock proportional to this fill increment
-            if isinstance(active, ActiveLimitOrder):
-                cash_rel, qty_rel = active.release_partial(delta_filled)
-                self._locked_cash = max(0.0, self._locked_cash - cash_rel)
-                if qty_rel > 0:
-                    pos = self._positions.get(order.symbol)
-                    if pos is not None:
-                        pos.locked_quantity = max(0.0, pos.locked_quantity - qty_rel)
-                self.logger.debug(
-                    f"[ShadowBook-{self._strategy_id}] Lock released: "
-                    f"cash_rel={cash_rel:.4f} qty_rel={qty_rel:.6f} "
-                    f"locked_cash={self._locked_cash:.4f}"
-                )
-
-            qty_delta = delta_filled if order.side == Side.BUY else -delta_filled
-            self.apply_fill(
-                symbol=order.symbol,
-                base_asset=event.base_asset,
-                quote_asset=event.quote_asset,
-                qty_delta=qty_delta,
-                price=fill_price,
-                commission=order.commission,
-                commission_asset=order.commission_asset,
-                venue=event.venue,
-                order_id=order_id,
-                timestamp=order.last_updated_timestamp or int(time.time() * 1000)
-            )
+            self._process_fill_delta(active, event, order, order_id, delta_filled)
 
         if active.is_terminal:
-            self.logger.info(
-                f"[ShadowBook-{self._strategy_id}] ORDER TERMINAL: {order_id} "
-                f"status={order.status.value} symbol={order.symbol} "
-                f"filled={order.filled_qty:.6f}/{order.quantity:.6f} "
-                f"avg_fill_price={order.avg_fill_price:.4f}"
+            self._finalize_terminal_order(active, order, order_id)
+
+    def _register_new_order(self, order, order_id: str) -> ActiveOrder:
+        """Wrap a first-seen order in an ActiveOrder and register it for tracking."""
+        active = ActiveOrder(
+            id=order.id, symbol=order.symbol, side=order.side,
+            order_type=order.order_type, quantity=order.quantity,
+            price=order.price, status=OrderStatus.PENDING,
+            venue=order.venue or self._venue, strategy_id=order.strategy_id,
+        )
+        self._active_orders[order_id] = active
+        self.logger.info(
+            f"[ShadowBook-{self._strategy_id}] NEW ORDER tracked: "
+            f"{order.side.value} {order.symbol} qty={order.quantity:.6f} "
+            f"type={order.order_type.value} order_id={order_id} "
+            f"active_orders_count={len(self._active_orders)}"
+        )
+        return active
+
+    def _process_fill_delta(self, active: ActiveOrder, event: OrderUpdateEvent,
+                            order, order_id: str, delta_filled: float):
+        """Release partial lock and apply a fill increment to positions/cash."""
+        fill_price = order.last_fill_price if order.last_fill_price > 0 else order.avg_fill_price
+        self.logger.info(
+            f"[ShadowBook-{self._strategy_id}] FILL: {order.side.value} {order.symbol} "
+            f"delta_filled={delta_filled:.6f} @ {fill_price:.4f} "
+            f"total_filled={order.filled_qty:.6f}/{order.quantity:.6f} "
+            f"order_id={order_id} commission={order.commission:.6f} {order.commission_asset}"
+        )
+
+        if isinstance(active, ActiveLimitOrder):
+            cash_rel, qty_rel = active.release_partial(delta_filled)
+            self._locked_cash = max(0.0, self._locked_cash - cash_rel)
+            if qty_rel > 0:
+                pos = self._positions.get(order.symbol)
+                if pos is not None:
+                    pos.locked_quantity = max(0.0, pos.locked_quantity - qty_rel)
+            self.logger.debug(
+                f"[ShadowBook-{self._strategy_id}] Lock released: "
+                f"cash_rel={cash_rel:.4f} qty_rel={qty_rel:.6f} "
+                f"locked_cash={self._locked_cash:.4f}"
             )
-            # Drain any remaining reservation (handles partial-fill-then-cancel)
-            if isinstance(active, ActiveLimitOrder):
-                cash_rem, qty_rem = active.release_all()
-                self._locked_cash = max(0.0, self._locked_cash - cash_rem)
-                if qty_rem > 0:
-                    pos = self._positions.get(order.symbol)
-                    if pos is not None:
-                        pos.locked_quantity = max(0.0, pos.locked_quantity - qty_rem)
-                if cash_rem > 0 or qty_rem > 0:
-                    self.logger.info(
-                        f"[ShadowBook-{self._strategy_id}] Remaining lock drained: "
-                        f"cash_rem={cash_rem:.4f} qty_rem={qty_rem:.6f}"
-                    )
-            self._active_orders.pop(order_id, None)
-            self._completed_order_ids.add(order_id)
-            
-            # Recording the trade to db here
-            asyncio.create_task(self._async_record_trade(active))
+
+        qty_delta = delta_filled if order.side == Side.BUY else -delta_filled
+        self.apply_fill(
+            symbol=order.symbol,
+            base_asset=event.base_asset,
+            quote_asset=event.quote_asset,
+            qty_delta=qty_delta,
+            price=fill_price,
+            commission=order.commission,
+            commission_asset=order.commission_asset,
+            venue=event.venue,
+            order_id=order_id,
+            timestamp=order.last_updated_timestamp or int(time.time() * 1000),
+        )
+
+    def _finalize_terminal_order(self, active: ActiveOrder, order, order_id: str):
+        """Drain remaining lock, mark order completed, and schedule trade recording."""
+        self.logger.info(
+            f"[ShadowBook-{self._strategy_id}] ORDER TERMINAL: {order_id} "
+            f"status={order.status.value} symbol={order.symbol} "
+            f"filled={order.filled_qty:.6f}/{order.quantity:.6f} "
+            f"avg_fill_price={order.avg_fill_price:.4f}"
+        )
+        if isinstance(active, ActiveLimitOrder):
+            cash_rem, qty_rem = active.release_all()
+            self._locked_cash = max(0.0, self._locked_cash - cash_rem)
+            if qty_rem > 0:
+                pos = self._positions.get(order.symbol)
+                if pos is not None:
+                    pos.locked_quantity = max(0.0, pos.locked_quantity - qty_rem)
+            if cash_rem > 0 or qty_rem > 0:
+                self.logger.info(
+                    f"[ShadowBook-{self._strategy_id}] Remaining lock drained: "
+                    f"cash_rem={cash_rem:.4f} qty_rem={qty_rem:.6f}"
+                )
+        self._active_orders.pop(order_id, None)
+        self._completed_order_ids.add(order_id)
+        asyncio.create_task(self._async_record_trade(active))
     
     # ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # ── Write — Fill attribution ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     def apply_fill(self, symbol: str, base_asset: str, quote_asset: str, qty_delta: float, price: float,
                    commission: float = 0.0, commission_asset: Optional[str] = None,
-                   venue: Optional[Venue] = None, order_id: Optional[str] = None, 
+                   venue: Optional[Venue] = None, order_id: Optional[str] = None,
                    timestamp: Optional[int] = None):
         """Attribute a fill to this shadow book.
 
@@ -591,97 +596,24 @@ class ShadowBook:
         Cash is adjusted here because _on_balance_update only handles
         deposits/withdrawals, not trade fills.
         """
-        # Keep base_asset → symbol map current so commission deductions can resolve positions.
         self._asset_symbol_map[base_asset] = symbol
-
-        if abs(qty_delta) < 1e-12:
+        if abs(qty_delta) < QTY_EPSILON:
             return
 
         venue = venue or self._venue
         side = Side.BUY if qty_delta > 0 else Side.SELL
-        pos = self._positions.get(symbol, Position(symbol=symbol, venue=venue))
-        old_qty = pos.quantity
-        new_qty = pos.quantity + qty_delta
 
-        same_direction = (pos.quantity >= 0) == (qty_delta >= 0) or pos.quantity == 0
-
-        if same_direction:
-            total_cost = pos.avg_entry_price * pos.quantity + price * qty_delta
-            pos.avg_entry_price = total_cost / new_qty if new_qty != 0 else 0.0
-            pos.quantity = new_qty
-        else:
-            closing_qty = min(abs(qty_delta), abs(pos.quantity))
-            sign = 1 if pos.quantity > 0 else -1
-            pnl = (price - pos.avg_entry_price) * closing_qty * sign
-
-            pos.realized_pnl += pnl
-            self._realized_pnl += pnl
-
-            pos.quantity = new_qty
-            if new_qty == 0:
-                pos.avg_entry_price = 0.0
-            elif (new_qty > 0) != (old_qty > 0):
-                # Position flipped direction
-                pos.avg_entry_price = price
-
-        # Commit position BEFORE commission block so same-symbol lookups (e.g. BNB fee
-        # on BNBUSDT) can find it. Do NOT pop flat positions yet — a SELL-to-zero still
-        # needs to be visible for same-symbol commission deduction. The pop is deferred
-        # to after commission handling; the commission block has its own pop (line below).
-        self._positions[symbol] = pos
-
-        # Commission tracking — record in per-position dict and strategy-level dict.
-        if commission_asset is not None and commission > 0:
-            pos.commission_by_asset[commission_asset] = (
-                pos.commission_by_asset.get(commission_asset, 0.0) + commission
-            )
-            self._total_commission_dict[commission_asset] = (
-                self._total_commission_dict.get(commission_asset, 0.0) + commission
-            )
-
-            # Non-stablecoin commissions reduce the real asset balance on the exchange
-            # (via outboundAccountPosition). Mirror this by reducing the corresponding
-            # ShadowBook position so qty stays in sync with the real balance.
-            # Record in _position_deducted_comm so total_commission() excludes these
-            # amounts from net_pnl (they are already reflected via reduced position value).
-            if commission_asset not in _STABLECOINS:
-                comm_symbol = self._asset_symbol_map.get(commission_asset)
-                if comm_symbol and comm_symbol in self._positions:
-                    fee_pos = self._positions[comm_symbol]
-                    fee_pos.quantity = max(0.0, fee_pos.quantity - commission)
-                    self._position_deducted_comm[commission_asset] = (
-                        self._position_deducted_comm.get(commission_asset, 0.0) + commission
-                    )
-                    if fee_pos.is_flat():
-                        self._positions.pop(comm_symbol, None)
-                else:
-                    raise ValueError(
-                        f"Commission asset {commission_asset} not found in positions for deduction"
-                    )
-            elif commission_asset in _STABLECOINS and commission > 0:
-                self._cash -= commission
-                self._cash_dict[commission_asset] = (
-                    self._cash_dict.get(commission_asset, 0.0) - commission
-                )
+        pos, old_qty = self._update_position_on_fill(symbol, venue, qty_delta, price)
+        self._track_commission(pos, commission_asset, commission, quote_asset)
 
         # Deferred flat-position cleanup: commission block may have further reduced qty
         # (e.g. SELL-to-zero BNBUSDT + BNB commission). pop() is a no-op if already removed.
         if pos.is_flat():
             self._positions.pop(symbol, None)
 
-        # ── Cash adjustment ───────────────────────────────────────────────
-        old_cash = self._cash
-        notional = abs(qty_delta) * price
-        if qty_delta > 0:  # BUY: spend quote asset
-            self._cash -= notional
-            self._cash_dict[quote_asset] = self._cash_dict.get(quote_asset, 0.0) - notional
-        else:              # SELL: receive quote asset
-            self._cash += notional
-            self._cash_dict[quote_asset] = self._cash_dict.get(quote_asset, 0.0) + notional
-        
+        old_cash, notional = self._adjust_cash(qty_delta, price, quote_asset)
         self._refresh_derived()
 
-        # Audit trail
         self._fills.append(Fill(
             symbol=symbol, venue=venue, side=side,
             quantity=abs(qty_delta), price=price,
@@ -701,8 +633,86 @@ class ShadowBook:
             f"comm_gross=({', '.join(f'{qty:.6f} {a}' for a, qty in self._total_commission_dict.items()) or 'none'}) "
             f"net_comm_usdt={self.total_commission():.4f}"
         )
-        
         self.logger.info(f"[ShadowBook-{self._strategy_id}] Snapshot:\n{self.log_snapshot()}")
+
+    def _update_position_on_fill(self, symbol: str, venue: Venue, qty_delta: float, price: float):
+        """Update position quantity and avg_entry for a fill. Commits to self._positions.
+
+        Returns (pos, old_qty). Position is committed before returning so that
+        commission deduction (same-symbol lookup) can find it.
+        """
+        pos = self._positions.get(symbol, Position(symbol=symbol, venue=venue))
+        old_qty = pos.quantity
+        new_qty = pos.quantity + qty_delta
+        same_direction = (pos.quantity >= 0) == (qty_delta >= 0) or pos.quantity == 0
+
+        if same_direction:
+            total_cost = pos.avg_entry_price * pos.quantity + price * qty_delta
+            pos.avg_entry_price = total_cost / new_qty if new_qty != 0 else 0.0
+            pos.quantity = new_qty
+        else:
+            closing_qty = min(abs(qty_delta), abs(pos.quantity))
+            sign = 1 if pos.quantity > 0 else -1
+            pnl = (price - pos.avg_entry_price) * closing_qty * sign
+            pos.realized_pnl += pnl
+            self._realized_pnl += pnl
+            pos.quantity = new_qty
+            if new_qty == 0:
+                pos.avg_entry_price = 0.0
+            elif (new_qty > 0) != (old_qty > 0):
+                pos.avg_entry_price = price  # position flipped direction
+
+        # Commit BEFORE commission block so same-symbol lookups (e.g. BNB fee on BNBUSDT)
+        # can find the position. Flat-position pop is deferred until after commission handling.
+        self._positions[symbol] = pos
+        return pos, old_qty
+
+    def _track_commission(self, pos, commission_asset: Optional[str], commission: float, quote_asset: str):
+        """Record commission amounts and deduct non-stablecoin fees from positions/cash."""
+        if commission_asset is None or commission <= 0:
+            return
+
+        pos.commission_by_asset[commission_asset] = (
+            pos.commission_by_asset.get(commission_asset, 0.0) + commission
+        )
+        self._total_commission_dict[commission_asset] = (
+            self._total_commission_dict.get(commission_asset, 0.0) + commission
+        )
+
+        if commission_asset not in STABLECOINS:
+            # Non-stablecoin fee reduces the real asset balance on the exchange.
+            # Mirror this by reducing the position qty so it stays in sync.
+            comm_symbol = self._asset_symbol_map.get(commission_asset)
+            if comm_symbol and comm_symbol in self._positions:
+                fee_pos = self._positions[comm_symbol]
+                fee_pos.quantity = max(0.0, fee_pos.quantity - commission)
+                self._position_deducted_comm[commission_asset] = (
+                    self._position_deducted_comm.get(commission_asset, 0.0) + commission
+                )
+                if fee_pos.is_flat():
+                    self._positions.pop(comm_symbol, None)
+            else:
+                raise ValueError(
+                    f"Commission asset {commission_asset} not found in positions for deduction"
+                )
+        else:
+            # Stablecoin fee reduces cash directly.
+            self._cash -= commission
+            self._cash_dict[commission_asset] = (
+                self._cash_dict.get(commission_asset, 0.0) - commission
+            )
+
+    def _adjust_cash(self, qty_delta: float, price: float, quote_asset: str):
+        """Adjust cash for a fill. Returns (old_cash, notional)."""
+        old_cash = self._cash
+        notional = abs(qty_delta) * price
+        if qty_delta > 0:  # BUY: spend quote asset
+            self._cash -= notional
+            self._cash_dict[quote_asset] = self._cash_dict.get(quote_asset, 0.0) - notional
+        else:              # SELL: receive quote asset
+            self._cash += notional
+            self._cash_dict[quote_asset] = self._cash_dict.get(quote_asset, 0.0) + notional
+        return old_cash, notional
         
         
     
@@ -732,7 +742,7 @@ class ShadowBook:
             return  # idempotent
         if intent.side == Side.BUY and intent.price is None:
             self.logger.warning(
-                f"[ShadowBook] lock_for_order: LIMIT BUY {order_id} has price=None, skipping lock"
+                f"[ShadowBook-{self._strategy_id}] lock_for_order: LIMIT BUY {order_id} has price=None, skipping lock"
             )
             return
 
@@ -819,7 +829,7 @@ class ShadowBook:
                 total_commission=active.commission,
                 total_commission_quote=(
                     active.commission * active.avg_fill_price
-                    if comm_asset.upper() not in _STABLECOINS
+                    if comm_asset.upper() not in STABLECOINS
                     else active.commission
                 ),
                 order_id=str(active.id),

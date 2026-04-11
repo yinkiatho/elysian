@@ -56,8 +56,6 @@ class BinanceSpotExchange(SpotExchangeConnector):
         await exchange.place_market_order(...)
     """
 
-    _STABLECOINS = frozenset({"USDC", "USDT", "BUSD"})
-
     def __init__(
         self,
         args: argparse.Namespace = argparse.Namespace(),

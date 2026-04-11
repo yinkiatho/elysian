@@ -26,8 +26,7 @@ from elysian_core.core.enums import AssetType, OrderType, Side, Venue
 from elysian_core.core.portfolio import Portfolio
 from elysian_core.core.signals import OrderIntent, RebalanceResult, ValidatedWeights
 import elysian_core.utils.logger as log
-
-_STABLECOINS = frozenset({"USDT", "USDC", "BUSD"})
+from elysian_core.core.constants import STABLECOINS
 
 
 def _round_step(value: float, step: float) -> float:
@@ -173,7 +172,7 @@ class ExecutionEngine:
             # Stablecoins must never appear as tradeable symbols — cash is always
             # implicit (1 - sum(weights)).  If a strategy emits a stablecoin key
             # it is a bug; warn loudly and skip so no order is placed.
-            if symbol in _STABLECOINS:
+            if symbol in STABLECOINS:
                 self.logger.warning(
                     f"[ExecutionEngine] Stablecoin '{symbol}' found in validated weights "
                     f"(w={target_weight:.4f}) — cash is implicit, skipping. "
