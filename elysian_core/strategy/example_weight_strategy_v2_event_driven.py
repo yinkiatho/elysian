@@ -36,7 +36,7 @@ class EventDrivenStrategy(SpotStrategy):
         super().__init__(*args, **kwargs)
         
         # Symbols can be passed explicitly or loaded from cfg in on_start
-        self._rebalance_interval = 60  # seconds; also set on FSM cooldown
+        self._rebalance_interval = 30  # seconds; also set on FSM cooldown
 
         # Initialized in on_start after self._symbols is populated by the runner
         self._price_series = {}
@@ -129,6 +129,23 @@ class EventDrivenStrategy(SpotStrategy):
             )
             
             
+    # def compute_weights(self, **ctx) -> dict:
+        
+    #     # --- Kill switch (go 100% cash) ---
+    #     if ctx.get('convert_all_base', False):
+    #         self.logger.warning("Kill signal received => returning zero weights (100% cash)")
+    #         return {sym: 0.0 for sym in self._symbols}
+        
+    #     if self.trade_counter % 2 == 1:
+    #         self.trade_counter += 1
+    #         weights = {sym: 0.0 for sym in self._symbols}
+    #     else:
+    #         self.trade_counter += 1
+    #         weights = {sym: 1.0 / len(self._symbols) for sym in self._symbols}
+            
+    #     self.logger.info(f"Computed weights: {weights}")
+    #     return weights
+    
     def compute_weights(self, **ctx) -> dict:
         
         # --- Kill switch (go 100% cash) ---
@@ -136,16 +153,23 @@ class EventDrivenStrategy(SpotStrategy):
             self.logger.warning("Kill signal received => returning zero weights (100% cash)")
             return {sym: 0.0 for sym in self._symbols}
         
-        if self.trade_counter % 2 == 1:
-            self.trade_counter += 1
-            weights = {sym: 0.0 for sym in self._symbols}
-        else:
-            self.trade_counter += 1
-            weights = {sym: 1.0 / len(self._symbols) for sym in self._symbols}
+        
+        weights = {}
+        symbol_max_weight = 1.0 / len(self._symbols)  # Cap individual symbol weight to prevent concentration
+        for sym in self._symbols:
             
+            # Get current price vs rolling exponential average of price as a simple momentum signal
+            price_series = self._price_series.get(sym)
+            current_price = price_series[-1] if price_series else None
+            sma = price_series[-30:].mean() if price_series and len(price_series) >= 30 else None
+            
+            if current_price is not None and sma is not None and current_price < sma:
+                weights[sym] = symbol_max_weight  # Assign max weight if momentum signal is positive
+            else:
+                weights[sym] = 0.0  # No position if momentum signal is negative or insufficient data
+                
         self.logger.info(f"Computed weights: {weights}")
         return weights
-        
 
     # def compute_weights(self, **ctx) -> dict:
     #     """

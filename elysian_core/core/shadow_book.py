@@ -603,6 +603,11 @@ class ShadowBook:
         venue = venue or self._venue
         side = Side.BUY if qty_delta > 0 else Side.SELL
 
+        # Capture before ANY mutation so the log reflects the true pre-fill cash.
+        # _track_commission() deducts USDT commissions from _cash before _adjust_cash
+        # runs, so old_cash must be captured here — not inside _adjust_cash.
+        old_cash = self._cash
+
         pos, old_qty = self._update_position_on_fill(symbol, venue, qty_delta, price)
         self._track_commission(pos, commission_asset, commission, quote_asset)
 
@@ -611,7 +616,7 @@ class ShadowBook:
         if pos.is_flat():
             self._positions.pop(symbol, None)
 
-        old_cash, notional = self._adjust_cash(qty_delta, price, quote_asset)
+        notional = self._adjust_cash(qty_delta, price, quote_asset)
         self._refresh_derived()
 
         self._fills.append(Fill(
@@ -702,9 +707,8 @@ class ShadowBook:
                 self._cash_dict.get(commission_asset, 0.0) - commission
             )
 
-    def _adjust_cash(self, qty_delta: float, price: float, quote_asset: str):
-        """Adjust cash for a fill. Returns (old_cash, notional)."""
-        old_cash = self._cash
+    def _adjust_cash(self, qty_delta: float, price: float, quote_asset: str) -> float:
+        """Adjust cash for a fill. Returns notional."""
         notional = abs(qty_delta) * price
         if qty_delta > 0:  # BUY: spend quote asset
             self._cash -= notional
@@ -712,7 +716,7 @@ class ShadowBook:
         else:              # SELL: receive quote asset
             self._cash += notional
             self._cash_dict[quote_asset] = self._cash_dict.get(quote_asset, 0.0) + notional
-        return old_cash, notional
+        return notional
         
         
     
@@ -925,7 +929,7 @@ class ShadowBook:
             lines.append(f"├─ Fill Audits (last {min(num_fills_show, len(fills))} of {len(fills)}) {'─' * 38}")
             # Show most recent fills first (deque maxlen retains newest at right)
             for fill in reversed(fills[-num_fills_show:]):
-                ts = fill.timestamp_str()
+                ts = fill.timestamp_str
                 # Format timestamp as milliseconds (or convert to readable if needed)
                 comm_str = f"{fill.commission:.6f} {fill.commission_asset}" if fill.commission else "none"
                 lines.append(
@@ -961,7 +965,7 @@ class ShadowBook:
                 cash=self._cash,
                 unrealized_pnl=self.unrealized_pnl(),
                 realized_pnl=self._realized_pnl,
-                total_commission=self.total_commission,
+                total_commission=self.total_commission(),
                 peak_equity=self._peak_equity,
                 max_drawdown=self._max_drawdown,
                 current_drawdown=self.current_drawdown(),
