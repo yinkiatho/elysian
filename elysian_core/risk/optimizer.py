@@ -22,29 +22,6 @@ import elysian_core.utils.logger as log
 if TYPE_CHECKING:
     from elysian_core.core.shadow_book import ShadowBook
 
-
-# ---------------------------------------------------------------------------
-# Internal result types for each pipeline step
-# ---------------------------------------------------------------------------
-
-class _StepResult:
-    """Carries weights and accumulated audit metadata through the pipeline."""
-
-    __slots__ = ("weights", "clips", "filtered_symbols", "notes")
-
-    def __init__(
-        self,
-        weights: Dict[str, float],
-        clips: Optional[Dict[str, float]] = None,
-        filtered_symbols: Optional[Set[str]] = None,
-        notes: Optional[List[str]] = None,
-    ) -> None:
-        self.weights: Dict[str, float] = weights
-        self.clips: Dict[str, float] = clips or {}
-        self.filtered_symbols: Set[str] = filtered_symbols or set()
-        self.notes: List[str] = notes or []
-
-
 # ---------------------------------------------------------------------------
 # PortfolioOptimizer
 # ---------------------------------------------------------------------------
