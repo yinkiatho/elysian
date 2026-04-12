@@ -15,6 +15,12 @@ echo "[entrypoint] Elysian Trading System starting..."
 echo "[entrypoint] APP_ENV=${APP_ENV:-production}"
 echo "[entrypoint] Python: $(python --version)"
 
+# ── 0. Skip DB init for containers that don't need it (e.g. market-data) ─────
+if [ "${SKIP_DB_INIT:-false}" = "true" ]; then
+  echo "[entrypoint] SKIP_DB_INIT=true — skipping postgres wait and table creation"
+  exec "$@"
+fi
+
 # ── 1. Wait for Postgres ──────────────────────────────────────────────────────
 POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"

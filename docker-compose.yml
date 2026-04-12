@@ -53,8 +53,8 @@ x-strategy-defaults: &strategy-defaults
   depends_on:
     postgres:
       condition: service_healthy
-    redis:
-      condition: service_started
+    elysian_market_data:
+      condition: service_healthy
   restart: unless-stopped
   # Ensure the container can open enough file descriptors for many WebSocket
   # connections (each symbol pair opens its own stream).
@@ -108,21 +108,61 @@ services:
       timeout: 5s
       retries: 3
 
+  # ── Market Data Service ────────────────────────────────────────────────────
+  # Owns all WebSocket feed managers. Publishes KlineEvent / OrderBookUpdateEvent
+  # to Redis pub/sub so strategy containers can subscribe independently.
+  elysian_market_data:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_ENV: production
+    container_name: elysian_market_data
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      SKIP_DB_INIT: "true"
+      PYTHONUNBUFFERED: "1"
+      NUMEXPR_MAX_THREADS: "4"
+    volumes:
+      - elysian_logs:/app/logs
+    networks:
+      - elysian_net
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: ["python", "-m", "elysian_core.services.market_data_service"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    profiles:
+      - strategy_0
+      - strategy_1
+      - all
+
   # ── Strategy 0: EventDrivenStrategy (Binance Spot) ─────────────────────────
   elysian_strategy_0:
     <<: *strategy-defaults
     container_name: elysian_strategy_0
-    # API keys for this sub-account (strategy_id = 0)
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      STRATEGY_CONFIG_YAML: elysian_core/config/strategies/strategy_000_event_driven.yaml
       BINANCE_API_KEY_0: ${BINANCE_API_KEY_0}
       BINANCE_API_SECRET_0: ${BINANCE_API_SECRET_0}
     command:
       - python
-      - elysian_core/run_strategy.py
+      - elysian_core/run_strategy_redis_new.py
     profiles:
       - strategy_0
       - all
@@ -137,11 +177,12 @@ services:
       POSTGRES_PORT: "5432"
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      STRATEGY_CONFIG_YAML: elysian_core/config/strategies/strategy_001_test_print.yaml
       BINANCE_API_KEY_1: ${BINANCE_API_KEY_1}
       BINANCE_API_SECRET_1: ${BINANCE_API_SECRET_1}
     command:
       - python
-      - elysian_core/run_strategy.py
+      - elysian_core/run_strategy_redis_new.py
     profiles:
       - strategy_1
       - all
