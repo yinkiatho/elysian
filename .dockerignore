@@ -1,0 +1,89 @@
+# ── .dockerignore ─────────────────────────────────────────────────────────────
+# Excludes files from the Docker build context so the image stays lean and
+# secrets never end up baked in accidentally.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Secrets & credentials ────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example          # allow the example template to be copied in
+*.key
+*.pem
+*.p12
+secrets/
+
+# ── Python runtime artifacts ─────────────────────────────────────────────────
+__pycache__/
+*.py[codz]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+.installed.cfg
+MANIFEST
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+.pyenv/
+.python-version
+
+# ── Development tooling ───────────────────────────────────────────────────────
+.git/
+.gitignore
+.github/
+.claude/
+.claude-flow/
+.swarm/
+.mcp.json
+.cursorignore
+.cursorindexingignore
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+.tox/
+htmlcov/
+*.cover
+
+# ── Logs & local state ────────────────────────────────────────────────────────
+logs/
+elysian_core/utils/logs/
+*.log
+
+# ── Documentation & non-essential files ──────────────────────────────────────
+docs/
+*.md
+!README.md             # keep the main README
+*.html
+*.spec
+
+# ── Test artifacts ────────────────────────────────────────────────────────────
+tests/
+.pytest_cache/
+
+# ── OS artifacts ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Node / npm (claude-flow tooling — not needed inside container) ────────────
+node_modules/
+npm-debug.log*
+package.json
+package-lock.json
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── IDE project files ─────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo

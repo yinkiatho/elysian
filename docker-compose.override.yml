@@ -1,0 +1,21 @@
+# ── Elysian — docker-compose.override.yml ────────────────────────────────────
+# Automatically merged by Docker Compose when running `docker compose up`.
+# Contains development-only overrides (hot-reload volume mount, debug ports).
+#
+# To use production settings only, pass the compose file explicitly:
+#   docker compose -f docker-compose.yml up
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "3.9"
+
+services:
+
+  # Expose Postgres to host for local psql / Adminer access during development
+  postgres:
+    ports:
+      - "5433:5432"   # use 5433 to avoid clash with a local Postgres instance
+
+  # Expose Redis to host for redis-cli inspection
+  redis:
+    ports:
+      - "6380:6379"
