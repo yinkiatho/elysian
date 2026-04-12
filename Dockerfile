@@ -3,7 +3,7 @@
 # from runtime deps.
 #
 # Build args:
-#   PYTHON_VERSION   Python release to use (default: 3.11)
+#   PYTHON_VERSION   Python release to use (default: 3.12)
 #   APP_ENV          "production" | "development" (default: production)
 #
 # Usage:
@@ -11,7 +11,7 @@
 #   docker build --build-arg APP_ENV=development -t elysian:dev .
 # ─────────────────────────────────────────────────────────────────────────────
 
-ARG PYTHON_VERSION=3.11
+ARG PYTHON_VERSION=3.12.10
 ARG APP_ENV=production
 
 # ─── Stage 1: dependency builder ─────────────────────────────────────────────
@@ -49,7 +49,7 @@ ENV APP_ENV=${APP_ENV} \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     # numexpr thread count — override via ENV in docker-compose
-    NUMEXPR_MAX_THREADS=4
+    NUMEXPR_MAX_THREADS=8
 
 # Runtime system packages only (libpq for psycopg2)
 RUN apt-get update && apt-get install -y --no-install-recommends \
