@@ -207,14 +207,14 @@ class RebalanceFSM(BaseFSM):
         Enriches ctx with ``validated_weights`` for the executing stage.
         """
         await self._publish_cycle_event("weights_ready", **ctx)
-
         weights = ctx.get("target_weights", {})
+        venue = ctx.get("venue", self._optimizer.venue)
         target = TargetWeights(
             weights=weights,
             timestamp=int(time.time() * 1000),
             metadata={},
             strategy_id=self._strategy.strategy_id,
-            venue=self._optimizer.venue,
+            venue=venue,
             liquidate=bool(ctx.get("convert_all_base", False)),
         )
 

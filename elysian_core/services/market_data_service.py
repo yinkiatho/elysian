@@ -79,7 +79,7 @@ class MarketDataService:
         config_json: str = "elysian_core/config/config.json",
         redis_url: str = "redis://localhost:6379",
     ) -> None:
-        self.logger = setup_custom_logger("root", False)
+        self.logger = setup_custom_logger("root")
         self._redis_url = redis_url
         self._start_time = time.monotonic()
 
@@ -340,42 +340,3 @@ class MarketDataService:
 
         # 7. Run forever: multiplex tasks + health server
         await asyncio.gather(*multiplex_tasks, self._health_server())
-
-
-# ── Entry point ───────────────────────────────────────────────────────────────
-
-async def _main() -> None:
-    parser = argparse.ArgumentParser(description="Elysian Market Data Service")
-    parser.add_argument(
-        "--trading-config",
-        default=os.environ.get(
-            "TRADING_CONFIG_YAML",
-            "elysian_core/config/trading_config.yaml",
-        ),
-    )
-    parser.add_argument(
-        "--config-json",
-        default=os.environ.get(
-            "CONFIG_JSON",
-            "elysian_core/config/config.json",
-        ),
-    )
-    parser.add_argument(
-        "--redis-url",
-        default=(
-            f"redis://{os.environ.get('REDIS_HOST', 'localhost')}:"
-            f"{os.environ.get('REDIS_PORT', '6379')}"
-        ),
-    )
-    args = parser.parse_args()
-
-    service = MarketDataService(
-        trading_config_yaml=args.trading_config,
-        config_json=args.config_json,
-        redis_url=args.redis_url,
-    )
-    await service.run()
-
-
-if __name__ == "__main__":
-    asyncio.run(_main())

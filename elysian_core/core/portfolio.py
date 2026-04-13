@@ -24,8 +24,6 @@ UTC8 = timezone(timedelta(hours=8))
 
 if TYPE_CHECKING:
     from elysian_core.core.shadow_book import ShadowBook
-
-
 # ── Fill record (audit trail) — imported by shadow_book.py ──────────────────
 
 @dataclass(frozen=True)

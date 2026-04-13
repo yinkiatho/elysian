@@ -47,7 +47,7 @@ class ValidatedWeights:
     rejected: bool = False
     rejection_reason: str = ""
     timestamp: int = 0                              # epoch ms when validation completed
-
+    venue: Optional[Venue] = None                   # target venue (None = default)
 
 @dataclass(frozen=True)
 class OrderIntent:

@@ -155,12 +155,6 @@ class BinanceKlineClientManager(KlineClientManager):
                             feed._kline = kline
                             feed._historical.append(kline.close)
 
-                            if len(feed._historical) == 60:
-                                returns = [
-                                    (feed._historical[i] - feed._historical[i - 1]) / feed._historical[i - 1]
-                                    for i in range(1, len(feed._historical))
-                                ]
-                                feed._vol = statistics.stdev(returns) * math.sqrt(20)
 
                             # Emit event to strategy via EventBus
                             if self._event_bus is not None:

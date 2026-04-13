@@ -63,10 +63,8 @@ class BinanceSpotExchange(SpotExchangeConnector):
         api_secret: str = "",
         symbols: Optional[List[str]] = [],
         file_path: Optional[str] = None,
-        kline_manager: Optional[BinanceKlineClientManager] = None,
-        ob_manager: Optional[BinanceOrderBookClientManager] = None,
         user_data_manager: Optional[BinanceUserDataClientManager] = None,
-        event_bus=None,
+        private_event_bus=None,
         strategy_config: Optional[StrategyConfig] = None
     ):
 
@@ -76,8 +74,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
             api_secret=api_secret,
             symbols=symbols,
             file_path=file_path,
-            kline_manager=kline_manager,
-            ob_manager=ob_manager,
+            venue=Venue.BINANCE,
             strategy_config=strategy_config
         )
         
@@ -85,9 +82,9 @@ class BinanceSpotExchange(SpotExchangeConnector):
 
         # user data — owns event bus publishing and event parsing
         self.user_data_manager = user_data_manager or BinanceUserDataClientManager(api_key, api_secret)
-        if event_bus:
-            self.user_data_manager.set_event_bus(event_bus)
-    
+        if private_event_bus:
+            self.user_data_manager.set_event_bus(private_event_bus)
+
     # ── Initialisation ────────────────────────────────────────────────────────
     async def initialize(self):
         """Create authenticated client, fetch metadata and start user-data stream."""
@@ -205,7 +202,6 @@ class BinanceSpotExchange(SpotExchangeConnector):
             await asyncio.sleep(poll_interval)
 
 
-    
     async def get_deposit_address(self, coin: str, network: Optional[str] = None) -> Optional[str]:
         '''
         Gets the deposit address for a given coin and network. If network is None, gets the default address.
@@ -435,7 +431,7 @@ class BinanceSpotExchange(SpotExchangeConnector):
         await self.initialize()
         asyncio.create_task(self.monitor_balances())
         asyncio.create_task(self.monitor_open_orders())
-        asyncio.create_task(self.print_snapshot())
+        #asyncio.create_task(self.print_snapshot())
         await asyncio.sleep(0.5)   # let first balance fetch settle
         self.logger.info("BinanceExchange running................")
         
@@ -447,9 +443,13 @@ class BinanceSpotExchange(SpotExchangeConnector):
         Call this before shutting down the exchange.
         """
 
-        # Stop shared client managers
-        await self.kline_manager.stop()
-        await self.ob_manager.stop()
+        # Stop subscription to Redis Event Bus
+        self.stop()
+        
+        # User Data Manager Stop
+        if self.user_data_manager:
+            await self.user_data_manager.stop()
+            self.logger.info("User data manager stopped.")
 
         # Close authenticated client
         if self._client:

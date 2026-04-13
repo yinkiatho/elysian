@@ -101,8 +101,7 @@ class PortfolioOptimizer:
         """
         now_ms = int(time.time() * 1000)
         cfg = self._risk_config
-        force: bool = bool(ctx.get("force", False))
-
+        
         self.logger.info(
             "[Optimizer] Incoming signal: %d symbols, raw_sum=%.4f",
             len(target.weights),
@@ -218,6 +217,7 @@ class PortfolioOptimizer:
             clipped=clips,
             rejected=False,
             timestamp=now_ms,
+            venue=target.venue,
         )
 
     def current_weights(
@@ -490,4 +490,5 @@ class PortfolioOptimizer:
             clipped={},
             rejected=True,
             timestamp=now_ms,
+            venue=target.venue,
         )

@@ -11,7 +11,6 @@ Backpressure semantics are preserved: subscriber callbacks are awaited sequentia
 so a slow strategy hook slows message consumption from Redis — matching the
 behaviour of the original EventBus.publish().
 """
-
 from __future__ import annotations
 
 import asyncio
@@ -28,9 +27,7 @@ from elysian_core.transport.event_serializer import (
     kline_channel,
     orderbook_channel,
 )
-
-
-log = logging.getLogger(__name__)
+from elysian_core.utils.logger import setup_custom_logger
 
 
 # ── Publisher (market-data container side) ────────────────────────────────────
@@ -51,6 +48,7 @@ class RedisEventBusPublisher:
         self._redis_url = redis_url
         self._channel_prefix = channel_prefix
         self._redis: Optional[aioredis.Redis] = None
+        self.logger = setup_custom_logger("RedisMarketData", False)
 
     async def _get_redis(self) -> aioredis.Redis:
         if self._redis is None:
@@ -78,7 +76,7 @@ class RedisEventBusPublisher:
             payload = serialize_event(event)
             await r.publish(channel, payload)
         except Exception as e:
-            log.error(f"RedisEventBusPublisher.publish error: {e}")
+            self.logger.error(f"RedisEventBusPublisher.publish error: {e}")
 
     # No-ops — publisher never receives subscriptions
     def subscribe(self, event_type: EventType, callback: Callable) -> None:
@@ -109,6 +107,7 @@ class RedisEventBusSubscriber:
         self._subscribers: Dict[EventType, List[Callable]] = defaultdict(list)
         self._listener_task: Optional[asyncio.Task] = None
         self._channels: List[str] = []
+        self.logger = setup_custom_logger("RedisMarketData", False)
 
     # ── EventBus-compatible interface ────────────────────────────────────────
 
@@ -140,7 +139,7 @@ class RedisEventBusSubscriber:
         of the strategy container.
         """
         if not channels:
-            log.warning("RedisEventBusSubscriber.start_listener: no channels provided")
+            self.logger.warning("RedisEventBusSubscriber.start_listener: no channels provided")
             return
 
         self._channels = channels
@@ -148,7 +147,7 @@ class RedisEventBusSubscriber:
             self._listener_loop(channels),
             name="redis-event-listener",
         )
-        log.info(
+        self.logger.info(
             f"RedisEventBusSubscriber: listening on {len(channels)} channels: "
             f"{channels[:4]}{'...' if len(channels) > 4 else ''}"
         )
@@ -163,14 +162,14 @@ class RedisEventBusSubscriber:
         try:
             async with redis_conn.pubsub() as ps:
                 await ps.subscribe(*channels)
-                log.info(f"RedisEventBusSubscriber: subscribed to {len(channels)} channels")
+                self.logger.info(f"RedisEventBusSubscriber: subscribed to {len(channels)} channels")
                 async for message in ps.listen():
                     if message["type"] != "message":
                         continue
                     try:
                         event = deserialize_event(message["data"])
                     except Exception as e:
-                        log.error(f"RedisEventBusSubscriber: deserialize error: {e}")
+                        self.logger.error(f"RedisEventBusSubscriber: deserialize error: {e}")
                         continue
 
                     callbacks = self._subscribers.get(event.event_type, [])
@@ -178,14 +177,14 @@ class RedisEventBusSubscriber:
                         try:
                             await cb(event)
                         except Exception as e:
-                            log.error(
+                            self.logger.error(
                                 f"RedisEventBusSubscriber: callback error "
                                 f"for {event.event_type}: {e}"
                             )
         except asyncio.CancelledError:
-            log.info("RedisEventBusSubscriber: listener task cancelled")
+            self.logger.info("RedisEventBusSubscriber: listener task cancelled")
         except Exception as e:
-            log.error(f"RedisEventBusSubscriber: listener loop error: {e}", exc_info=True)
+            self.logger.error(f"RedisEventBusSubscriber: listener loop error: {e}", exc_info=True)
         finally:
             await redis_conn.aclose()
 

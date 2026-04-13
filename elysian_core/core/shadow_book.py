@@ -28,6 +28,7 @@ from elysian_core.db.models import CexTrade
 from elysian_core.core.enums import AssetType, OrderStatus, OrderType, Side, Venue
 from elysian_core.core.events import EventType
 from elysian_core.core.order import ActiveLimitOrder, ActiveOrder, Order
+from elysian_core.core.market_data import OrderBook, Kline
 from elysian_core.core.portfolio import Fill
 from elysian_core.core.position import Position
 from elysian_core.core.signals import OrderIntent
@@ -48,6 +49,7 @@ class ShadowBook:
         Fraction of total portfolio capital allocated to this strategy [0, 1].
     venue:
         Default venue for positions created by fills.
+    
     """
 
     def __init__(self, strategy_id: int,
@@ -75,9 +77,11 @@ class ShadowBook:
         # Mark prices (updated via strategy's kline dispatch)
         # Stablecoins seeded at 1.0 so total_commission USDT conversion is correct
         self._mark_prices: Dict[str, float] = {symbol: 1.0 for symbol in STABLECOINS}
+        self._klines : Dict[str, Kline] = {}
 
         # PnL tracking
         self._realized_pnl: float = 0.0
+        
         #self._total_commission: float = 0.0
         self._total_commission_dict: Dict[str, float] = {}
 
@@ -408,6 +412,8 @@ class ShadowBook:
         """Update mark prices from kline close price and refresh derived metrics."""
         if event.venue == self._venue and event.kline.close and event.kline.close > 0:
             self._mark_prices[event.symbol] = event.kline.close
+            self._klines[event.symbol] = event.kline
+            
             # Patch avg_entry_price for positions synced at startup before feeds had data.
             # Using current mark price as cost basis avoids inflated unrealized/realized PnL.
             pos = self._positions.get(event.symbol)

@@ -19,7 +19,7 @@ import asyncio
 import time
 from elysian_core.core.shadow_book import ShadowBook
 from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
-
+from elysian_core.core.events import EventType
 from elysian_core.connectors.base import AbstractDataFeed, SpotExchangeConnector
 from elysian_core.core.enums import AssetType, OrderType, Side, Venue
 
@@ -41,52 +41,79 @@ def _round_step(value: float, step: float) -> float:
 
 class ExecutionEngine:
     '''
+    Per Strategy Execution Engine 
     Currently designed for one execution engine per strategy
     '''
     def __init__(
         self,
         exchanges: Dict[Venue, SpotExchangeConnector],
-        portfolio: Union[Portfolio, ShadowBook],
-        feeds: Dict[str, AbstractDataFeed],
+        portfolio: ShadowBook,
         default_venue: Venue = Venue.BINANCE,
         default_order_type: OrderType = OrderType.MARKET,
         symbol_venue_map: Optional[Dict[str, Venue]] = None,
         cfg: Optional[Any] = None,
         asset_type: AssetType = None,
-        venue: Venue = None
         
     ):
-        if isinstance(portfolio, Portfolio):
-            self.logger = log.setup_custom_logger("root")
-        elif isinstance(portfolio, ShadowBook):
-            self.logger = log.setup_custom_logger(f"{portfolio._strategy_name}_{portfolio._strategy_id}")
-        else:
-            raise ValueError("Unsupported portfolio type")
-
+        self.logger = log.setup_custom_logger(f"{portfolio._strategy_name}_{portfolio._strategy_id}")
         self._exchanges = exchanges
         self._portfolio = portfolio   # Portfolio here is a ShadowBook instance
-        self._feeds = feeds
+        
         self._default_venue = default_venue
         self._default_order_type = default_order_type
         self._symbol_venue_map = symbol_venue_map or {}
         self.cfg = cfg
         self.asset_type = asset_type
-        self.venue = venue
         
         # Lock to prevent concurrent execute() calls from multiple strategy FSMs
         self._execute_lock = asyncio.Lock()
+        
+        self._mark_prices = {venue: {stablecoin: 1.0 for stablecoin in STABLECOINS} for venue in exchanges}  # symbol -> mark price, updated from feeds
+        self._event_bus = None
+    
+    # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # ── Lifecycle — EventBus wiring ────────────────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    
+    def start(self, event_bus):
+        """Subscribe to event buses for mark price updates.
 
+        Parameters
+        ----------
+        event_bus:
+            Shared EventBus instance (market data: KLINE).
+        """
+        self._event_bus = event_bus        
+        self._event_bus.subscribe(EventType.KLINE, self._on_kline)
+        
+        self.logger.info(
+            f"[ExecutionEngine-{self._portfolio._strategy_id}] started in sub-account mode — "
+            f" KLINE on shared bus"
+        )
+
+    def stop(self):
+        """Unsubscribe from all event buses."""
+        self._event_bus.unsubscribe(EventType.KLINE, self._on_kline)
+        self._event_bus = None
+        self.logger.info(f"[ExecutionEngine-{self._portfolio._strategy_id}] stopped")
+
+    async def _on_kline(self, event):
+        """Update mark prices from kline close price and refresh derived metrics."""
+        if event.kline.close and event.kline.close > 0:
+            self._mark_prices[event.venue][event.symbol] = event.kline.close
+    
     # ── Public ───────────────────────────────────────────────────────────────
 
     async def execute(self, validated: ValidatedWeights, **ctx) -> RebalanceResult:
         """Execute a full rebalance cycle from validated weights to exchange orders."""
         async with self._execute_lock:
+            venue = validated.venue
             total_value_pre = self._portfolio.total_value()
             self.logger.info(
                 f"[ExecutionEngine] Starting rebalance: {len(validated.weights)} symbols "
                 f"portfolio_nav={total_value_pre:.4f} cash={self._portfolio.cash:.4f}"
             )
-            mark_prices = self._get_mark_prices()
+            mark_prices = self._get_mark_prices(venue)
             self.logger.info(
                 f"[ExecutionEngine] Mark prices snapshot: {len(mark_prices)} symbols — {mark_prices}"
             )
@@ -298,15 +325,7 @@ class ExecutionEngine:
             )
             return None
 
-    def _get_mark_prices(self) -> Dict[str, float]:
-        """Snapshot current mid prices from all feeds."""
-        prices: Dict[str, float] = {}
-        for symbol, feed in self._feeds.items():
-            try:
-                price = feed.latest_price
-                if price and price > 0:
-                    prices[symbol] = price
-            except Exception as e:
-                self.logger.error(f'[ExecutionEngine] Unable to get mark price for {symbol}: {e}')
-                continue
-        return prices
+    def _get_mark_prices(self, venue: Venue) -> Dict[str, float]:
+        """Snapshot current mid prices from feeds"""
+        
+        return self._portfolio.mark_prices.get(venue, {})

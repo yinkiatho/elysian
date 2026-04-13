@@ -12,9 +12,12 @@ import pandas as pd
 from elysian_core.core.enums import Side, OrderStatus, Venue
 from elysian_core.config.app_config import StrategyConfig   
 from elysian_core.core.order import Order
-from elysian_core.core.market_data import OrderBook
+from elysian_core.core.events import EventType
+from elysian_core.core.market_data import OrderBook, Kline
+from elysian_core.core.events import KlineEvent, OrderBookUpdateEvent
 import elysian_core.utils.logger as log
 import pylru
+
 class AbstractDataFeed(ABC):
     """
     Base class for all exchange order-book feeds.
@@ -348,9 +351,6 @@ class KlineClientManager(AbstractClientManager):
     pass
 
 
-
-
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Connector base classes
 # ──────────────────────────────────────────────────────────────────────────────
@@ -372,23 +372,25 @@ class SpotExchangeConnector(ABC):
                        api_secret: str,
                        symbols: List[str],
                        file_path: Optional[str] = None,
-                       kline_manager: Optional[KlineClientManager]= None,
-                       ob_manager: Optional[OrderBookClientManager] = None,
+                       venue: Venue = None,
                        strategy_config: Optional[StrategyConfig] = None):
         
         if strategy_config:
             self.logger = log.setup_custom_logger(f"{strategy_config.strategy_name}_{strategy_config.strategy_id}")
         else:
             self.logger = log.setup_custom_logger("root")
+            
         self._api_key = api_key
         self._api_secret = api_secret
         self._symbols = symbols
         self._file_path = file_path
         self.cfg = args
+        self.venue = venue
 
         # Per-symbol feeds
-        self.kline_manager = kline_manager
-        self.ob_manager = ob_manager
+        self._event_bus = None
+        self.kline_feeds: Dict[str, Kline] = {}
+        self.ob_feeds: Dict[str, OrderBook] = {}
         
         # Account state
         self._balances: Dict[str, float] = {}
@@ -399,13 +401,46 @@ class SpotExchangeConnector(ABC):
         # Orders Tracking
         self._past_orders = pylru.lrucache(1000)  # order_id → Order, for fills tracking and health checks
                 
+    # ------------------------------------------------- Event bus integration -------------------------------------------------
+    def start(self, event_bus):
+        """Subscribe to event buses for mark price updates.
+
+        Parameters
+        ----------
+        event_bus:
+            Shared EventBus instance (market data: KLINE).
+        """
+        self._event_bus = event_bus        
+        self._event_bus.subscribe(EventType.KLINE, self._on_kline)
+        self._event_bus.subscribe(EventType.ORDERBOOK_UPDATE, self._on_orderbook_update)
         
+        self.logger.info(
+            f"[SpotExchangeConnector @ {self.venue} started in sub-account mode — "
+            f"subscribing to KLINE and ORDERBOOK_UPDATE events for {self._symbols}" )
+
+    def stop(self):
+        """Unsubscribe from all event buses."""
+        self._event_bus.unsubscribe(EventType.KLINE, self._on_kline)
+        self._event_bus.unsubscribe(EventType.ORDERBOOK_UPDATE, self._on_orderbook_update)
+        self._event_bus = None
+        self.logger.info(f"[SpotExchangeConnector @ {self.venue} stopped]")
+
+    async def _on_kline(self, event: KlineEvent):
+        """Update mark prices from kline close price and refresh derived metrics."""
+        if event.kline.close and event.kline.close > 0 and event.venue == self.venue:
+            self.kline_feeds[event.symbol] = event.kline
+            
+    async def _on_orderbook_update(self, event: OrderBookUpdateEvent):
+        """Update order book data."""
+        if event.orderbook and event.venue == self.venue:
+            self.ob_feeds[event.symbol] = event.orderbook
+
     # ── Feed accessors ────────────────────────────────────────────────────────
     def kline_feed(self, symbol: str):
-        return self.kline_manager.get_feed(symbol) if self.kline_manager else None
+        return self.kline_feeds.get(symbol)
 
     def ob_feed(self, symbol: str):
-        return self.ob_manager.get_feed(symbol) if self.ob_manager else None
+        return self.ob_feeds.get(symbol)
 
     def last_price(self, symbol: str) -> Optional[float]:
         """Best available mid-price: OB mid → last kline close → None."""
@@ -671,9 +706,9 @@ class FuturesExchangeConnector(ABC):
                        api_secret: str,
                        symbols: List[str],
                        file_path: Optional[str] = None,
-                       kline_manager: Optional[KlineClientManager] = None,
-                       ob_manager: Optional[OrderBookClientManager] = None,
+                        venue: Venue = Venue.BINANCE,
                        default_leverage: int = 1):
+        
         self.logger = log.setup_custom_logger("root")
         # Common state (mirrors SpotExchangeConnector)
         self._api_key = api_key
@@ -681,10 +716,12 @@ class FuturesExchangeConnector(ABC):
         self._symbols = symbols
         self._file_path = file_path
         self.cfg = args
+        self.venue = venue
 
         # Per-symbol feeds
-        self.kline_manager = kline_manager
-        self.ob_manager = ob_manager
+        self._event_bus = None
+        self.kline_feeds: Dict[str, Kline] = {}
+        self.ob_feeds: Dict[str, OrderBook] = {}
 
         # Account state
         self._balances: Dict[str, float] = {}
@@ -698,12 +735,46 @@ class FuturesExchangeConnector(ABC):
         self._default_leverage: int = default_leverage
         self._margin_types: Dict[str, str] = {}   # symbol -> "ISOLATED" | "CROSSED"
 
+    # ------------------------------------------------- Event bus integration -------------------------------------------------
+    def start(self, event_bus):
+        """Subscribe to event buses for mark price updates.
+
+        Parameters
+        ----------
+        event_bus:
+            Shared EventBus instance (market data: KLINE).
+        """
+        self._event_bus = event_bus        
+        self._event_bus.subscribe(EventType.KLINE, self._on_kline)
+        self._event_bus.subscribe(EventType.ORDERBOOK_UPDATE, self._on_orderbook_update)
+        
+        self.logger.info(
+            f"[SpotExchangeConnector @ {self.venue} started in sub-account mode — "
+            f"subscribing to KLINE and ORDERBOOK_UPDATE events for {self._symbols}" )
+
+    def stop(self):
+        """Unsubscribe from all event buses."""
+        self._event_bus.unsubscribe(EventType.KLINE, self._on_kline)
+        self._event_bus.unsubscribe(EventType.ORDERBOOK_UPDATE, self._on_orderbook_update)
+        self._event_bus = None
+        self.logger.info(f"[SpotExchangeConnector @ {self.venue} stopped]")
+
+    async def _on_kline(self, event: KlineEvent):
+        """Update mark prices from kline close price and refresh derived metrics."""
+        if event.kline.close and event.kline.close > 0 and event.venue == self.venue:
+            self.kline_feeds[event.symbol] = event.kline
+            
+    async def _on_orderbook_update(self, event: OrderBookUpdateEvent):
+        """Update order book data."""
+        if event.orderbook and event.venue == self.venue:
+            self.ob_feeds[event.symbol] = event.orderbook
+
     # ── Feed accessors ────────────────────────────────────────────────────────
     def kline_feed(self, symbol: str):
-        return self.kline_manager.get_feed(symbol) if self.kline_manager else None
+        return self.kline_feeds.get(symbol)
 
     def ob_feed(self, symbol: str):
-        return self.ob_manager.get_feed(symbol) if self.ob_manager else None
+        return self.ob_feeds.get(symbol)
 
     def last_price(self, symbol: str) -> Optional[float]:
         """Best available mid-price: OB mid → last kline close → None."""
