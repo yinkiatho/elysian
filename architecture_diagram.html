@@ -68,6 +68,11 @@
             font-size: 0.8rem;
             letter-spacing: 1px;
         }
+        .pill.pill-new {
+            background: rgba(22, 163, 74, 0.2);
+            border-color: #16a34a;
+            color: #86efac;
+        }
         .container {
             max-width: 1400px;
             margin: 0 auto;
@@ -111,6 +116,26 @@
             font-weight: 600;
             margin-right: 8px;
         }
+        .toc ol li .badge-new {
+            background: #dcfce7;
+            color: #16a34a;
+            font-size: 0.68rem;
+            font-weight: 700;
+            padding: 1px 6px;
+            border-radius: 4px;
+            margin-left: 6px;
+            letter-spacing: 0.5px;
+        }
+        .toc ol li .badge-updated {
+            background: #fef3c7;
+            color: #b45309;
+            font-size: 0.68rem;
+            font-weight: 700;
+            padding: 1px 6px;
+            border-radius: 4px;
+            margin-left: 6px;
+            letter-spacing: 0.5px;
+        }
         h2 {
             font-size: 1.5rem;
             font-weight: 400;
@@ -120,6 +145,28 @@
             color: #2563eb;
         }
         h2 span { color: #6b7280; font-size: 0.9rem; font-weight: 300; margin-left: 12px; }
+        h2 .badge-new {
+            background: #dcfce7;
+            color: #15803d;
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-left: 10px;
+            letter-spacing: 0.5px;
+            vertical-align: middle;
+        }
+        h2 .badge-updated {
+            background: #fef3c7;
+            color: #b45309;
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-left: 10px;
+            letter-spacing: 0.5px;
+            vertical-align: middle;
+        }
         h3 { color: #374151; font-size: 1.05rem; margin: 24px 0 8px; font-weight: 600; }
         p.desc {
             color: #4b5563;
@@ -183,6 +230,16 @@
             color: #1e40af;
         }
         .note-box strong { display: block; margin-bottom: 4px; }
+        .note-box.note-green {
+            background: #f0fdf4;
+            border-left-color: #16a34a;
+            color: #14532d;
+        }
+        .note-box.note-orange {
+            background: #fff7ed;
+            border-left-color: #ea580c;
+            color: #7c2d12;
+        }
         .legend {
             display: flex;
             gap: 20px;
@@ -197,6 +254,18 @@
             border-radius: 3px;
             border: 1px solid #dee2e6;
         }
+        .change-list {
+            background: #f8faff;
+            border: 1px solid #bfdbfe;
+            border-radius: 8px;
+            padding: 14px 18px;
+            margin: 12px 0 20px;
+            font-size: 0.88rem;
+        }
+        .change-list h4 { color: #1e40af; margin-bottom: 8px; font-size: 0.9rem; }
+        .change-list ul { padding-left: 18px; }
+        .change-list ul li { margin-bottom: 4px; color: #374151; }
+        .change-list ul li strong { color: #1e3a5f; }
     </style>
 </head>
 <body>
@@ -212,6 +281,9 @@
         <span class="pill">FSM-Driven</span>
         <span class="pill">Event Sourcing</span>
         <span class="pill">ShadowBook Ledger</span>
+        <span class="pill pill-new">Redis Pub/Sub</span>
+        <span class="pill pill-new">Docker Multi-Container</span>
+        <span class="pill pill-new">MarketDataService</span>
     </div>
 </div>
 
@@ -220,118 +292,378 @@
     <div class="toc">
         <h3>Table of Contents</h3>
         <ol>
-            <li><span>1.</span><a href="#s1">System Overview</a></li>
-            <li><span>2.</span><a href="#s2">5-Stage Rebalance Pipeline</a></li>
-            <li><span>3.</span><a href="#s3">Order Data Model Hierarchy</a></li>
-            <li><span>4.</span><a href="#s4">Position &amp; ShadowBook</a></li>
-            <li><span>5.</span><a href="#s5">Signal Contract Flow</a></li>
-            <li><span>6.</span><a href="#s6">Event System</a></li>
-            <li><span>7.</span><a href="#s7">Connector &amp; Feed Layer</a></li>
-            <li><span>8.</span><a href="#s8">StrategyRunner Lifecycle</a></li>
-            <li><span>9.</span><a href="#s9">RiskConfig Constraints</a></li>
-            <li><span>10.</span><a href="#s10">Database &amp; Persistence</a></li>
+            <li><span>1.</span><a href="#s1">System Overview</a><span class="badge-updated">UPDATED</span></li>
+            <li><span>2.</span><a href="#s2">Docker Deployment Architecture</a><span class="badge-new">NEW</span></li>
+            <li><span>3.</span><a href="#s3">MarketDataService — Feed Layer</a><span class="badge-new">NEW</span></li>
+            <li><span>4.</span><a href="#s4">Redis Transport Layer</a><span class="badge-new">NEW</span></li>
+            <li><span>5.</span><a href="#s5">5-Stage Rebalance Pipeline</a></li>
+            <li><span>6.</span><a href="#s6">StrategyRunner Lifecycle</a><span class="badge-updated">UPDATED</span></li>
+            <li><span>7.</span><a href="#s7">Strategy Event Bus Wiring</a><span class="badge-updated">UPDATED</span></li>
+            <li><span>8.</span><a href="#s8">Order Data Model Hierarchy</a></li>
+            <li><span>9.</span><a href="#s9">Position &amp; ShadowBook</a><span class="badge-updated">UPDATED</span></li>
+            <li><span>10.</span><a href="#s10">Signal Contract Flow</a></li>
+            <li><span>11.</span><a href="#s11">Connector &amp; Feed Layer</a></li>
+            <li><span>12.</span><a href="#s12">RiskConfig Constraints</a></li>
+            <li><span>13.</span><a href="#s13">Two-Tier Config System</a><span class="badge-new">NEW</span></li>
+            <li><span>14.</span><a href="#s14">Database &amp; Persistence</a></li>
         </ol>
     </div>
 
     <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s1">1. System Overview <span>Top-level component topology</span></h2>
+    <h2 id="s1">1. System Overview <span class="badge-updated">UPDATED</span> <span>Top-level component topology</span></h2>
     <p class="desc">
-        <code>StrategyRunner</code> is the root orchestrator. For each configured strategy it wires together an exchange connector,
-        a set of data feeds, two event buses (shared market data + private user data), a <code>ShadowBook</code> ledger,
-        a <code>PortfolioOptimizer</code>, and an <code>ExecutionEngine</code>. The thin <code>Portfolio</code> object aggregates NAV
-        across all shadow books without owning any raw exchange state.
+        Elysian now runs as a <strong>multi-container Docker system</strong>. A dedicated
+        <code>MarketDataService</code> container owns all WebSocket feed managers and publishes market data events
+        to a <strong>Redis pub/sub</strong> broker. Each strategy runs in its own isolated container, subscribing
+        to the Redis channels relevant to its symbols. This replaces the former single-process model where
+        one <code>StrategyRunner</code> managed both feeds and strategies in the same asyncio event loop.
     </p>
+
+    <div class="change-list">
+        <h4>Key Changes from Previous Architecture</h4>
+        <ul>
+            <li><strong>MarketDataService</strong> — new dedicated container that owns all WebSocket client managers (BinanceKlineClientManager, BinanceOrderBookClientManager, etc.)</li>
+            <li><strong>Redis pub/sub</strong> — new network boundary between market data and strategy layers; replaces in-process EventBus for market data distribution</li>
+            <li><strong>One container per strategy</strong> — <code>elysian_strategy_N</code> containers each run one strategy, subscribing to Redis for their symbols</li>
+            <li><strong>Private EventBus still in-process</strong> — account events (ORDER_UPDATE, BALANCE_UPDATE, REBALANCE_COMPLETE) remain on the in-process private EventBus inside each strategy container</li>
+            <li><strong>Two-tier YAML config</strong> — <code>trading_config.yaml</code> (system) + per-strategy YAML files (<code>strategy_NNN_*.yaml</code>)</li>
+        </ul>
+    </div>
+
     <div class="legend">
         <span class="legend-item"><span class="legend-color" style="background:#fef2f2;border-color:#ef4444"></span>Exchange / Infra</span>
         <span class="legend-item"><span class="legend-color" style="background:#fefce8;border-color:#ca8a04"></span>Data / Feeds</span>
         <span class="legend-item"><span class="legend-color" style="background:#f0fdf4;border-color:#16a34a"></span>Strategy Layer</span>
         <span class="legend-item"><span class="legend-color" style="background:#eff6ff;border-color:#2563eb"></span>Risk &amp; Execution</span>
         <span class="legend-item"><span class="legend-color" style="background:#fdf4ff;border-color:#a855f7"></span>Ledger / Portfolio</span>
+        <span class="legend-item"><span class="legend-color" style="background:#ecfdf5;border-color:#059669"></span>Redis / Transport (NEW)</span>
     </div>
     <div class="diagram-card">
         <div class="mermaid">
 graph TB
-    subgraph RUNNER["StrategyRunner (orchestrator)"]
+    subgraph INFRA["Exchange WebSocket Layer (Market Data Container)"]
         direction TB
-        CFG["AppConfig\ntrading_config.yaml\nstrategy_config.yaml(s)\n.env credentials"]
+        subgraph FEEDS["WebSocket Feed Managers"]
+            BKM["BinanceKlineClientManager"]
+            BOM["BinanceOrderBookClientManager"]
+            BFKM["BinanceFuturesKlineClientManager"]
+            BFOM["BinanceFuturesOrderBookClientManager"]
+            AKM["AsterKlineClientManager"]
+            AOM["AsterOrderBookClientManager"]
+        end
+        MDS["MarketDataService\nrun_market_data.py\nHealth: :8080/health"]
+        FEEDS --> MDS
     end
 
-    subgraph INFRA["Exchange &amp; Feed Infra"]
+    subgraph REDIS["Redis Broker (elysian_redis)"]
         direction TB
-        subgraph CONN["SpotExchangeConnector"]
-            BSE["BinanceSpotExchange"]
-            BFE["BinanceFuturesExchange"]
-            ASE["AsterSpotExchange"]
-        end
-        subgraph FEEDS["DataFeeds"]
-            BKF["BinanceKlineFeed"]
-            BOF["BinanceOrderBookFeed"]
-            BFKF["BinanceFuturesKlineFeed"]
-            AKF["AsterKlineFeed"]
-            APF["AsterPerpKlineFeed"]
-        end
+        RCHK["elysian:md:binance:spot:kline:SYMBOL"]
+        RCHOB["elysian:md:binance:spot:orderbook:SYMBOL"]
+        RCHF["elysian:md:binance:futures:kline:SYMBOL"]
+        RCHA["elysian:md:aster:spot:kline:SYMBOL"]
     end
 
-    subgraph BUSES["Event Buses"]
-        SBUS["Shared EventBus\nKlineEvent\nOrderBookUpdateEvent"]
-        PBUS["Private EventBus\nOrderUpdateEvent\nBalanceUpdateEvent\nRebalanceCycleEvent\nRebalanceCompleteEvent"]
-    end
-
-    subgraph STRAT["Strategy Layer (per strategy)"]
+    subgraph STRAT0["Strategy Container 0 (elysian_strategy_0)"]
         direction TB
-        SS["SpotStrategy\n(user subclass)\non_kline / on_orderbook_update\ncompute_weights / on_rebalance_complete"]
-        subgraph PIPELINE["Rebalance Pipeline"]
-            direction LR
-            RFSM["RebalanceFSM\nIDLE→COMPUTING\n→VALIDATING→EXECUTING\n→COOLDOWN→IDLE"]
-            PO["PortfolioOptimizer\nvalidate(TargetWeights)\n→ ValidatedWeights"]
-            EE["ExecutionEngine\nexecute(ValidatedWeights)\n→ RebalanceResult"]
-        end
-        SB["ShadowBook\nper-strategy virtual ledger\npositions / cash / NAV\nactive orders / fills"]
+        SUB0["RedisEventBusSubscriber\nsubscribes to relevant channels"]
+        PBUS0["Private EventBus\n(in-process)\nORDER_UPDATE\nBALANCE_UPDATE\nREBALANCE_COMPLETE"]
+        SS0["SpotStrategy 0\n(e.g. EventDrivenStrategy)"]
+        SB0["ShadowBook 0\npositions / cash / NAV"]
+        EX0["BinanceSpotExchange 0\nsub-account API keys"]
+        OPT0["PortfolioOptimizer 0"]
+        EE0["ExecutionEngine 0"]
+        SUB0 -->|KlineEvent\nOrderBookUpdateEvent| SS0
+        EX0 -->|fills + balances\nvia user-data WS| PBUS0
+        PBUS0 -->|ORDER_UPDATE\nBALANCE_UPDATE| SS0
+        SS0 --> OPT0 --> EE0
+        EE0 --> EX0
+        SS0 --> SB0
     end
 
-    subgraph PORT["Portfolio (NAV aggregator)"]
-        PRT["Portfolio\naggregate_nav()\naggregate_cash()\naggregate_positions()"]
+    subgraph STRAT1["Strategy Container 1 (elysian_strategy_1)"]
+        direction TB
+        SUB1["RedisEventBusSubscriber"]
+        PBUS1["Private EventBus\n(in-process)"]
+        SS1["SpotStrategy 1\n(e.g. PrintEventsStrategy)"]
+        SB1["ShadowBook 1"]
+        EX1["BinanceSpotExchange 1\ndifferent sub-account keys"]
+        SUB1 -->|KlineEvent\nOrderBookUpdateEvent| SS1
+        EX1 -->|fills + balances| PBUS1
+        PBUS1 --> SS1
+        SS1 --> SB1
     end
 
-    CFG --> RUNNER
-    RUNNER --> INFRA
-    RUNNER --> STRAT
-    FEEDS -->|"KlineEvent / OBUpdateEvent"| SBUS
-    CONN -->|"fills + balance WS"| PBUS
-    SBUS -->|"dispatch_kline / dispatch_ob"| SS
-    PBUS -->|"dispatch_order / dispatch_balance\ndispatch_rebalance"| SS
-    SS --> RFSM
-    RFSM --> PO
-    PO --> EE
-    EE -->|"place_limit/market_order"| CONN
-    EE --> SB
-    SB --> PRT
+    subgraph DB["PostgreSQL (elysian_postgres)"]
+        SNAP["PortfolioSnapshot\nCexTrade\nAccountSnapshots"]
+    end
 
-    style RUNNER fill:#f1f5f9,stroke:#94a3b8,color:#1a1a2e
+    MDS -->|publish| REDIS
+    REDIS -->|subscribe| SUB0
+    REDIS -->|subscribe| SUB1
+    SB0 -->|save_snapshot| DB
+    SB1 -->|save_snapshot| DB
+    EX0 -->|place_market/limit_order\nREST API| EX_NET(("Binance\nExchange"))
+    EX1 -->|REST API| EX_NET
+
     style INFRA fill:#fef2f2,stroke:#ef4444,color:#991b1b
-    style BUSES fill:#fefce8,stroke:#ca8a04,color:#713f12
-    style STRAT fill:#f0fdf4,stroke:#16a34a,color:#166534
-    style PIPELINE fill:#dcfce7,stroke:#16a34a,color:#166534
-    style PORT fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
+    style REDIS fill:#ecfdf5,stroke:#059669,color:#065f46
+    style STRAT0 fill:#f0fdf4,stroke:#16a34a,color:#166534
+    style STRAT1 fill:#f0fdf4,stroke:#16a34a,color:#166534
+    style DB fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
         </div>
     </div>
-    <p class="desc">
-        The <code>StrategyRunner</code> owns the top-level lifecycle: config loading, exchange construction,
-        feed startup, and per-strategy wiring. Each strategy gets its own isolated <code>ShadowBook</code> so
-        that fills and balances from one strategy never contaminate another's ledger state.
-    </p>
+    <div class="note-box note-green">
+        <strong>Private EventBus remains in-process</strong>
+        Only <em>market data</em> events (KLINE, ORDERBOOK_UPDATE) cross the Redis network boundary.
+        Account events — ORDER_UPDATE, BALANCE_UPDATE, REBALANCE_COMPLETE — travel on the per-strategy
+        <em>private EventBus</em> inside the strategy container. This preserves the sub-account isolation
+        invariant: fills from one strategy's exchange connection never reach another strategy's handlers.
+    </div>
 
     <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s2">2. 5-Stage Rebalance Pipeline <span>Data flow through a single rebalance cycle</span></h2>
+    <h2 id="s2">2. Docker Deployment Architecture <span class="badge-new">NEW</span></h2>
     <p class="desc">
-        A single rebalance cycle touches five distinct stages. Each stage has a well-defined input and output type,
-        making the pipeline easy to test in isolation. Stages 1–2 are continuous (streaming); Stages 3–5 are triggered
-        by the <code>RebalanceFSM</code> on a timer or a manual <code>request_rebalance()</code> call.
+        The full Elysian stack is orchestrated by <code>docker-compose.yml</code>. Services are grouped
+        by Docker Compose profiles so operators can start only the containers needed. Each strategy runs
+        in a dedicated container and depends on <code>elysian_market_data</code> being healthy before it starts.
+    </p>
+    <div class="diagram-card">
+        <div class="mermaid">
+graph TB
+    subgraph COMPOSE["docker-compose.yml (profiles: strategy_0 | strategy_1 | all | dev)"]
+        direction TB
+
+        subgraph INFRA_SVCS["Infrastructure Services (always)"]
+            PG["elysian_postgres\npostgres:15-alpine\nPort: 5432\nVolume: postgres_data\nHealthcheck: pg_isready"]
+            RD["elysian_redis\nredis:7-alpine\nPort: 6379\nVolume: redis_data\nHealthcheck: redis-cli ping"]
+        end
+
+        subgraph MDS_SVC["Market Data Service (profiles: strategy_0, strategy_1, all)"]
+            MDC["elysian_market_data\nDockerfile (APP_ENV=production)\nCMD: python run_market_data.py\nHealthcheck: curl :8080/health\nDepends: redis (healthy)"]
+        end
+
+        subgraph STRAT_SVCS["Strategy Services (per profile)"]
+            S0["elysian_strategy_0\n(profile: strategy_0, all)\nENV: STRATEGY_CONFIG_YAML\n    BINANCE_API_KEY_0\n    BINANCE_API_SECRET_0\nCMD: python run_strategy.py\nDepends: postgres + market_data (healthy)"]
+            S1["elysian_strategy_1\n(profile: strategy_1, all)\nENV: STRATEGY_CONFIG_YAML\n    BINANCE_API_KEY_1\n    BINANCE_API_SECRET_1\nDepends: postgres + market_data (healthy)"]
+        end
+
+        subgraph DEV_SVC["Development Service (profile: dev)"]
+            DEV["elysian_dev\nVolume mount: .:/app\n(live source reload)\nAPP_ENV=development"]
+        end
+
+        subgraph VOLS["Named Volumes"]
+            V1["postgres_data"]
+            V2["redis_data"]
+            V3["elysian_logs\n/app/logs\n/app/elysian_core/utils/logs"]
+        end
+
+        RD -->|"healthy"| MDC
+        PG -->|"healthy"| S0
+        PG -->|"healthy"| S1
+        MDC -->|"healthy"| S0
+        MDC -->|"healthy"| S1
+    end
+
+    ENTRYPOINT["docker/entrypoint.sh\n1. Wait for Postgres (psycopg2 poll)\n2. Create DB tables (safe=True)\n3. exec CMD\n(SKIP_DB_INIT=true for market_data)"]
+
+    S0 --> ENTRYPOINT
+    S1 --> ENTRYPOINT
+
+    style INFRA_SVCS fill:#f1f5f9,stroke:#94a3b8,color:#1a1a2e
+    style MDS_SVC fill:#fef2f2,stroke:#ef4444,color:#991b1b
+    style STRAT_SVCS fill:#f0fdf4,stroke:#16a34a,color:#166534
+    style DEV_SVC fill:#fefce8,stroke:#ca8a04,color:#713f12
+    style VOLS fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
+        </div>
+    </div>
+
+    <h3>Docker Service Reference</h3>
+    <table>
+        <thead>
+            <tr><th>Service</th><th>Image / Dockerfile</th><th>Profiles</th><th>Healthcheck</th><th>Key ENV</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>elysian_postgres</code></td><td><code>postgres:15-alpine</code></td><td>always</td><td><code>pg_isready</code></td><td>POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB</td></tr>
+            <tr><td><code>elysian_redis</code></td><td><code>redis:7-alpine</code></td><td>always</td><td><code>redis-cli ping</code></td><td>—</td></tr>
+            <tr><td><code>elysian_market_data</code></td><td>Dockerfile (production)</td><td>strategy_0, strategy_1, all</td><td><code>curl :8080/health</code></td><td>REDIS_HOST, REDIS_PORT, SKIP_DB_INIT=true</td></tr>
+            <tr><td><code>elysian_strategy_N</code></td><td>Dockerfile (production)</td><td>strategy_N, all</td><td>—</td><td>STRATEGY_CONFIG_YAML, BINANCE_API_KEY_N, BINANCE_API_SECRET_N</td></tr>
+            <tr><td><code>elysian_dev</code></td><td>Dockerfile (development)</td><td>dev</td><td>—</td><td>Source volume mount <code>.:/app</code></td></tr>
+        </tbody>
+    </table>
+    <div class="note-box note-orange">
+        <strong>SKIP_DB_INIT=true on market_data container</strong>
+        The entrypoint.sh normally waits for Postgres and creates tables. The market_data container
+        does not need a Postgres connection — it only uses Redis. Setting SKIP_DB_INIT=true bypasses
+        the Postgres wait and table creation steps, avoiding a hard dependency on Postgres for the
+        market data service.
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <h2 id="s3">3. MarketDataService — Feed Layer <span class="badge-new">NEW</span></h2>
+    <p class="desc">
+        <code>MarketDataService</code> (<code>elysian_core/services/market_data_service.py</code>) is the
+        dedicated feed container. It instantiates all WebSocket client managers, registers feeds for every
+        configured symbol, and injects a <code>RedisEventBusPublisher</code> as the event bus for each
+        manager so that market data events are serialised and published to Redis. It does not run any
+        strategies, sub-account exchanges, or risk/execution components.
+    </p>
+    <div class="diagram-card">
+        <div class="mermaid">
+flowchart TB
+    subgraph CONFIG["Configuration (trading_config.yaml + config.json)"]
+        CFG["symbols_for('binance', 'spot')\nsymbols_for('binance', 'futures')\nsymbols_for('aster', 'spot')\nsymbols_for('aster', 'futures')"]
+    end
+
+    subgraph PUBLISHERS["RedisEventBusPublisher (one per venue/asset_type)"]
+        P1["Publisher\nprefix: elysian:md:binance:spot"]
+        P2["Publisher\nprefix: elysian:md:binance:futures"]
+        P3["Publisher\nprefix: elysian:md:aster:spot"]
+        P4["Publisher\nprefix: elysian:md:aster:futures"]
+    end
+
+    subgraph MANAGERS["WebSocket Client Managers (set_event_bus → publisher)"]
+        direction LR
+        BKM2["BinanceKlineClientManager\nset_event_bus(P1)"]
+        BOM2["BinanceOrderBookClientManager\nset_event_bus(P1)"]
+        BFKM2["BinanceFuturesKlineClientManager\nset_event_bus(P2)"]
+        BFOM2["BinanceFuturesOrderBookClientManager\nset_event_bus(P2)"]
+        AKM2["AsterKlineClientManager\nset_event_bus(P3)"]
+        AOM2["AsterOrderBookClientManager\nset_event_bus(P3)"]
+        AFKM["AsterPerpKlineClientManager\nset_event_bus(P4)"]
+        AFOM["AsterPerpOrderBookClientManager\nset_event_bus(P4)"]
+    end
+
+    subgraph FEEDS_REG["Feed Registration (per symbol)"]
+        direction LR
+        KF["BinanceKlineFeed\nper symbol"]
+        OBF["BinanceOrderBookFeed\nper symbol"]
+        SNAP["get_initial_snapshot()\n(after 10s WS settle)"]
+        KF --> SNAP
+        OBF --> SNAP
+    end
+
+    subgraph REDIS2["Redis Channels Published"]
+        RC1["elysian:md:binance:spot:kline:SUIUSDT"]
+        RC2["elysian:md:binance:spot:orderbook:SUIUSDT"]
+        RC3["elysian:md:binance:spot:kline:BTCUSDT"]
+        RC4["..."]
+    end
+
+    subgraph HEALTH["Health Server (:8080)"]
+        HE["GET /health\n→ {status, feeds, uptime_s}"]
+    end
+
+    CFG --> MANAGERS
+    CFG --> PUBLISHERS
+    PUBLISHERS --> MANAGERS
+    MANAGERS --> FEEDS_REG
+    FEEDS_REG -->|"KlineEvent / OrderBookUpdateEvent\n(serialised JSON)"| REDIS2
+    MDS_MAIN["MarketDataService.run()\nasyncio.gather(\n  *multiplex_tasks,\n  health_server()\n)"] --> MANAGERS
+    MDS_MAIN --> HEALTH
+
+    style CONFIG fill:#f1f5f9,stroke:#94a3b8,color:#1a1a2e
+    style PUBLISHERS fill:#ecfdf5,stroke:#059669,color:#065f46
+    style MANAGERS fill:#fef2f2,stroke:#ef4444,color:#991b1b
+    style FEEDS_REG fill:#fefce8,stroke:#ca8a04,color:#713f12
+    style REDIS2 fill:#ecfdf5,stroke:#059669,color:#065f46
+    style HEALTH fill:#eff6ff,stroke:#2563eb,color:#1e40af
+        </div>
+    </div>
+    <div class="note-box">
+        <strong>Startup sequencing</strong>
+        MarketDataService waits 10 seconds after WebSocket connections are established before fetching
+        REST order-book snapshots. This ensures the snapshot's <code>lastUpdateId</code> can be matched
+        against already-buffered WebSocket depth events, following the Binance/Aster order-book
+        synchronisation protocol.
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <h2 id="s4">4. Redis Transport Layer <span class="badge-new">NEW</span></h2>
+    <p class="desc">
+        The <code>elysian_core/transport/</code> module provides the JSON serialisation codec and the
+        Redis-backed EventBus implementations that replace the in-process EventBus for market data.
+        Only <code>KlineEvent</code> and <code>OrderBookUpdateEvent</code> cross the Redis network boundary.
     </p>
     <div class="diagram-card">
         <div class="mermaid">
 flowchart LR
-    subgraph ST1["Stage 1: Market Data"]
+    subgraph MDS_SIDE["Market Data Container"]
+        direction TB
+        WS["WebSocket Worker\n(KlineClientManager)"]
+        PUB["RedisEventBusPublisher\n(elysian_core/transport/redis_event_bus.py)\nredis_url + channel_prefix\n\nawait r.publish(channel, payload)"]
+        SER["event_serializer.serialize_event(event)\n→ JSON bytes\n\nChannel: {prefix}:kline:{symbol}\nor {prefix}:orderbook:{symbol}"]
+        WS -->|"KlineEvent / OBUpdateEvent"| PUB
+        PUB --> SER
+    end
+
+    subgraph REDIS_BROKER["Redis (elysian_redis)"]
+        CHAN["Channels:\nelysian:md:binance:spot:kline:BTCUSDT\nelysian:md:binance:spot:orderbook:SUIUSDT\nelysian:md:aster:spot:kline:ASTERUSDT\n..."]
+    end
+
+    subgraph STRAT_SIDE["Strategy Container"]
+        direction TB
+        SUB2["RedisEventBusSubscriber\n(elysian_core/transport/redis_event_bus.py)\n\nstart_listener(channels)\n→ asyncio Task: _listener_loop()"]
+        DESER["event_serializer.deserialize_event(payload)\n→ KlineEvent | OrderBookUpdateEvent"]
+        CB["Dispatch to registered callbacks\n(sequential, backpressure preserved)\n\nsubscribe(EventType.KLINE, callback)\nunsubscribe(EventType.KLINE, callback)"]
+        SUB2 --> DESER --> CB
+    end
+
+    subgraph CHANNELS_HELPER["strategy_channels() helper"]
+        CH_FN["strategy_channels(symbols, venue, asset_type)\n→ List of Redis channel strings\nfor all symbols (kline + orderbook)"]
+    end
+
+    SER -->|"r.publish(channel, JSON bytes)"| REDIS_BROKER
+    REDIS_BROKER -->|"ps.listen() messages"| SUB2
+    CHANNELS_HELPER -->|"channels list"| SUB2
+
+    style MDS_SIDE fill:#fef2f2,stroke:#ef4444,color:#991b1b
+    style REDIS_BROKER fill:#ecfdf5,stroke:#059669,color:#065f46
+    style STRAT_SIDE fill:#f0fdf4,stroke:#16a34a,color:#166534
+    style CHANNELS_HELPER fill:#eff6ff,stroke:#2563eb,color:#1e40af
+        </div>
+    </div>
+
+    <h3>Channel Naming Convention</h3>
+    <table>
+        <thead>
+            <tr><th>Pattern</th><th>Example</th><th>Event Type</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>elysian:md:{venue}:{asset_type}:kline:{SYMBOL}</code></td><td><code>elysian:md:binance:spot:kline:BTCUSDT</code></td><td>KlineEvent</td></tr>
+            <tr><td><code>elysian:md:{venue}:{asset_type}:orderbook:{SYMBOL}</code></td><td><code>elysian:md:binance:spot:orderbook:ETHUSDT</code></td><td>OrderBookUpdateEvent</td></tr>
+            <tr><td><code>elysian:md:binance:perpetual:kline:{SYMBOL}</code></td><td><code>elysian:md:binance:perpetual:kline:BTCUSDT</code></td><td>KlineEvent (futures)</td></tr>
+            <tr><td><code>elysian:md:aster:spot:kline:{SYMBOL}</code></td><td><code>elysian:md:aster:spot:kline:ASTERUSDT</code></td><td>KlineEvent (Aster)</td></tr>
+        </tbody>
+    </table>
+    <div class="note-box">
+        <strong>EventBus interface compatibility</strong>
+        <code>RedisEventBusSubscriber</code> implements the same <code>subscribe()</code> / <code>unsubscribe()</code> /
+        <code>publish()</code> interface as the in-process <code>EventBus</code>. Strategies call
+        <code>shared_event_bus.subscribe(EventType.KLINE, cb)</code> identically regardless of whether
+        the bus is backed by Redis or an in-process deque. <code>publish()</code> on the subscriber side
+        is a no-op — strategies never publish to the shared bus.
+    </div>
+    <div class="note-box">
+        <strong>Serialisation</strong>
+        Events are serialised as JSON via <code>_EventEncoder</code> (handles <code>datetime</code>,
+        enums, and <code>SortedDict</code>). OrderBook bid/ask levels are serialised as lists of
+        <code>[price, qty]</code> pairs and reconstructed into a plain <code>OrderBook</code>
+        (not a <code>BinanceOrderBook</code> or <code>AsterOrderBook</code>) on the subscriber side.
+        This is intentional — only the level data matters for mark-price and signal computation.
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <h2 id="s5">5. 5-Stage Rebalance Pipeline <span>Data flow through a single rebalance cycle</span></h2>
+    <p class="desc">
+        The six-stage pipeline is unchanged in structure. The only architectural difference is that
+        Stage 1 (market data) now runs in a <em>separate container</em> and delivers events to Stage 2
+        (strategy dispatch) via Redis rather than in-process. Stages 3–5 remain sequential direct
+        method calls within the strategy container.
+    </p>
+    <div class="diagram-card">
+        <div class="mermaid">
+flowchart LR
+    subgraph ST1["Stage 1: Market Data (MarketDataService Container)"]
         direction TB
         WS1["BinanceKlineClientManager\nBinanceFuturesKlineClientManager\nBinanceOrderBookClientManager\nAsterKlineClientManager\nAsterPerpKlineClientManager"]
         DF["KlineFeed\nOHLCV ring buffer\nrolling vol\nlatest_price"]
@@ -340,7 +672,15 @@ flowchart LR
         WS1 -->|"raw WS msg"| OBF2
     end
 
-    subgraph ST2["Stage 2: Signal Dispatch"]
+    subgraph TRANSPORT["Redis Transport (NEW)"]
+        direction TB
+        PUB2["RedisEventBusPublisher\nserialise → JSON bytes\nr.publish(channel, payload)"]
+        REDIS3["Redis Broker\nelysian:md:...\nchannels"]
+        SUB3["RedisEventBusSubscriber\nps.listen() → deserialise\n→ EventBus dispatch"]
+        PUB2 --> REDIS3 --> SUB3
+    end
+
+    subgraph ST2["Stage 2: Signal Dispatch (Strategy Container)"]
         direction TB
         DISP["SpotStrategy\n_dispatch_kline()\n_dispatch_ob()\n_dispatch_order()\n_dispatch_balance()"]
         CB["on_kline()\non_orderbook_update()\non_order_update()\non_balance_update()"]
@@ -358,38 +698,41 @@ flowchart LR
     subgraph ST4["Stage 4: Risk Validation"]
         direction TB
         OPT["PortfolioOptimizer.validate(TargetWeights)"]
-        R1["1. Rate-limit check\nmin_rebalance_interval_s"]
+        R1["1. Input validation NaN/Inf"]
         R2["2. Symbol whitelist / blacklist"]
         R3["3. Per-asset weight clip\nmax_weight_per_asset"]
-        R4["4. Total-exposure scaling\nmax_gross_exposure"]
+        R4["4. Total-exposure scaling\nmax_total_exposure"]
         R5["5. Cash-floor enforcement\nmin_cash_weight"]
-        R6["6. Turnover cap\nmax_turnover"]
+        R6["6. Turnover cap\nmax_turnover_per_rebalance"]
+        R7["7. Min-delta prune\nmin_weight_delta"]
         VW["ValidatedWeights\noriginal / weights\nclipped / rejected\nrejection_reason"]
-        OPT --> R1 --> R2 --> R3 --> R4 --> R5 --> R6 --> VW
+        OPT --> R1 --> R2 --> R3 --> R4 --> R5 --> R6 --> R7 --> VW
     end
 
     subgraph ST5["Stage 5: Execution"]
         direction TB
         EE2["ExecutionEngine.execute(ValidatedWeights)"]
-        E1["1. Snapshot mark prices from feeds"]
+        E1["1. Snapshot mark prices from _mark_prices dict\n(updated via KLINE subscription on shared_bus)"]
         E2["2. Compute portfolio total_value()"]
         E3["3. Compute delta_qty per symbol"]
         E4["4. Round to step_size"]
-        E5["5. Filter weight_delta &lt; 0.001"]
+        E5["5. Filter weight_delta < 0.001"]
         E6["6. Execute SELLS first, then BUYS"]
         E7["7. ShadowBook.lock_for_order()\nActiveLimitOrder reservation"]
         RR["RebalanceResult\nintents / submitted / failed\ntimestamp / errors\nsubmitted_orders"]
         EE2 --> E1 --> E2 --> E3 --> E4 --> E5 --> E6 --> E7 --> RR
     end
 
-    DF -->|"KlineEvent\non SharedEventBus"| DISP
-    OBF2 -->|"OrderBookUpdateEvent\non SharedEventBus"| DISP
+    DF -->|"KlineEvent\n→ Publisher"| PUB2
+    OBF2 -->|"OrderBookUpdateEvent\n→ Publisher"| PUB2
+    SUB3 -->|"KlineEvent / OBUpdateEvent\ndispatched via shared_event_bus"| DISP
     RRQ -->|"COMPUTING trigger"| CW
     TW -->|"VALIDATING trigger"| OPT
     VW -->|"EXECUTING trigger"| EE2
     RR -->|"RebalanceCompleteEvent\non Private EventBus"| CB
 
     style ST1 fill:#fef2f2,stroke:#ef4444,color:#991b1b
+    style TRANSPORT fill:#ecfdf5,stroke:#059669,color:#065f46
     style ST2 fill:#fefce8,stroke:#ca8a04,color:#713f12
     style ST3 fill:#f0fdf4,stroke:#16a34a,color:#166534
     style ST4 fill:#eff6ff,stroke:#2563eb,color:#1e40af
@@ -397,15 +740,197 @@ flowchart LR
         </div>
     </div>
     <div class="note-box">
-        <strong>Design decision: sells before buys</strong>
-        Stage 5 always submits SELL orders ahead of BUY orders to free up quote balance before attempting purchases.
-        This prevents unnecessary order rejections due to insufficient free cash in accounts that hold no separate
-        credit facility. The <code>0.001</code> weight-delta threshold eliminates micro-trades whose transaction costs
-        would exceed the rebalancing benefit.
+        <strong>ExecutionEngine mark prices</strong>
+        ExecutionEngine now maintains its own <code>_mark_prices</code> dict (keyed by <code>Venue</code>)
+        updated via <code>_on_kline()</code> subscribed to the shared event bus. This allows it to
+        snapshot prices at execution time without needing live feed references. It calls
+        <code>execution_engine.start(shared_event_bus)</code> in <code>StrategyRunner.setup_strategy()</code>.
     </div>
 
     <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s3">3. Order Data Model Hierarchy <span>src/models/order.py</span></h2>
+    <h2 id="s6">6. StrategyRunner Lifecycle <span class="badge-updated">UPDATED</span> <span>Startup, steady state, and shutdown</span></h2>
+    <p class="desc">
+        <code>StrategyRunner</code> (in <code>run_strategy.py</code>) has been restructured for single-strategy
+        container deployment. It reads <code>STRATEGY_CONFIG_YAML</code> from the environment, constructs a
+        <code>RedisEventBusSubscriber</code> as the shared event bus, and no longer creates any WebSocket
+        client managers (those live in the MarketDataService container).
+    </p>
+
+    <div class="change-list">
+        <h4>Changes from Previous StrategyRunner</h4>
+        <ul>
+            <li><strong>Removed</strong>: KlineClientManager, OrderBookClientManager creation — now in MarketDataService</li>
+            <li><strong>Added</strong>: <code>RedisEventBusSubscriber</code> as <code>shared_event_bus</code></li>
+            <li><strong>Added</strong>: <code>_compute_channels()</code> — derives Redis channels for this strategy's symbols</li>
+            <li><strong>Added</strong>: <code>start_listener(channels)</code> call to begin Redis subscription</li>
+            <li><strong>Added</strong>: <code>execution_engine.start(shared_event_bus)</code> in setup_strategy</li>
+            <li><strong>Changed</strong>: Reads single strategy from <code>STRATEGY_CONFIG_YAML</code> env var</li>
+            <li><strong>Changed</strong>: <code>strategy_config_yaml</code> (singular) instead of list</li>
+        </ul>
+    </div>
+
+    <div class="diagram-card">
+        <div class="mermaid">
+flowchart TB
+    subgraph INIT["__init__ — Configuration"]
+        direction TB
+        LC["load_app_config(\n  trading_config_yaml,\n  strategy_config_yamls=[strategy_yaml],\n  json_path, env_path\n)"]
+        AC["AppConfig\n{meta, portfolio, risk,\nexecution, venue_configs,\nstrategies: Dict[int, StrategyConfig]}"]
+        LC --> AC
+    end
+
+    subgraph REDIS_SETUP["Redis Setup (NEW)"]
+        direction TB
+        RSub["RedisEventBusSubscriber\n(redis_url from env)\nshared_event_bus = RSub"]
+    end
+
+    subgraph SETUP["setup_strategy(strategy_config)"]
+        direction TB
+        SP1["_create_sub_account_exchange()\n→ (private_exchange, private_bus)\nprivate_exchange.start(shared_event_bus)\n(subscribes to KLINE+OB on shared bus)"]
+        SS2["create ShadowBook(strategy_id, venue,\n  strategy_config=strat_cfg)\nshadow_book.sync_from_exchange(private_exchange, {})\nshadow_book.start(shared_event_bus, private_event_bus)"]
+        SPO["create PortfolioOptimizer(risk_config, shadow_book)"]
+        SEE["create ExecutionEngine(\n  exchanges, shadow_book,\n  default_venue, cfg\n)\nexecution_engine.start(shared_event_bus)  ← NEW"]
+        PRG["portfolio.register_shadow_book(sb)"]
+        SST["strategy.start()\n(subscribes 5 event types\non shared + private buses)"]
+        SP1 --> SS2 --> SPO --> SEE --> PRG --> SST
+    end
+
+    subgraph CHANNELS["Channel Computation (NEW)"]
+        direction TB
+        CC["_compute_channels(cfg)\n→ strategy_channels(symbols, venue, asset_type)\n→ List of Redis channel strings\n(kline + orderbook per symbol)"]
+    end
+
+    subgraph STATES["RunnerState FSM"]
+        direction LR
+        CREATED(["CREATED"])
+        CONFIGURING(["CONFIGURING"])
+        CONNECTING(["CONNECTING"])
+        SYNCING(["SYNCING"])
+        RUNNING(["RUNNING"])
+        STOPPING(["STOPPING"])
+        STOPPED(["STOPPED"])
+        CREATED --> CONFIGURING --> CONNECTING --> SYNCING --> RUNNING --> STOPPING --> STOPPED
+    end
+
+    subgraph MAIN_LOOP["asyncio.gather() — Main Run Loop"]
+        LT["shared_event_bus._listener_task\n(Redis subscription loop)"]
+        RF["strategy.run_forever()\n(timer-based or event-driven)"]
+    end
+
+    INIT --> REDIS_SETUP
+    REDIS_SETUP --> SETUP
+    SETUP --> CHANNELS
+    CHANNELS -->|"start_listener(channels)"| MAIN_LOOP
+    MAIN_LOOP --> STATES
+
+    style INIT fill:#fef2f2,stroke:#ef4444,color:#991b1b
+    style REDIS_SETUP fill:#ecfdf5,stroke:#059669,color:#065f46
+    style SETUP fill:#fefce8,stroke:#ca8a04,color:#713f12
+    style CHANNELS fill:#eff6ff,stroke:#2563eb,color:#1e40af
+    style STATES fill:#eff6ff,stroke:#2563eb,color:#1e40af
+    style MAIN_LOOP fill:#f0fdf4,stroke:#16a34a,color:#166534
+    style CREATED fill:#dbeafe,stroke:#2563eb,color:#1e40af
+    style CONFIGURING fill:#dbeafe,stroke:#2563eb,color:#1e40af
+    style CONNECTING fill:#dbeafe,stroke:#2563eb,color:#1e40af
+    style SYNCING fill:#dbeafe,stroke:#2563eb,color:#1e40af
+    style RUNNING fill:#bbf7d0,stroke:#16a34a,color:#166534
+    style STOPPING fill:#fed7aa,stroke:#ea580c,color:#9a3412
+    style STOPPED fill:#fee2e2,stroke:#ef4444,color:#991b1b
+        </div>
+    </div>
+    <div class="note-box note-green">
+        <strong>asyncio.gather() — concurrent main coroutines</strong>
+        <code>run()</code> gathers two coroutines: <code>shared_event_bus._listener_task</code> (the Redis
+        subscription loop that deserialises messages and dispatches to strategy callbacks) and
+        <code>strategy.run_forever()</code> (the strategy's timer or event loop). Both run concurrently
+        on the single asyncio event loop. When either exits (e.g. on shutdown), the other is cancelled.
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <h2 id="s7">7. Strategy Event Bus Wiring <span class="badge-updated">UPDATED</span> <span>Shared vs private buses across two containers</span></h2>
+    <p class="desc">
+        The two-bus architecture is preserved but now the <strong>shared bus is backed by Redis</strong>
+        while the <strong>private bus remains in-process</strong>. The strategy subscribes to 5 event types
+        across the two buses. The ShadowBook also subscribes to KLINE on the shared bus for mark price
+        updates. ORDER_UPDATE and BALANCE_UPDATE are dispatched by the strategy to the ShadowBook via
+        <code>asyncio.gather()</code> rather than ShadowBook subscribing directly.
+    </p>
+    <div class="diagram-card">
+        <div class="mermaid">
+flowchart TB
+    subgraph SHARED_BUS["Shared EventBus — RedisEventBusSubscriber (market data)"]
+        direction LR
+        subgraph SHARED_PRODUCERS["Producers (Market Data Container → Redis)"]
+            BKP["BinanceKlineFeed"]
+            BOP["BinanceOrderBookFeed"]
+            BFKP["BinanceFuturesKlineFeed"]
+            AKP["AsterKlineFeed"]
+        end
+        subgraph SHARED_EVENTS["Events (via Redis → deserialise)"]
+            KE["KlineEvent\n{symbol, venue, kline, timestamp}"]
+            OE["OrderBookUpdateEvent\n{symbol, venue, orderbook, timestamp}"]
+        end
+        subgraph SHARED_CONSUMERS["Consumers (Strategy Container)"]
+            SDK["SpotStrategy._dispatch_kline\n(filters by venue + symbols)"]
+            SDOB["SpotStrategy._dispatch_ob\n(filters by venue)"]
+            SBKL["ShadowBook._on_kline\n→ update _mark_prices\n→ _refresh_derived()"]
+            EEK["ExecutionEngine._on_kline\n→ update _mark_prices[venue][symbol]"]
+            SPEX["SpotExchangeConnector._on_kline\n→ kline_feeds[symbol]"]
+        end
+        SHARED_PRODUCERS --> SHARED_EVENTS --> SHARED_CONSUMERS
+    end
+
+    subgraph PRIVATE_BUS["Private EventBus — in-process (per-strategy, per-container)"]
+        direction LR
+        subgraph PRIVATE_PRODUCERS["Producers"]
+            UDS["BinanceSpotExchange\n._user_data_stream()\nBinanceUserDataClientManager\nuserDataStream.subscribe.signature"]
+        end
+        subgraph PRIVATE_EVENTS["Events"]
+            OUE["OrderUpdateEvent\n{symbol, base_asset, quote_asset,\nvenue, order, timestamp}"]
+            BAE["BalanceUpdateEvent\n{asset, venue, delta,\nnew_balance, timestamp}"]
+            RCE["RebalanceCycleEvent\n{old_state, new_state,\ntrigger, timestamp}"]
+            RCO["RebalanceCompleteEvent\n{result, validated_weights,\ntimestamp, strategy_id}"]
+        end
+        subgraph PRIVATE_CONSUMERS["Consumers"]
+            PDO["SpotStrategy._dispatch_order\n→ asyncio.gather(\n    on_order_update(event),\n    shadow_book._on_order_update(event)\n  )"]
+            PDB["SpotStrategy._dispatch_balance\n→ asyncio.gather(\n    on_balance_update(event),\n    shadow_book._on_balance_update(event)\n  )"]
+            PDR["SpotStrategy._dispatch_rebalance\n→ on_rebalance_complete()"]
+        end
+        PRIVATE_PRODUCERS --> PRIVATE_EVENTS
+        OUE --> PDO
+        BAE --> PDB
+        RCO --> PDR
+    end
+
+    style SHARED_BUS fill:#eff6ff,stroke:#2563eb,color:#1e40af
+    style SHARED_PRODUCERS fill:#ecfdf5,stroke:#059669,color:#065f46
+    style SHARED_EVENTS fill:#f8faff,stroke:#93c5fd,color:#1e40af
+    style SHARED_CONSUMERS fill:#dbeafe,stroke:#2563eb,color:#1e40af
+    style PRIVATE_BUS fill:#f0fdf4,stroke:#16a34a,color:#166534
+    style PRIVATE_PRODUCERS fill:#dcfce7,stroke:#16a34a,color:#166534
+    style PRIVATE_EVENTS fill:#f8fff9,stroke:#86efac,color:#166534
+    style PRIVATE_CONSUMERS fill:#dcfce7,stroke:#16a34a,color:#166534
+        </div>
+    </div>
+    <div class="note-box">
+        <strong>ShadowBook ORDER_UPDATE / BALANCE_UPDATE dispatch</strong>
+        Unlike the KLINE subscription (which ShadowBook registers itself via <code>start()</code>),
+        ORDER_UPDATE and BALANCE_UPDATE are dispatched to the ShadowBook by the strategy's
+        <code>_dispatch_order()</code> and <code>_dispatch_balance()</code> handlers using
+        <code>asyncio.gather()</code>. This means both the strategy's user hook (<code>on_order_update()</code>)
+        and the ShadowBook's internal handler (<code>_on_order_update()</code>) run concurrently for each event.
+    </div>
+    <div class="note-box">
+        <strong>Three shared-bus consumers per KlineEvent</strong>
+        Every KLINE event on the shared bus is consumed by three independent subscribers:
+        (1) <code>SpotStrategy._dispatch_kline</code> (drives strategy logic + rebalance trigger),
+        (2) <code>ShadowBook._on_kline</code> (updates mark prices and refreshes NAV/weights),
+        (3) <code>ExecutionEngine._on_kline</code> (updates internal price snapshot for execution sizing),
+        and (4) <code>SpotExchangeConnector._on_kline</code> (keeps kline_feeds for order health checks).
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <h2 id="s8">8. Order Data Model Hierarchy <span>src/core/order.py</span></h2>
     <p class="desc">
         Orders follow a strict inheritance chain. The base <code>Order</code> holds the canonical exchange fields.
         <code>ActiveOrder</code> adds fill-delta bookkeeping for streaming partial fills. <code>ActiveLimitOrder</code>
@@ -475,6 +1000,8 @@ classDiagram
         &lt;&lt;enum&gt;&gt;
         MARKET
         LIMIT
+        STOP_MARKET
+        TAKE_PROFIT_MARKET
     }
 
     class OrderStatus {
@@ -497,20 +1024,15 @@ classDiagram
     Order --> OrderStatus
         </div>
     </div>
-    <p class="desc">
-        <code>last_fill_price</code> captures the Binance field <code>"L"</code> — the price of the most recent
-        incremental fill, distinct from <code>avg_fill_price</code>. <code>sync_from_event</code> in
-        <code>ActiveOrder</code> returns the quantity delta (new fill minus previous fill) so callers can apply
-        exactly one incremental accounting update per WebSocket message without re-processing prior fills.
-    </p>
 
     <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s4">4. Position &amp; ShadowBook <span>Per-strategy virtual ledger</span></h2>
+    <h2 id="s9">9. Position &amp; ShadowBook <span class="badge-updated">UPDATED</span> <span>Per-strategy virtual ledger</span></h2>
     <p class="desc">
-        The <code>ShadowBook</code> is the single source of truth for a strategy's financial state. It mirrors
-        the real exchange state through event-driven updates rather than polling, and exposes a rich read API
-        (NAV, weights, drawdown, exposure) that the strategy and optimizer consume. <code>Portfolio</code> is a
-        thin read-only aggregator — it holds references to shadow books but never mutates them.
+        The <code>ShadowBook</code> architecture is largely unchanged except for how it wires to event buses.
+        <code>start(event_bus, private_event_bus)</code> now <em>requires</em> both buses explicitly.
+        KLINE is subscribed internally; ORDER_UPDATE and BALANCE_UPDATE are dispatched externally
+        by the strategy via <code>asyncio.gather()</code>. The <code>_asset_symbol_map</code> and
+        <code>_position_deducted_comm</code> fields have been added for precise non-stablecoin commission tracking.
     </p>
     <div class="diagram-card">
         <div class="mermaid">
@@ -521,12 +1043,13 @@ classDiagram
         +float quantity
         +float avg_entry_price
         +float realized_pnl
-        +float total_commission
+        +Dict commission_by_asset
         +float locked_quantity
         +free_quantity : float
         +unrealized_pnl(mark_price) float
         +total_pnl(mark_price) float
-        +net_pnl(mark_price) float
+        +net_pnl(mark_price, asset_prices) float
+        +notional(mark_price) float
         +is_flat() bool
         +is_long() bool
         +is_short() bool
@@ -535,15 +1058,14 @@ classDiagram
     class Fill {
         +str order_id
         +str symbol
-        +str base_asset
-        +str quote_asset
         +Side side
-        +float qty_delta
+        +float quantity
         +float price
         +float commission
         +str commission_asset
         +Venue venue
         +float timestamp
+        +timestamp_str : str
     }
 
     class ShadowBook {
@@ -553,8 +1075,11 @@ classDiagram
         +float _cash
         +Dict _cash_dict
         +Dict _mark_prices
+        +Dict _klines
         +float _realized_pnl
         +Dict _total_commission_dict
+        +Dict _asset_symbol_map  ← NEW
+        +Dict _position_deducted_comm  ← NEW
         +Deque _fills
         +Dict _active_orders
         +float _locked_cash
@@ -567,10 +1092,10 @@ classDiagram
         +init_from_portfolio_cash(portfolio_cash, mark_prices)
         +start(event_bus, private_event_bus)
         +stop()
-        +_on_kline(event)
-        +_on_order_update(event)
-        +_on_balance_update(event)
-        +apply_fill(symbol, qty_delta, price, ...)
+        +_on_kline(event)  ← subscribed internally
+        +_on_order_update(event)  ← dispatched externally by strategy
+        +_on_balance_update(event)  ← dispatched externally by strategy
+        +apply_fill(symbol, base_asset, quote_asset, ...)
         +lock_for_order(order_id, intent)
         +mark_to_market(mark_prices)
         +position(symbol) Position
@@ -586,13 +1111,14 @@ classDiagram
         +net_exposure() float
         +long_exposure() float
         +short_exposure() float
-        +total_commission : float
+        +total_commission() float
         +realized_pnl : float
         +net_pnl() float
         +peak_equity : float
         +max_drawdown : float
         +current_drawdown() float
         +snapshot() dict
+        +log_snapshot() str
         +save_snapshot()
     }
 
@@ -620,19 +1146,17 @@ classDiagram
         </div>
     </div>
     <div class="note-box">
-        <strong>Stablecoin seeding</strong>
-        On initialisation, <code>_mark_prices</code> seeds all detected stablecoins (USDT, USDC, BUSD) at
-        <code>1.0</code>. This ensures NAV calculations remain correct when the strategy holds a mix of stable
-        and volatile assets before the first kline event arrives.
-    </div>
-    <div class="note-box">
-        <strong>Locked cash vs free cash</strong>
-        <code>_locked_cash</code> is the running sum of all <code>ActiveLimitOrder.reserved_cash</code> for
-        pending BUY limit orders. <code>free_cash = _cash - _locked_cash</code>. The optimizer uses
-        <code>free_cash</code> (not gross cash) when sizing new orders, preventing double-allocation.
+        <strong>_asset_symbol_map and _position_deducted_comm (new fields)</strong>
+        <code>_asset_symbol_map</code> maps raw base asset names (e.g. <code>"BNB"</code>) to trading
+        symbols (e.g. <code>"BNBUSDT"</code>), populated whenever <code>apply_fill()</code> is called with a
+        <code>base_asset</code>. This allows non-stablecoin commission assets (e.g. BNB fee on an ETHUSDT trade)
+        to be resolved to their position and have their qty deducted, mirroring the real exchange balance.
+        <code>_position_deducted_comm</code> tracks these position-side deductions so they are excluded from
+        <code>total_commission()</code> in USDT to avoid double-counting in <code>net_pnl()</code>.
     </div>
 
-    <h2 id="s5">5. Signal Contract Flow <span>Type-safe handoffs between pipeline stages</span></h2>
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <h2 id="s10">10. Signal Contract Flow <span>Type-safe handoffs between pipeline stages</span></h2>
     <p class="desc">
         Each stage boundary is a typed dataclass, making the full pipeline statically verifiable.
         The sequence below shows one complete rebalance cycle from the strategy emitting weights
@@ -657,7 +1181,7 @@ classDiagram
         POpt-->>FSM: ValidatedWeights{original, weights, clipped, rejected, rejection_reason}
 
         FSM->>EE: execute(ValidatedWeights)
-        EE->>EE: snapshot mark prices from feeds
+        EE->>EE: snapshot _mark_prices[venue] (from KLINE subscription)
         EE->>SB: total_value()
         SB-->>EE: nav: float
         EE->>EE: compute delta_qty per symbol
@@ -682,250 +1206,100 @@ classDiagram
         PBUS->>STRAT: on_rebalance_complete(event)
         </div>
     </div>
-    <p class="desc">
-        Note that <code>ShadowBook.lock_for_order()</code> is called synchronously within the execution loop,
-        immediately after the exchange acknowledges the order ID. This ensures the locked cash / qty is
-        accounted for before the next rebalance cycle can begin, even if the WebSocket fill event
-        arrives late or out of order.
-    </p>
 
     <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s6">6. Event System <span>Shared vs private buses, producers and consumers</span></h2>
+    <h2 id="s11">11. Connector &amp; Feed Layer <span>Exchange connectivity and WebSocket client managers</span></h2>
     <p class="desc">
-        The system uses two logically separate event buses. The shared bus carries market data visible to all
-        strategies simultaneously. The private bus carries user-data events (fills, balance changes) scoped to
-        a single strategy's sub-account connection. Separating the buses prevents one strategy's order activity
-        from leaking into another strategy's event handlers.
+        In the new architecture, the connector and feed layer is <strong>split across two containers</strong>.
+        The <em>data feeds</em> (kline feeds, order book feeds, and their client managers) live exclusively in the
+        <code>MarketDataService</code> container. The <em>exchange connectors</em>
+        (<code>BinanceSpotExchange</code>, <code>AsterSpotExchange</code>) live in the strategy containers,
+        handling authenticated REST order placement and user-data WebSocket streams.
     </p>
     <div class="diagram-card">
         <div class="mermaid">
 flowchart TB
-    subgraph SHARED["Shared EventBus (market data)"]
-        direction LR
-        subgraph SPRODUCERS["Producers"]
-            BKP["BinanceKlineFeed"]
-            BOP["BinanceOrderBookFeed"]
-            BFKP["BinanceFuturesKlineFeed"]
-            AKP["AsterKlineFeed"]
-            APP["AsterPerpKlineFeed"]
-        end
-        subgraph SEVENTS["Events"]
-            KE["KlineEvent\n{symbol, venue, kline: Kline, timestamp}"]
-            OE["OrderBookUpdateEvent\n{symbol, venue, orderbook: OrderBook, timestamp}"]
-        end
-        subgraph SCONSUMERS["Consumers"]
-            SDK["SpotStrategy._dispatch_kline"]
-            SDOB["SpotStrategy._dispatch_ob"]
-            SBKL["ShadowBook._on_kline\n→ update _mark_prices\n→ _refresh_derived()"]
-        end
-        SPRODUCERS --> SEVENTS --> SCONSUMERS
-    end
-
-    subgraph PRIVATE["Private EventBus (per-strategy user data)"]
-        direction LR
-        subgraph PPRODUCERS["Producers"]
-            UDS["BinanceSpotExchange\n._user_data_stream()\nWebSocket listenKey"]
-        end
-        subgraph PEVENTS["Events"]
-            OUE["OrderUpdateEvent\n{symbol, base_asset, quote_asset,\nvenue, order: Order, timestamp}"]
-            BAE["BalanceUpdateEvent\n{asset, venue, delta,\nnew_balance, timestamp}"]
-            RCE["RebalanceCycleEvent\n{old_state, new_state,\ntrigger, timestamp}"]
-            RCO["RebalanceCompleteEvent\n{result: RebalanceResult,\nvalidated_weights, timestamp,\nstrategy_id}"]
-            LFE["LifecycleEvent\n{component, old_state,\nnew_state, timestamp}"]
-        end
-        subgraph PCONSUMERS["Consumers"]
-            PDO["SpotStrategy._dispatch_order\n→ ShadowBook._on_order_update\n→ ActiveOrder.sync_from_event()\n→ apply_fill()\n→ lock release"]
-            PDB["SpotStrategy._dispatch_balance\n→ ShadowBook._on_balance_update\n→ update _cash_dict / _cash"]
-            PDR["SpotStrategy._dispatch_rebalance\n→ on_rebalance_complete()"]
-        end
-        PPRODUCERS --> PEVENTS
-        OUE --> PDO
-        BAE --> PDB
-        RCO --> PDR
-    end
-
-    style SHARED fill:#eff6ff,stroke:#2563eb,color:#1e40af
-    style SPRODUCERS fill:#dbeafe,stroke:#2563eb,color:#1e40af
-    style SEVENTS fill:#f8faff,stroke:#93c5fd,color:#1e40af
-    style SCONSUMERS fill:#dbeafe,stroke:#2563eb,color:#1e40af
-    style PRIVATE fill:#f0fdf4,stroke:#16a34a,color:#166534
-    style PPRODUCERS fill:#dcfce7,stroke:#16a34a,color:#166534
-    style PEVENTS fill:#f8fff9,stroke:#86efac,color:#166534
-    style PCONSUMERS fill:#dcfce7,stroke:#16a34a,color:#166534
-        </div>
-    </div>
-    <div class="note-box">
-        <strong>ShadowBook subscription model</strong>
-        <code>ShadowBook.start(shared_event_bus, private_event_bus)</code> subscribes <code>_on_kline</code> to
-        the shared bus and <code>_on_order_update</code> / <code>_on_balance_update</code> to the private bus.
-        <code>stop()</code> unsubscribes both, making the subscription lifecycle deterministic and leak-free.
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s7">7. Connector &amp; Feed Layer <span>Exchange connectivity and WebSocket client managers</span></h2>
-    <p class="desc">
-        All exchange interactions go through a two-tier abstraction: the <code>SpotExchangeConnector</code> base
-        defines the order-management contract, while <code>AbstractDataFeed</code> defines the market-data contract.
-        Concrete implementations (Binance Spot, Binance Futures, Aster) override only the venue-specific details.
-        WebSocket lifecycle is managed by dedicated client-manager classes, keeping reconnection logic out of the
-        feed business logic.
-    </p>
-    <div class="diagram-card">
-        <div class="mermaid">
-flowchart TB
-    subgraph CONNBASE["SpotExchangeConnector (abstract base)"]
+    subgraph MDS_LAYER["Market Data Container — Feed & Client Manager Layer"]
         direction TB
-        CA1["place_market_order(symbol, side, qty, strategy_id)"]
-        CA2["place_limit_order(symbol, side, price, qty, strategy_id)"]
-        CA3["cancel_order(symbol, order_id)"]
-        CA4["get_balance(asset) → float"]
-        CA5["order_health_check(symbol, side, qty, price)"]
-        CA6["_balances: Dict[str, float]"]
-        CA7["_open_orders: Dict[str, Dict[str, Order]]"]
-        CA8["_token_infos: Dict[str, TokenInfo]\n{step_size, min_notional, base_precision, ...}"]
-    end
+        subgraph CONNBASE["AbstractDataFeed / AbstractClientManager"]
+            CA1["AbstractDataFeed\n_historical deque (maxlen=60)\n_vol rolling stdev\nlatest_price property"]
+            CA2["KlineClientManager\nset_event_bus(publisher)\nregister_feed()\nrun_multiplex_feeds()"]
+            CA3["OrderBookClientManager\nset_event_bus(publisher)"]
+        end
 
-    subgraph CONNIMPL["Concrete Connectors"]
-        direction LR
-        BSE2["BinanceSpotExchange\n_user_data_stream() → private EventBus\nbase_asset_to_symbol(asset)\nListenKey keepalive"]
-        BFE2["BinanceFuturesExchange\nfutures-specific margin / leverage\nmark price from futures stream"]
-        ASE2["AsterSpotExchange\nAster DEX REST + WS\ncustom auth headers"]
-    end
-
-    subgraph FEEDBASE["AbstractDataFeed (abstract base)"]
-        direction TB
-        FA1["latest_price : float"]
-        FA2["volatility : Optional[float]"]
-        FA3["subscribe(symbol)"]
-        FA4["unsubscribe(symbol)"]
-        FA5["get_orderbook(symbol) → OrderBook"]
-    end
-
-    subgraph FEEDIMPL["Concrete Feeds"]
-        direction LR
-        subgraph KFEEDS["Kline Feeds"]
+        subgraph KFEEDS["Kline Feeds (one per symbol per venue)"]
             BKF2["BinanceKlineFeed\nOHLCV ring buffer\nrolling vol σ"]
             BFKF2["BinanceFuturesKlineFeed"]
             AKF2["AsterKlineFeed"]
             APF2["AsterPerpKlineFeed"]
         end
-        subgraph OBFEEDS["OrderBook Feeds"]
-            BOF2["BinanceOrderBookFeed\nL2 SortedDict\nbid/ask/mid/spread"]
+
+        subgraph OBFEEDS["OrderBook Feeds (one per symbol per venue)"]
+            BOF2["BinanceOrderBookFeed\nL2 SortedDict\nbid/ask/mid/spread\nget_initial_snapshot()"]
             BFOF["BinanceFuturesOrderBookFeed"]
             AOF["AsterOrderBookFeed"]
         end
+
+        subgraph WSMGRS["WebSocket Client Managers"]
+            BKM3["BinanceKlineClientManager"]
+            BOM3["BinanceOrderBookClientManager"]
+            BFKM3["BinanceFuturesKlineClientManager"]
+            AKM3["AsterKlineClientManager"]
+            APKM["AsterPerpKlineClientManager"]
+        end
+        WSMGRS -->|"raw WS frames → feeds"| KFEEDS
+        WSMGRS -->|"raw WS frames → feeds"| OBFEEDS
+        KFEEDS -->|"KlineEvent → publisher"| CA2
+        OBFEEDS -->|"OBUpdateEvent → publisher"| CA3
     end
 
-    subgraph WSMGRS["WebSocket Client Managers"]
-        direction LR
-        BKM["BinanceKlineClientManager"]
-        BOM["BinanceOrderBookClientManager"]
-        BFKM["BinanceFuturesKlineClientManager"]
-        BFOM["BinanceFuturesOrderBookClientManager"]
-        AKM["AsterKlineClientManager"]
-        APKM["AsterPerpKlineClientManager"]
-        AOM["AsterOrderBookClientManager"]
-        APOM["AsterPerpOrderBookClientManager"]
-    end
-
-    CONNBASE --> CONNIMPL
-    FEEDBASE --> FEEDIMPL
-    WSMGRS -->|"raw WS frames"| FEEDIMPL
-    CONNIMPL -->|"REST API calls"| EX_NET(("Exchange\nNetwork"))
-    WSMGRS -->|"WS connect/reconnect"| EX_NET
-
-    style CONNBASE fill:#fef2f2,stroke:#ef4444,color:#991b1b
-    style CONNIMPL fill:#fee2e2,stroke:#ef4444,color:#991b1b
-    style FEEDBASE fill:#fefce8,stroke:#ca8a04,color:#713f12
-    style FEEDIMPL fill:#fef9c3,stroke:#ca8a04,color:#713f12
-    style WSMGRS fill:#f0fdf4,stroke:#16a34a,color:#166534
-        </div>
-    </div>
-    <p class="desc">
-        Client managers are responsible solely for WebSocket lifecycle: initial connection, keepalive pings,
-        exponential-backoff reconnect, and subscription refresh. They push raw frames to feed objects which
-        maintain parsed state. This separation means feeds can be unit-tested with injected frames without
-        any network involvement.
-    </p>
-
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s8">8. StrategyRunner Lifecycle <span>Startup, steady state, and shutdown FSM</span></h2>
-    <p class="desc">
-        <code>StrategyRunner</code> itself progresses through a linear state machine before entering the
-        steady-state <code>RUNNING</code> phase. Each transition has a clear precondition, making startup
-        failures easy to diagnose. A <code>PeriodicTask</code> runs concurrently to persist snapshots without
-        blocking the event loop.
-    </p>
-    <div class="diagram-card">
-        <div class="mermaid">
-flowchart TB
-    subgraph INIT["__init__ — Configuration"]
+    subgraph STRAT_CONN["Strategy Containers — Exchange Connector Layer"]
         direction TB
-        LC["load_app_config(\n  trading_config_yaml,\n  strategy_config_yamls,\n  json_path,\n  env_path\n)"]
-        AC["AppConfig\n{meta, portfolio, risk,\nexecution, venue_configs,\nstrategies: List[StrategyConfig]}"]
-        LC --> AC
+        subgraph CONNBASE2["SpotExchangeConnector (abstract base)"]
+            CB1["place_market_order()"]
+            CB2["place_limit_order()"]
+            CB3["cancel_order()"]
+            CB4["get_balance()"]
+            CB5["order_health_check()"]
+            CB6["_balances / _open_orders / _token_infos"]
+            CB7["kline_feeds / ob_feeds\n(updated via _on_kline / _on_orderbook_update)"]
+            CB8["start(shared_event_bus)\nstop()"]
+        end
+        subgraph CONNIMPL["Concrete Connectors"]
+            BSE2["BinanceSpotExchange\nuser_data_manager:\nBinanceUserDataClientManager\n(userDataStream.subscribe.signature)\nstart(shared_event_bus)"]
+            ASE2["AsterSpotExchange\nAsterUserDataClientManager\nListen key lifecycle"]
+            BFE2["BinanceFuturesExchange\nBinanceFuturesUserDataClientManager\nlistenKey approach"]
+        end
+        subgraph USERDATA["User Data Managers"]
+            BUD["BinanceUserDataClientManager\nwss://ws-api.binance.com:443/ws-api/v3\nuserDataStream.subscribe.signature\n(HMAC key, no Ed25519 required)\nPublishes to private EventBus"]
+            AUD["AsterUserDataClientManager\nListenKey: POST/PUT/DELETE\nwss://sstream.asterdex.com/ws"]
+        end
+        CONNBASE2 --> CONNIMPL
+        CONNIMPL --> USERDATA
     end
 
-    subgraph SETUP["setup_strategy(strategy_config)"]
-        direction TB
-        SS2["create ShadowBook(strategy_id, venue)"]
-        SPO["create PortfolioOptimizer(risk_config, shadow_book)"]
-        SEE["create ExecutionEngine(\n  exchanges, shadow_book, feeds,\n  event_bus, risk_config\n)"]
-        SBS["shadow_book.start(\n  shared_event_bus,\n  private_event_bus\n)"]
-        PRG["portfolio.register_shadow_book(sb)"]
-        SST["strategy.start()"]
-        SS2 --> SPO --> SEE --> SBS --> PRG --> SST
-    end
+    MDS_LAYER -->|"Redis pub/sub\nKlineEvent / OBUpdateEvent"| STRAT_CONN
 
-    subgraph STATES["RunnerState FSM"]
-        direction LR
-        CREATED(["CREATED"])
-        CONFIGURING(["CONFIGURING"])
-        CONNECTING(["CONNECTING"])
-        SYNCING(["SYNCING"])
-        RUNNING(["RUNNING"])
-        STOPPING(["STOPPING"])
-        STOPPED(["STOPPED"])
-        CREATED --> CONFIGURING --> CONNECTING --> SYNCING --> RUNNING --> STOPPING --> STOPPED
-    end
-
-    subgraph BG["Background Tasks"]
-        PT["PeriodicTask\nsave_snapshot()\ninterval_s = 60"]
-        HC["Health-check\norder_health_check()"]
-        LK["ListenKey keepalive\nevery 30 min"]
-    end
-
-    INIT --> SETUP
-    SETUP -->|"all strategies wired"| STATES
-    RUNNING -->|"concurrent"| BG
-
-    style INIT fill:#fef2f2,stroke:#ef4444,color:#991b1b
-    style SETUP fill:#fefce8,stroke:#ca8a04,color:#713f12
-    style STATES fill:#eff6ff,stroke:#2563eb,color:#1e40af
-    style BG fill:#f0fdf4,stroke:#16a34a,color:#166534
-    style CREATED fill:#dbeafe,stroke:#2563eb,color:#1e40af
-    style CONFIGURING fill:#dbeafe,stroke:#2563eb,color:#1e40af
-    style CONNECTING fill:#dbeafe,stroke:#2563eb,color:#1e40af
-    style SYNCING fill:#dbeafe,stroke:#2563eb,color:#1e40af
-    style RUNNING fill:#bbf7d0,stroke:#16a34a,color:#166534
-    style STOPPING fill:#fed7aa,stroke:#ea580c,color:#9a3412
-    style STOPPED fill:#fee2e2,stroke:#ef4444,color:#991b1b
+    style MDS_LAYER fill:#fef2f2,stroke:#ef4444,color:#991b1b
+    style STRAT_CONN fill:#f0fdf4,stroke:#16a34a,color:#166534
         </div>
     </div>
     <div class="note-box">
-        <strong>SYNCING state</strong>
-        In <code>SYNCING</code>, the runner calls <code>shadow_book.sync_from_exchange(exchange, feeds)</code>
-        for sub-account mode deployments. This pulls the current live balances and open orders from the exchange
-        REST API, seeding the ShadowBook with ground truth before any WebSocket events arrive. Strategies that
-        omit sub-account mode skip this step and rely on <code>init_from_portfolio_cash()</code> instead.
+        <strong>BinanceUserDataClientManager — new WS API</strong>
+        The user-data stream has migrated from the deprecated <code>/api/v3/userDataStream</code> listenKey
+        approach (retired 2026-02-20) to the new Binance WebSocket API at
+        <code>wss://ws-api.binance.com:443/ws-api/v3</code> using
+        <code>userDataStream.subscribe.signature</code>. This method works with HMAC-SHA256 keys
+        without requiring an Ed25519 session login. Events arrive in the envelope
+        <code>{"subscriptionId": 0, "event": {...}}</code> rather than raw event objects.
     </div>
 
     <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s9">9. RiskConfig Constraints <span>PortfolioOptimizer validation pipeline</span></h2>
+    <h2 id="s12">12. RiskConfig Constraints <span>PortfolioOptimizer validation pipeline</span></h2>
     <p class="desc">
-        The <code>RiskConfig</code> drives Stage 4 of the rebalance pipeline. All six constraints are applied
-        in a fixed order; earlier steps may eliminate symbols before later steps run. The final
-        <code>ValidatedWeights</code> object records which symbols were clipped or rejected and why.
+        The <code>RiskConfig</code> drives Stage 4 of the rebalance pipeline. The optimizer now runs
+        a 7-step ordered constraint pipeline (previously 6 steps), adding an input validation step
+        at the front to drop NaN / Inf / non-numeric weights before any constraint is applied.
     </p>
 
     <div class="diagram-card">
@@ -933,21 +1307,23 @@ flowchart TB
 flowchart LR
     TW2["TargetWeights\nfrom strategy"]
 
-    subgraph PIPE["PortfolioOptimizer.validate() — ordered constraint pipeline"]
+    subgraph PIPE["PortfolioOptimizer.validate() — 7-step ordered constraint pipeline"]
         direction LR
-        C1["1. Rate-limit\nmin_rebalance_interval_s\n→ reject entire rebalance\nif too soon"]
-        C2["2. Whitelist / Blacklist\nwhitelist: Set[str]\nblacklist: Set[str]\n→ drop prohibited symbols"]
-        C3["3. Per-asset weight clip\nmax_weight_per_asset\n→ clip each symbol weight\nto ceiling"]
-        C4["4. Total-exposure scale\nmax_gross_exposure\nsum(|w|) ≤ limit\n→ scale all weights down"]
-        C5["5. Cash-floor\nmin_cash_weight\n→ ensure cash ≥ floor\nscale risky weights"]
-        C6["6. Turnover cap\nmax_turnover\n|new_w - old_w| ≤ limit\n→ blend toward current weights"]
-        C1 --> C2 --> C3 --> C4 --> C5 --> C6
+        C0["0. Liquidate fast-path\nif target.liquidate → bypass all\nreturn as-is"]
+        C1["1. Input validation\ndrop NaN / Inf / non-numeric\nweights before any constraint"]
+        C2["2. Symbol filter\nwhitelist / blacklist\n→ drop prohibited symbols"]
+        C3["3. Per-asset weight clip\nmax_weight_per_asset\nmax_short_weight\n→ clip each symbol weight"]
+        C4["4. Total-exposure scale\nmax_total_exposure\nsum(|w|) ≤ limit\n→ scale all weights down"]
+        C5["5. Cash-floor\nmin_cash_weight\n→ ensure long_invested ≤ 1 - min_cash\nscale long weights only"]
+        C6["6. Turnover cap\nmax_turnover_per_rebalance\n→ blend toward current weights\n(partial rebalance)"]
+        C7["7. Min-delta prune\nmin_weight_delta\n→ drop legs with\n|target_w - current_w| < threshold"]
+        C0 --> C1 --> C2 --> C3 --> C4 --> C5 --> C6 --> C7
     end
 
     VW2["ValidatedWeights\n{original, weights,\nclipped, rejected,\nrejection_reason}"]
 
-    TW2 --> C1
-    C6 --> VW2
+    TW2 --> C0
+    C7 --> VW2
 
     style PIPE fill:#eff6ff,stroke:#2563eb,color:#1e40af
         </div>
@@ -959,7 +1335,7 @@ flowchart LR
             <tr>
                 <th>Field</th>
                 <th>Type</th>
-                <th>Example</th>
+                <th>Default</th>
                 <th>Description</th>
             </tr>
         </thead>
@@ -967,55 +1343,156 @@ flowchart LR
             <tr>
                 <td><code>max_weight_per_asset</code></td>
                 <td>float</td>
-                <td>0.50</td>
-                <td>Maximum fraction of portfolio NAV in any single symbol. Applied per-asset before exposure scaling.</td>
+                <td>0.25</td>
+                <td>Maximum fraction of portfolio NAV in any single symbol.</td>
             </tr>
             <tr>
-                <td><code>max_gross_exposure</code></td>
+                <td><code>min_weight_per_asset</code></td>
                 <td>float</td>
-                <td>1.00</td>
-                <td>Maximum sum of absolute weights. Values below 1.0 enforce a cash buffer at the portfolio level.</td>
+                <td>0.0</td>
+                <td>Minimum weight floor per asset (0 = long-only is fine).</td>
+            </tr>
+            <tr>
+                <td><code>max_total_exposure</code></td>
+                <td>float</td>
+                <td>1.0</td>
+                <td>Maximum sum of absolute weights. &lt;1.0 enforces a cash buffer at portfolio level.</td>
             </tr>
             <tr>
                 <td><code>min_cash_weight</code></td>
                 <td>float</td>
-                <td>0.00</td>
-                <td>Minimum fraction kept as stablecoin cash. Prevents the portfolio from being fully invested.</td>
+                <td>0.05</td>
+                <td>Minimum fraction kept as stablecoin cash. Only long weights are scaled down.</td>
             </tr>
             <tr>
-                <td><code>max_turnover</code></td>
+                <td><code>max_turnover_per_rebalance</code></td>
                 <td>float</td>
-                <td>0.20</td>
-                <td>Maximum portfolio turnover per cycle (sum of absolute weight changes). Limits transaction costs.</td>
+                <td>0.5</td>
+                <td>Maximum portfolio turnover per cycle (sum of absolute weight changes).</td>
             </tr>
             <tr>
-                <td><code>min_rebalance_interval_s</code></td>
+                <td><code>max_leverage</code></td>
                 <td>float</td>
-                <td>60.0</td>
-                <td>Rate limiter — minimum seconds between consecutive rebalance cycles for this strategy.</td>
+                <td>1.0</td>
+                <td>Maximum gross leverage (1.0 = spot-only, unlevered).</td>
             </tr>
             <tr>
-                <td><code>whitelist</code></td>
-                <td>Set[str]</td>
-                <td>{"BTCUSDT", "ETHUSDT"}</td>
-                <td>If non-empty, only symbols in this set may receive non-zero weight. Empty set = all allowed.</td>
+                <td><code>max_short_weight</code></td>
+                <td>float</td>
+                <td>0.0</td>
+                <td>Maximum short weight per asset (0 = no shorts; long-only spot).</td>
             </tr>
             <tr>
-                <td><code>blacklist</code></td>
-                <td>Set[str]</td>
-                <td>{"LUNAUSTC"}</td>
-                <td>Symbols explicitly forbidden from receiving any allocation, regardless of strategy output.</td>
+                <td><code>min_order_notional</code></td>
+                <td>float</td>
+                <td>10.0</td>
+                <td>Skip orders below this USD notional threshold.</td>
+            </tr>
+            <tr>
+                <td><code>max_order_notional</code></td>
+                <td>float</td>
+                <td>100,000</td>
+                <td>Cap single-order notional size.</td>
+            </tr>
+            <tr>
+                <td><code>min_weight_delta</code></td>
+                <td>float</td>
+                <td>0.005</td>
+                <td>Prune rebalance legs with |target_w - current_w| below this threshold.</td>
+            </tr>
+            <tr>
+                <td><code>min_rebalance_interval_ms</code></td>
+                <td>int</td>
+                <td>60,000</td>
+                <td>Rate limiter — minimum ms between consecutive rebalance cycles.</td>
             </tr>
         </tbody>
     </table>
 
     <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s10">10. Database &amp; Persistence <span>Peewee ORM snapshots</span></h2>
+    <h2 id="s13">13. Two-Tier Config System <span class="badge-new">NEW</span></h2>
     <p class="desc">
-        Portfolio state is persisted asynchronously to a SQLite (or Postgres) database via Peewee ORM.
+        Configuration is now split into two tiers. <code>trading_config.yaml</code> holds system-level
+        settings shared across all strategies. Individual <code>strategies/strategy_NNN_*.yaml</code> files
+        hold per-strategy settings. Both are loaded by <code>load_app_config()</code> and merged into a single
+        <code>AppConfig</code> object. Strategy YAML files also accept placeholder substitution (e.g.
+        <code>{strategy_name}</code> in <code>log_dir</code>).
+    </p>
+    <div class="diagram-card">
+        <div class="mermaid">
+flowchart TB
+    subgraph TIER1["Tier 1: trading_config.yaml (system-level)"]
+        direction TB
+        T1A["version_name\nlogging.enable_discord"]
+        T1B["spot.venues / futures.venues"]
+        T1C["portfolio:\n  max_history: 10000\n  snapshot_interval_s: 300"]
+        T1D["execution:\n  default_order_type: MARKET\n  default_venue: Binance"]
+        T1E["venue_configs:\n  spot_binance: {risk: {}, execution: {}, portfolio: {}}\n  perpetual_binance: {...}\n  spot_aster: {...}"]
+        T1F["global risk: (defaults only,\n  per-strategy overrides in YAML)"]
+    end
+
+    subgraph TIER2["Tier 2: strategies/strategy_NNN_*.yaml (per-strategy)"]
+        direction TB
+        T2A["strategy_id: 0\nstrategy_name: event_driven_...\nclass: elysian_core.strategy...EventDrivenStrategy\nasset_type: Spot / venue: Binance"]
+        T2B["symbols: [SUIUSDT, BTCUSDT, ...]\n(empty → load from config.json for venue)"]
+        T2C["risk:\n  max_weight_per_asset: 0.25\n  min_cash_weight: 0.05\n  ... (full RiskConfig)"]
+        T2D["execution_overrides: {}\nportfolio_overrides: {}"]
+        T2E["params:\n  rebalance_interval_s: 60\n  (arbitrary strategy params)"]
+    end
+
+    subgraph JSON["config.json (symbol lists)"]
+        direction TB
+        J1["venues.binance.spot: [SUIUSDT, ...]"]
+        J2["venues.aster.spot: [ASTERUSDT, ...]"]
+        J3["tokens.spot / tokens.futures"]
+    end
+
+    subgraph ENV[".env (secrets)"]
+        E1["BINANCE_API_KEY_N\nBINANCE_API_SECRET_N\n(N = strategy_id)"]
+        E2["POSTGRES_* / REDIS_*"]
+    end
+
+    subgraph MERGE["load_app_config() → AppConfig"]
+        direction TB
+        M1["AppConfig.risk (global RiskConfig)"]
+        M2["AppConfig.venue_configs (VenueConfig per pair)"]
+        M3["AppConfig.strategies: Dict[int, StrategyConfig]"]
+        M4["AppConfig.portfolio / execution / symbols / secrets"]
+        M5["StrategyConfig.sub_account_api_key\n← os.getenv(VENUE_API_KEY_strategyid)"]
+        M6["effective_risk_for(strategy_id=N)\n→ StrategyConfig.risk_config\n(built from strategy YAML risk section)"]
+    end
+
+    subgraph PRIORITY["Risk Config Priority (highest wins)"]
+        direction LR
+        P1["strategy YAML risk:\n(strategy_NNN.yaml)"]
+        P2["venue_configs[spot_binance].risk"]
+        P3["global risk: (trading_config.yaml)"]
+        P1 -->|"overrides"| P2 -->|"overrides"| P3
+    end
+
+    TIER1 --> MERGE
+    TIER2 --> MERGE
+    JSON --> MERGE
+    ENV --> MERGE
+    MERGE --> PRIORITY
+
+    style TIER1 fill:#fef2f2,stroke:#ef4444,color:#991b1b
+    style TIER2 fill:#f0fdf4,stroke:#16a34a,color:#166534
+    style JSON fill:#fefce8,stroke:#ca8a04,color:#713f12
+    style ENV fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
+    style MERGE fill:#eff6ff,stroke:#2563eb,color:#1e40af
+    style PRIORITY fill:#f1f5f9,stroke:#94a3b8,color:#1a1a2e
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <h2 id="s14">14. Database &amp; Persistence <span>Peewee ORM snapshots</span></h2>
+    <p class="desc">
+        Portfolio state is persisted asynchronously to PostgreSQL via Peewee ORM.
         Both per-strategy <code>ShadowBook</code> snapshots and aggregate <code>Portfolio</code> snapshots
-        are written. The <code>PeriodicTask</code> ensures at most 60 seconds of state can be lost on crash;
-        manual calls to <code>save_snapshot()</code> are also made at shutdown.
+        are written. The <code>PeriodicTask</code> ensures at most <code>snapshot_interval_s</code> of
+        state can be lost on crash; trade records are written by <code>ShadowBook._async_record_trade()</code>
+        as a fire-and-forget <code>asyncio.create_task()</code> after each terminal order event.
     </p>
     <div class="diagram-card">
         <div class="mermaid">
@@ -1024,7 +1501,8 @@ flowchart TB
         direction LR
         SBS2["ShadowBook.save_snapshot()\n(per-strategy)"]
         PTS2["Portfolio.save_snapshot()\n(aggregate across all strategies)"]
-        PT2["PeriodicTask\nevery 60 seconds"]
+        PT2["PeriodicTask\ninterval: snapshot_interval_s\n(from trading_config.yaml portfolio section)"]
+        TRD["ShadowBook._async_record_trade()\nasyncio.create_task() on terminal order\nskips orders with 0 filled_qty"]
         PT2 -->|"triggers"| SBS2
         PT2 -->|"triggers"| PTS2
     end
@@ -1032,7 +1510,7 @@ flowchart TB
     subgraph MODEL["PortfolioSnapshot (Peewee Model)"]
         direction TB
         F1["strategy_id : IntegerField"]
-        F2["venue : CharField"]
+        F2["venue : EnumField(Venue)"]
         F3["nav : FloatField"]
         F4["cash : FloatField"]
         F5["unrealized_pnl : FloatField"]
@@ -1041,35 +1519,48 @@ flowchart TB
         F8["peak_equity : FloatField"]
         F9["max_drawdown : FloatField"]
         F10["current_drawdown : FloatField"]
-        F11["gross_exposure : FloatField"]
-        F12["net_exposure : FloatField"]
-        F13["positions : JSONField  (Dict[str, PositionDict])"]
-        F14["weights : JSONField  (Dict[str, float])"]
-        F15["mark_prices : JSONField  (Dict[str, float])"]
-        F16["num_fills : IntegerField"]
-        F17["timestamp : DateTimeField  (auto_now_add)"]
+        F11["gross_exposure / net_exposure : FloatField"]
+        F12["positions : JSONField"]
+        F13["weights : JSONField"]
+        F14["mark_prices : JSONField"]
+        F15["num_fills : IntegerField"]
+        F16["datetime : DateTimeField (UTC+8)"]
     end
 
-    subgraph DB["Database"]
-        direction LR
-        SQLITE["SQLite\n(default dev)"]
-        PG["PostgreSQL\n(production)"]
+    subgraph TRADE_MODEL["CexTrade (Peewee Model)"]
+        direction TB
+        CT1["strategy_id / strategy_name"]
+        CT2["venue / asset_type / symbol"]
+        CT3["side / base_amount / quote_amount / price"]
+        CT4["commission_asset / total_commission"]
+        CT5["order_id / status / order_type"]
+        CT6["datetime (UTC+8)"]
+    end
+
+    subgraph DB["PostgreSQL (elysian_postgres)\nReconnectPooledPostgresqlDatabase\nmax_connections=20\nstale_timeout=300\nsynchronous_commit=off"]
+        SQLITE["portfolio_snapshots\ncex_trades\naccount_snapshots"]
     end
 
     SBS2 -->|"PortfolioSnapshot.create(**data)"| MODEL
     PTS2 -->|"PortfolioSnapshot.create(**data)"| MODEL
+    TRD -->|"CexTrade.create(**data)"| TRADE_MODEL
     MODEL -->|"Peewee ORM"| DB
+    TRADE_MODEL -->|"Peewee ORM"| DB
 
     style SOURCES fill:#fefce8,stroke:#ca8a04,color:#713f12
     style MODEL fill:#eff6ff,stroke:#2563eb,color:#1e40af
+    style TRADE_MODEL fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
     style DB fill:#f0fdf4,stroke:#16a34a,color:#166534
         </div>
     </div>
-    <p class="desc">
-        The <code>positions</code>, <code>weights</code>, and <code>mark_prices</code> columns are stored as JSON
-        blobs, keeping the schema flat and portable. This allows historical snapshots to be replayed offline for
-        debugging, backtesting reconciliation, or drawdown analysis without requiring any live exchange connectivity.
-    </p>
+    <div class="note-box">
+        <strong>synchronous_commit=off on PostgreSQL</strong>
+        The <code>docker/postgres/init.sql</code> sets <code>synchronous_commit = 'off'</code> for the
+        Elysian database. This dramatically increases write throughput for the high-frequency snapshot
+        and trade recording inserts. The trade-off is that up to one WAL flush interval (~200ms) of
+        writes may be lost on a hard crash. Since ShadowBook is the authoritative in-memory state and
+        DB writes are for audit/analytics only, this is acceptable.
+    </div>
 
 </div><!-- /container -->
 </body>
