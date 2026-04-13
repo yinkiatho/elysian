@@ -16,6 +16,8 @@ from binance.exceptions import BinanceAPIException
 
 from elysian_core.connectors.base import AbstractDataFeed
 from elysian_core.core.market_data import Kline, OrderBook, BinanceOrderBook
+from elysian_core.core.events import KlineEvent, OrderBookUpdateEvent
+from elysian_core.core.enums import Venue
 
 from elysian_core.connectors.base import AbstractClientManager, KlineClientManager, OrderBookClientManager
 import elysian_core.utils.logger as log
@@ -38,6 +40,7 @@ class BinanceFuturesKlineClientManager(KlineClientManager):
         self._running = False
         self._reader_task: Optional[asyncio.Task] = None
         self._worker_tasks: List[asyncio.Task] = []
+        self._event_bus = None
 
 
     async def _create_client(self, retries: int = 5) -> AsyncClient:
@@ -154,6 +157,14 @@ class BinanceFuturesKlineClientManager(KlineClientManager):
                                 feed._vol = statistics.stdev(returns) * math.sqrt(12)
                                 self.logger.info(f"[{symbol}] Futures Volatility: {feed._vol * 1e4:.2f} bps (60-candle window)")
 
+                            if self._event_bus is not None:
+                                await self._event_bus.publish(KlineEvent(
+                                    symbol=symbol,
+                                    venue=Venue.BINANCE,
+                                    kline=kline,
+                                    timestamp=int(time.time() * 1000),
+                                ))
+
                 self._queue.task_done()
 
             except Exception as e:
@@ -197,6 +208,7 @@ class BinanceFuturesOrderBookClientManager(OrderBookClientManager):
         self._running = False
         self._reader_task: Optional[asyncio.Task] = None
         self._worker_tasks: List[asyncio.Task] = []
+        self._event_bus = None
 
     async def _create_client(self, retries: int = 5) -> AsyncClient:
         for i in range(retries):
@@ -300,6 +312,14 @@ class BinanceFuturesOrderBookClientManager(OrderBookClientManager):
 
                         if feed.save_data:
                             asyncio.create_task(feed._append_to_df(feed._data))
+
+                        if self._event_bus is not None and feed._data is not None:
+                            await self._event_bus.publish(OrderBookUpdateEvent(
+                                symbol=symbol,
+                                venue=Venue.BINANCE,
+                                orderbook=feed._data,
+                                timestamp=int(time.time() * 1000),
+                            ))
 
                 self._queue.task_done()
 

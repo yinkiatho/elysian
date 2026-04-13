@@ -445,11 +445,11 @@ class SpotExchangeConnector(ABC):
     def last_price(self, symbol: str) -> Optional[float]:
         """Best available mid-price: OB mid → last kline close → None."""
         ob = self.ob_feed(symbol)
-        if ob and ob.data:
-            return ob.data.mid_price
+        if ob is not None and ob.mid_price > 0:
+            return ob.mid_price
         kf = self.kline_feed(symbol)
-        if kf and kf.latest_close:
-            return kf.latest_close
+        if kf is not None and kf.close and kf.close > 0:
+            return kf.close
         return None
 
     # ── Shared order utilities ────────────────────────────────────────────────
@@ -779,11 +779,11 @@ class FuturesExchangeConnector(ABC):
     def last_price(self, symbol: str) -> Optional[float]:
         """Best available mid-price: OB mid → last kline close → None."""
         ob = self.ob_feed(symbol)
-        if ob and ob.data:
-            return ob.data.mid_price
+        if ob is not None and ob.mid_price > 0:
+            return ob.mid_price
         kf = self.kline_feed(symbol)
-        if kf and kf.latest_close:
-            return kf.latest_close
+        if kf is not None and kf.close and kf.close > 0:
+            return kf.close
         return None
 
     def base_asset_to_symbol(self, asset: str) -> Optional[str]:

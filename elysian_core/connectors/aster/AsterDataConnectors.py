@@ -11,6 +11,8 @@ import websockets
 
 from elysian_core.connectors.base import AbstractDataFeed, KlineClientManager, OrderBookClientManager
 from elysian_core.core.market_data import Kline, OrderBook, AsterOrderBook
+from elysian_core.core.events import KlineEvent, OrderBookUpdateEvent
+from elysian_core.core.enums import Venue
 import elysian_core.utils.logger as log
 from elysian_core.utils.async_helpers import cancel_tasks
 
@@ -158,6 +160,14 @@ class AsterKlineClientManager(KlineClientManager):
                                     for i in range(1, len(feed._historical))
                                 ]
                                 feed._vol = statistics.stdev(returns) * math.sqrt(20)
+
+                            if self._event_bus is not None:
+                                await self._event_bus.publish(KlineEvent(
+                                    symbol=symbol,
+                                    venue=Venue.ASTER,
+                                    kline=kline,
+                                    timestamp=int(time.time() * 1000),
+                                ))
 
                 self._queue.task_done()
 
@@ -317,6 +327,14 @@ class AsterOrderBookClientManager(OrderBookClientManager):
                         feed._data = await feed._process_depth_event(data)
                         if feed.save_data:
                             asyncio.create_task(feed._append_to_df(feed._data))
+
+                        if self._event_bus is not None and feed._data is not None:
+                            await self._event_bus.publish(OrderBookUpdateEvent(
+                                symbol=symbol,
+                                venue=Venue.ASTER,
+                                orderbook=feed._data,
+                                timestamp=int(time.time() * 1000),
+                            ))
 
                 self._queue.task_done()
 

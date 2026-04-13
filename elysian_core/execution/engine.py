@@ -326,6 +326,5 @@ class ExecutionEngine:
             return None
 
     def _get_mark_prices(self, venue: Venue) -> Dict[str, float]:
-        """Snapshot current mid prices from feeds"""
-        
-        return self._portfolio.mark_prices.get(venue, {})
+        """Snapshot current mark prices for a venue (updated via _on_kline)."""
+        return self._mark_prices.get(venue, {})
