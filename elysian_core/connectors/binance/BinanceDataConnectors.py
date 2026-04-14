@@ -69,7 +69,7 @@ class BinanceKlineClientManager(KlineClientManager):
             return
 
         self._client = await self._create_client()
-        self._manager = BinanceSocketManager(self._client, max_queue_size=10000)
+        self._manager = BinanceSocketManager(self._client, max_queue_size=1000000)
         self._running = True
         self.logger.info("BinanceKlineClientManager: Started shared kline client")
 
@@ -234,7 +234,7 @@ class BinanceOrderBookClientManager(OrderBookClientManager):
             return
 
         self._client = await self._create_client()
-        self._manager = BinanceSocketManager(self._client, max_queue_size=10000)
+        self._manager = BinanceSocketManager(self._client, max_queue_size=1000000)
         self._running = True
         self.logger.info("BinanceOrderBookClientManager: Started shared orderbook client")
 

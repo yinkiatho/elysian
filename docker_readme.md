@@ -552,3 +552,130 @@ for k, v in os.environ.items():
         print(k, '=', v[:8] + '...' if v else '(empty)')
 "
 ```
+
+## 16. Docker Helpers — Command Reference
+
+A quick‑reference cheatsheet for everyday Docker operations. All commands assume you are in the project root (where `docker-compose.yml` lives).
+
+### 🔨 Build & Rebuild
+
+| Command | Use case |
+|---------|----------|
+| `docker compose build` | Build or rebuild images after code changes (fast, uses cache). |
+| `docker compose build --no-cache` | Force a full rebuild (ignore cache) – useful when pip dependencies change. |
+| `docker compose build --build-arg APP_ENV=development` | Build a dev image with live‑reload source mount. |
+| `docker compose build --parallel` | Build multiple services in parallel (faster). |
+
+### 🚀 Start Services
+
+| Command | Use case |
+|---------|----------|
+| `docker compose up -d` | Start all services in the background (detached). |
+| `docker compose up -d elysian_strategy_0` | Start only strategy 0 (plus its dependencies). |
+| `docker compose --profile all up -d` | Start everything – Postgres, Redis, market data, both strategies. |
+| `docker compose --profile dev up` | Start development container with live source mount (foreground logs). |
+| `docker compose up --scale elysian_strategy_0=3` | **Not supported** – Elysian expects one container per strategy. |
+
+### 🛑 Stop & Clean
+
+| Command | Use case |
+|---------|----------|
+| `docker compose down` | Stop all containers (keeps volumes – data persists). |
+| `docker compose down -v` | Stop **and delete** volumes (erases Postgres + Redis data). |
+| `docker compose down --remove-orphans` | Remove containers not defined in the current compose file. |
+| `docker compose stop elysian_strategy_0` | Pause only strategy 0 (useful for maintenance). |
+| `docker compose restart elysian_market_data` | Restart a service without stopping the whole stack. |
+
+### 📜 View Logs
+
+| Command | Use case |
+|---------|----------|
+| `docker compose logs -f` | Follow (tail) logs from all services. |
+| `docker compose logs -f elysian_strategy_0` | Follow logs of a specific service. |
+| `docker compose logs --tail=200 elysian_market_data` | Show last 200 lines of market data logs. |
+| `docker compose logs -t elysian_redis` | Show logs with timestamps. |
+| `docker compose logs elysian_strategy_0 2>&1 \| grep -i error` | Filter logs for errors (Linux/Mac/WSL). |
+
+### 🐚 Execute Commands Inside Containers
+
+| Command | Use case |
+|---------|----------|
+| `docker compose exec elysian_strategy_0 bash` | Open an interactive bash shell inside the running container. |
+| `docker compose exec postgres psql -U elysian -d elysian` | Connect to Postgres directly. |
+| `docker compose exec redis redis-cli` | Open Redis CLI. |
+| `docker compose exec elysian_strategy_0 python -c "import os; print(os.environ['BINANCE_API_KEY_0'])"` | Run a one‑liner Python command (e.g., check env vars). |
+| `docker compose exec -e DEBUG=1 elysian_strategy_0 python run_strategy.py` | Pass an extra environment variable for one run. |
+
+### 🧪 Testing & Debugging
+
+| Command | Use case |
+|---------|----------|
+| `docker compose run --rm elysian_strategy_0 python -m pytest tests/ -v` | Run the test suite inside a throwaway container. |
+| `docker compose run --rm --no-deps elysian_strategy_0 python -m pytest tests/test_order_fsm.py` | Test a single file, skip dependencies (faster). |
+| `docker compose exec elysian_strategy_0 python -m pdb /app/elysian_core/run_strategy.py` | Start the Python debugger inside the running container. |
+| `docker compose logs elysian_market_data --tail=50 \| grep -E "ERROR\|WARNING"` | Quick error/warning scan. |
+
+### 📊 Inspect State
+
+| Command | Use case |
+|---------|----------|
+| `docker compose ps` | Show status of all services (Up, Exit, Health). |
+| `docker compose top` | Display running processes inside each container. |
+| `docker compose events` | Stream real‑time events (start, stop, health changes). |
+| `docker inspect elysian_strategy_0` | Low‑level container details (IP, mounts, env). |
+| `docker compose exec redis redis-cli PUBSUB channels` | List active Redis pub/sub channels. |
+| `docker compose exec redis redis-cli MONITOR` | Watch every Redis command in real time (press Ctrl+C to stop). |
+
+### 💾 Volume & Data Management
+
+| Command | Use case |
+|---------|----------|
+| `docker volume ls \| grep elysian` | List Elysian volumes. |
+| `docker volume inspect elysian_postgres_data` | See where the volume is stored on the host. |
+| `docker compose exec postgres pg_dump -U elysian elysian > backup.sql` | Backup database to a local file. |
+| `cat backup.sql \| docker compose exec -T postgres psql -U elysian -d elysian` | Restore database from backup. |
+| `docker compose down -v && docker compose up -d` | Hard reset – erase all data and start fresh. |
+
+### 🧹 System Cleanup
+
+| Command | Use case |
+|---------|----------|
+| `docker system prune -f` | Remove unused containers, networks, images (keep volumes). |
+| `docker system prune -a --volumes` | **Dangerous** – remove everything unused, including all volumes. |
+| `docker image prune -a -f` | Delete all images not referenced by any container. |
+| `docker builder prune -f` | Clean build cache (free disk space). |
+
+### 🏃 Shortcuts Using Makefile (if you have one)
+
+If your project includes a `Makefile` with the targets described earlier, you can use:
+
+| Make target | Equivalent docker compose command |
+|-------------|-----------------------------------|
+| `make up` | `docker compose up -d postgres redis` |
+| `make all` | `docker compose --profile all up -d` |
+| `make strategy-0` | `docker compose --profile strategy_0 up -d` |
+| `make logs` | `docker compose logs -f` |
+| `make shell` | `docker compose exec elysian_strategy_0 bash` |
+| `make db-shell` | `docker compose exec postgres psql -U elysian -d elysian` |
+| `make test` | `docker compose run --rm elysian_strategy_0 python -m pytest tests/` |
+| `make clean` | `docker compose down -v --remove-orphans` |
+
+### ⚠️ Common Pitfalls
+
+- **`.env` not loaded** – Ensure the file exists and is in the same directory as `docker-compose.yml`. Use `docker compose config` to see the resolved environment.
+- **Port conflicts** – If you see `port already allocated`, change the external port in `.env` (e.g., `POSTGRES_EXTERNAL_PORT=5433`).
+- **“No such service”** – You must include the `--profile` flag for services that have profiles (e.g., `elysian_market_data`). Use `--profile all` or `--profile strategy_0`.
+- **Changes not reflected** – After editing Python code, rebuild the image: `docker compose build elysian_strategy_0 && docker compose up -d`.
+- **Container keeps restarting** – Check logs with `docker compose logs <service>`. Common cause: missing API keys or database connection failure.
+
+### 📚 Pro tip: create shell aliases
+
+Add these to your `~/.bashrc` or `~/.zshrc` for even faster access:
+
+```bash
+alias dc='docker compose'
+alias dcu='docker compose up -d'
+alias dcd='docker compose down'
+alias dcl='docker compose logs -f'
+alias dce='docker compose exec'
+alias dcb='docker compose build'
