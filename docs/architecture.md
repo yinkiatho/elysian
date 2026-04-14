@@ -2,12 +2,14 @@
 
 ## Overview
 
-Elysian is an event-driven, multi-venue quantitative trading system built on a single `asyncio` event loop. It implements a **6-stage pipeline** from raw market data to executed orders, with risk management and portfolio tracking throughout.
+Elysian is an event-driven, multi-venue quantitative trading system built on a single `asyncio` event loop per process. It implements a **6-stage pipeline** from raw market data to executed orders, with risk management and portfolio tracking throughout.
+
+In production it runs as a set of Docker containers, with market data published over Redis pub/sub and per-strategy containers consuming it independently.
 
 ```
-Stage 1          Stage 2           Stage 3          Stage 4          Stage 5          Stage 6
-Market Data  →  Feature Compute  →  Strategy/Alpha  →  Risk Mgmt  →  Execution  →  Exchange
-(WebSocket)     (Feeds/Vol)         (Weights)          (Optimizer)    (Engine)       (REST/WS)
+Stage 1          Stage 2              Stage 3          Stage 4          Stage 5          Stage 6
+Market Data  →  Redis EventBus    →  Strategy/Alpha  →  Risk Mgmt  →  Execution  →  Exchange
+(WebSocket)     (pub/sub transport)  (Weights)          (Optimizer)    (Engine)       (REST/WS)
 ```
 
 ---
@@ -17,157 +19,215 @@ Market Data  →  Feature Compute  →  Strategy/Alpha  →  Risk Mgmt  →  Exe
 ```
 elysian_core/
 ├── config/
-│   ├── trading_config.yaml  # System-level config: venues, DB, networking, risk defaults
-│   ├── strategies/          # Per-strategy config overrides
-│   │   └── strategy_NNN.yaml  # risk_overrides, execution_overrides, portfolio_overrides
-│   └── config.json          # Trading pairs per venue
+│   ├── trading_config.yaml       # System-level config: venues, risk defaults, execution, portfolio
+│   ├── strategies/               # Per-strategy config overrides
+│   │   └── strategy_NNN.yaml     # risk, execution, portfolio overrides + strategy-specific params
+│   └── config.json               # Trading pairs per venue
 │
-├── connectors/              # Stage 1 & 6: Exchange I/O
-│   ├── base.py              # ABC: SpotExchangeConnector, FuturesExchangeConnector,
-│   │                        #       AbstractDataFeed, AbstractKlineFeed,
-│   │                        #       AbstractClientManager
-│   ├── BinanceExchange.py         # BinanceSpotExchange (REST + user data WS)
-│   ├── BinanceDataConnectors.py   # BinanceKlineFeed, BinanceOrderBookFeed,
-│   │                              # BinanceKlineClientManager, BinanceOrderBookClientManager
-│   ├── BinanceFuturesExchange.py
-│   ├── BinanceFuturesDataConnectors.py
-│   ├── AsterExchange.py
-│   ├── AsterDataConnectors.py
-│   ├── AsterPerpExchange.py
-│   └── AsterPerpDataConnectors.py
+├── connectors/                   # Stages 1 & 6: Exchange I/O
+│   ├── base.py                   # ABCs: SpotExchangeConnector, FuturesExchangeConnector,
+│   │                             #       AbstractDataFeed, KlineClientManager,
+│   │                             #       OrderBookClientManager, AbstractClientManager
+│   ├── binance/
+│   │   ├── BinanceExchange.py          # BinanceSpotExchange (REST + user data WS)
+│   │   ├── BinanceDataConnectors.py    # BinanceKlineFeed, BinanceOrderBookFeed,
+│   │   │                               # BinanceKlineClientManager, BinanceOrderBookClientManager,
+│   │   │                               # BinanceUserDataClientManager
+│   │   ├── BinanceFuturesExchange.py
+│   │   └── BinanceFuturesDataConnectors.py
+│   └── aster/
+│       ├── AsterExchange.py
+│       ├── AsterDataConnectors.py
+│       ├── AsterPerpDataConnectors.py
 │
-├── core/                    # Shared domain model
-│   ├── enums.py             # Side, Venue, OrderType, OrderStatus, ...
-│   ├── events.py            # EventType enum + frozen event dataclasses
-│   ├── event_bus.py         # In-process async pub/sub
-│   ├── market_data.py       # Kline (OHLCV), OrderBook
-│   ├── order.py             # Order, LimitOrder
-│   ├── position.py          # Single-asset Position tracker
-│   ├── portfolio.py         # Portfolio: positions, cash, weights, risk, snapshots
-│   ├── shadow_book.py       # ShadowBook: per-strategy virtual position ledger
-│   └── signals.py           # Pipeline contracts: TargetWeights, ValidatedWeights,
-│                            #                     OrderIntent, RebalanceResult
+├── core/                         # Shared domain model
+│   ├── enums.py                  # Side, Venue, OrderType, OrderStatus, RebalanceState, …
+│   ├── events.py                 # EventType enum + frozen event dataclasses
+│   ├── event_bus.py              # In-process async pub/sub (used for private/account events)
+│   ├── market_data.py            # Kline (OHLCV), OrderBook (SortedDict-backed)
+│   ├── order.py                  # Order, ActiveOrder, ActiveLimitOrder
+│   ├── order_fsm.py              # Order lifecycle FSM (warn-mode)
+│   ├── position.py               # Single-asset Position tracker
+│   ├── portfolio.py              # Portfolio: aggregate NAV across ShadowBooks + Fill record
+│   ├── shadow_book.py            # ShadowBook: per-strategy authoritative position ledger
+│   ├── fsm.py                    # BaseFSM + PeriodicTask
+│   ├── rebalance_fsm.py          # RebalanceFSM: compute→validate→execute→cooldown
+│   ├── signals.py                # Pipeline contracts: TargetWeights, ValidatedWeights,
+│   │                             #                     OrderIntent, RebalanceResult
+│   └── constants.py              # STABLECOINS, FILL_HISTORY_MAXLEN, QTY_EPSILON
 │
-├── risk/                    # Stage 4: Risk management
-│   ├── risk_config.py       # RiskConfig dataclass (mutable for runtime tuning)
-│   └── optimizer.py         # PortfolioOptimizer: constraint projection
+├── risk/                         # Stage 4: Risk management
+│   ├── risk_config.py            # RiskConfig dataclass (mutable for runtime tuning)
+│   └── optimizer.py              # PortfolioOptimizer: constraint projection pipeline
 │
-├── execution/               # Stage 5: Order generation & submission
-│   └── engine.py            # ExecutionEngine: weights → deltas → orders
+├── execution/                    # Stage 5: Order generation & submission
+│   └── engine.py                 # ExecutionEngine: weights → deltas → orders
 │
-├── strategy/                # Stage 3: Alpha generation
-│   ├── base_strategy.py     # SpotStrategy base class (event hooks + submit_weights)
-│   ├── example_weight_strategy.py  # EqualWeightStrategy reference impl
-│   └── test_strategy.py     # TestPrintStrategy (debug logging)
+├── strategy/                     # Stage 3: Alpha generation
+│   ├── base_strategy.py          # SpotStrategy base class
+│   ├── example_weight_strategy_v2_event_driven.py  # EventDrivenStrategy reference impl
+│   └── example_strategy_test_print.py              # PrintEventsStrategy (debug logging)
 │
-├── db/                      # Persistence
-│   ├── database.py          # Peewee ORM + ReconnectPooledPostgresqlDatabase
-│   └── models.py            # CexTrade, DexTrade, PortfolioSnapshot, AccountSnapshots
+├── transport/                    # Redis pub/sub transport layer
+│   ├── redis_event_bus.py        # RedisEventBusPublisher + RedisEventBusSubscriber
+│   └── event_serializer.py       # JSON codec for KlineEvent / OrderBookUpdateEvent
 │
-├── market_maker/            # Market-making logic (independent module)
-├── oms/                     # Order management system
+├── services/                     # Standalone services
+│   └── market_data_service.py    # MarketDataService: owns all WebSocket feeds
+│
+├── db/                           # Persistence
+│   ├── database.py               # Peewee ORM + ReconnectPooledPostgresqlDatabase
+│   └── models.py                 # CexTrade, DexTrade, PortfolioSnapshot, AccountSnapshots
+│
 ├── utils/
-│   ├── logger.py            # Custom logger setup
-│   └── utils.py             # config_to_args(), load_config()
+│   ├── logger.py                 # Custom logger (coloured terminal + file + Discord)
+│   ├── utils.py                  # config_to_args(), load_config(), DataFrameIterator
+│   └── async_helpers.py          # cancel_tasks() helper
 │
-└── run_strategy.py          # StrategyRunner: main entry point, wires everything
+├── run_strategy.py               # StrategyRunner: Redis-transport entry point (one per container)
+└── run_market_data.py            # MarketDataService entry point
 ```
 
 ---
 
-## 2. The 6-Stage Pipeline
+## 2. Deployment Architecture
+
+Elysian is designed for containerised deployment. The architecture separates market data ingestion from strategy execution:
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  elysian_market_data container                                    │
+│                                                                   │
+│  MarketDataService                                                │
+│  ├── BinanceKlineClientManager   → WebSocket → Binance           │
+│  ├── BinanceOrderBookClientManager                                │
+│  ├── AsterKlineClientManager     → WebSocket → Aster             │
+│  └── AsterOrderBookClientManager                                  │
+│                    │                                              │
+│                    ▼ RedisEventBusPublisher                       │
+│            elysian:md:{venue}:{asset_type}:kline:{SYMBOL}        │
+│            elysian:md:{venue}:{asset_type}:orderbook:{SYMBOL}    │
+└──────────────────────────────────────────────────────────────────┘
+                      │
+              Redis pub/sub
+                      │
+┌─────────────────────▼────────────────────────────────────────────┐
+│  elysian_strategy_0 container                                     │
+│                                                                   │
+│  RedisEventBusSubscriber                                          │
+│  ├── shared_event_bus (market data from Redis)                    │
+│  ├── private_event_bus (in-process: account events)               │
+│  ├── BinanceSpotExchange (sub-account REST + user data WS)        │
+│  ├── ShadowBook (strategy-0 position ledger)                      │
+│  ├── PortfolioOptimizer (risk constraint projection)              │
+│  ├── ExecutionEngine (weight → order)                             │
+│  └── Strategy (EventDrivenStrategy)                               │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+This separation means:
+- **One set of WebSocket connections** serves all strategies — no duplicate subscriptions
+- **Crash isolation** — a strategy container crashing does not affect the market data feed or other strategies
+- **Independent restarts** — `docker compose restart elysian_strategy_1`
+- **Independent scaling** — strategies can run on separate hosts
+
+---
+
+## 3. The 6-Stage Pipeline
 
 ### Stage 1 — Market Data Ingestion
 
-**Files:** `connectors/BinanceDataConnectors.py`, `connectors/base.py`
+**Files:** `connectors/binance/BinanceDataConnectors.py`, `connectors/aster/AsterDataConnectors.py`, `connectors/base.py`
 
-Raw market data arrives over WebSocket connections using a **multiplex architecture** — a single TCP connection carries data for all tracked symbols. Each venue has two client managers:
+Raw market data arrives over WebSocket using a **multiplex architecture** — one TCP connection per venue carries data for all tracked symbols. Each venue has two client managers:
 
 | Manager | Feed Type | Update Rate | Event Published |
 |---------|-----------|-------------|-----------------|
 | `BinanceKlineClientManager` | Kline (OHLCV) | 1s candles | `KlineEvent` |
 | `BinanceOrderBookClientManager` | Depth (L2) | 100ms | `OrderBookUpdateEvent` |
+| `AsterKlineClientManager` | Kline | 1s | `KlineEvent` |
+| `AsterOrderBookClientManager` | Depth | 100ms | `OrderBookUpdateEvent` |
 
-**Multiplex Design:**
+**Worker pattern:**
 ```
-Single WebSocket → asyncio.Queue (10k max) → 4 async workers
+Single WebSocket → asyncio.Queue (bounded) → N async workers
                                                ├─ Parse message
-                                               ├─ Mutate feed state
-                                               └─ EventBus.publish(TypedEvent)
+                                               ├─ Mutate feed state (sync)
+                                               └─ await event_bus.publish(event) (async)
 ```
 
-The `BinanceSpotExchange` also runs a **user data stream** that emits:
+State mutation always precedes event publishing. This means strategy hooks see consistent feed state when they receive an event.
+
+`BinanceSpotExchange` also runs a **user data stream** via the new Binance WebSocket API (`wss://ws-api.binance.com`) that emits:
 - `OrderUpdateEvent` — order fills, cancels, partial fills
-- `BalanceUpdateEvent` — account balance changes (delta-based)
+- `BalanceUpdateEvent` — account balance changes
 
-### Stage 2 — Feature Computation
+### Stage 2 — EventBus (Transport)
 
-**Files:** `connectors/base.py` (AbstractDataFeed, AbstractKlineFeed)
+In production, the EventBus between MarketDataService and strategy containers is Redis pub/sub (`RedisEventBusPublisher` / `RedisEventBusSubscriber`). Within a strategy container, account events travel over an in-process `EventBus` on a private bus.
 
-Each feed maintains rolling state:
-- **`_historical`** — 60-sample ring buffer of mid prices (for volatility)
-- **`_historical_ob`** — 60-sample ring buffer of OrderBook snapshots
-- **`_vol`** — 60-second realised volatility (annualised)
-- **Slippage pricing** — `executed_buy_price()` / `executed_sell_price()` compute VWAP through the book
+**Channel naming convention:**
+```
+elysian:md:{venue_lower}:{asset_type_lower}:kline:{SYMBOL}
+elysian:md:{venue_lower}:{asset_type_lower}:orderbook:{SYMBOL}
+```
 
-The `Portfolio` also computes features on every kline:
-- Mark-to-market NAV
-- Current weight vector
-- Peak equity / max drawdown tracking
+Events are serialised to JSON via `event_serializer.py`.
 
 ### Stage 3 — Strategy / Alpha Generation
 
-**Files:** `strategy/base_strategy.py`, `strategy/example_weight_strategy.py`
+**Files:** `strategy/base_strategy.py`
 
 `SpotStrategy` is the base class. Subclass it and override hooks:
 
 ```python
 class MyStrategy(SpotStrategy):
     async def on_kline(self, event: KlineEvent):
-        # Analyze data, generate signal
-        weights = {"ETHUSDT": 0.4, "BTCUSDT": 0.5}
-        await self.submit_weights(weights)
+        # Analyse data, trigger rebalance
+        await self.request_rebalance(trigger="kline")
+
+    def compute_weights(self, **ctx) -> dict:
+        return {"ETHUSDT": 0.4, "BTCUSDT": 0.5}
 ```
 
 **Available hooks:**
 
-| Hook | Event | Typical Use |
-|------|-------|-------------|
-| `on_start()` | — | Initialization logic |
-| `on_stop()` | — | Cleanup |
-| `on_kline(KlineEvent)` | `KLINE` | Price-based signals, rebalance triggers |
-| `on_orderbook_update(OrderBookUpdateEvent)` | `ORDERBOOK_UPDATE` | Spread/depth analysis |
-| `on_order_update(OrderUpdateEvent)` | `ORDER_UPDATE` | Fill tracking, execution feedback |
-| `on_balance_update(BalanceUpdateEvent)` | `BALANCE_UPDATE` | Cash sync |
-| `on_rebalance_complete(RebalanceCompleteEvent)` | `REBALANCE_COMPLETE` | Post-execution observability |
-| `run_forever()` | — | Periodic tasks (timer-based rebalancing) |
-
-**Output mechanisms:**
-
-1. **`submit_weights(weights)`** — Primary. Sends target portfolio weights through the risk/execution pipeline. Returns `RebalanceResult`.
-2. **Direct exchange access** — Escape hatch. `self.get_exchange(Venue.BINANCE).place_market_order(...)` for time-sensitive single-symbol trades.
+| Hook | Bus | Trigger | Typical Frequency |
+|------|-----|---------|-------------------|
+| `on_start()` | — | Once at startup | Once |
+| `on_stop()` | — | Once at shutdown | Once |
+| `run_forever()` | — | Long-running coroutine | Continuous |
+| `on_kline(KlineEvent)` | shared | Closed kline candle | ~1/sec per symbol |
+| `on_orderbook_update(OrderBookUpdateEvent)` | shared | Depth snapshot | ~10/sec per symbol |
+| `on_order_update(OrderUpdateEvent)` | private | Order state change | On fill / cancel |
+| `on_balance_update(BalanceUpdateEvent)` | private | Balance delta | On balance change |
+| `on_rebalance_complete(RebalanceCompleteEvent)` | private | FSM cycle finished | After each rebalance |
+| `compute_weights(**ctx)` | — | Called by FSM | Once per cycle |
 
 ### Stage 4 — Risk Management (PortfolioOptimizer)
 
 **Files:** `risk/optimizer.py`, `risk/risk_config.py`
 
-The optimizer is a **stateless constraint projector** — it clips, scales, and rejects weights that violate the risk envelope. It is NOT a Markowitz-style optimizer.
+The optimizer is a **stateless constraint projector** — it clips, scales, and rejects weights that violate the risk envelope. It is not a Markowitz-style optimizer.
 
 **Constraint pipeline (executed in order):**
 
 ```
 TargetWeights
     │
-    ├─ 1. Rate-limit check     → reject if < min_rebalance_interval_ms since last
-    ├─ 2. Symbol filter         → remove blocked, keep only allowed
-    ├─ 3. Per-asset clip        → clamp to [min_weight, max_weight] per asset
-    ├─ 4. Exposure scaling      → if gross > max_total_exposure, scale proportionally
-    ├─ 5. Cash floor            → if sum(long_weights) > 1 - min_cash_weight, scale down
-    └─ 6. Turnover cap          → limit sum(abs(delta_w)) per cycle
+    ├─ 1. Input validation      → drop NaN / Inf / non-numeric weights
+    ├─ 2. Symbol filter          → apply whitelist / blacklist
+    ├─ 3. Per-asset clip         → clamp to [min_weight_per_asset, max_weight_per_asset]
+    ├─ 4. Total-exposure scaling → if gross > max_total_exposure, scale proportionally
+    ├─ 5. Cash-floor enforcement → if long_exposure > 1 - min_cash_weight, scale down
+    ├─ 6. Turnover cap           → limit sum(|target_w - current_w|) per cycle
+    └─ 7. Min-delta prune        → drop legs with |Δw| < min_weight_delta
     │
     ▼
-ValidatedWeights (with audit trail: original, clipped amounts, rejection reason)
+ValidatedWeights (with audit trail: original weights, clipped amounts, rejection reason)
 ```
+
+A special `liquidate=True` flag on `TargetWeights` bypasses all constraints (kill-switch path for `convert_all_base`).
 
 **RiskConfig parameters:**
 
@@ -177,17 +237,14 @@ ValidatedWeights (with audit trail: original, clipped amounts, rejection reason)
 | `min_weight_per_asset` | 0.0 | Long-only floor |
 | `max_total_exposure` | 1.0 | Sum of abs(weights); 1.0 = unlevered |
 | `min_cash_weight` | 0.05 | Always keep >= 5% in cash |
-| `max_turnover_per_rebalance` | 0.5 | Max sum(abs(delta_w)) per cycle |
+| `max_turnover_per_rebalance` | 0.5 | Max sum(|Δw|) per cycle |
 | `max_leverage` | 1.0 | For futures expansion |
 | `max_short_weight` | 0.0 | 0 = no shorts |
 | `min_order_notional` | 10.0 | Skip orders below $10 |
 | `max_order_notional` | 100,000 | Cap single-order size |
 | `min_weight_delta` | 0.005 | Skip rebalance legs < 0.5% weight change |
-| `min_rebalance_interval_ms` | 60,000 | 1 minute between rebalances |
-| `allowed_symbols` | None | None = all allowed |
-| `blocked_symbols` | `frozenset()` | Explicit blacklist |
 
-RiskConfig is **mutable** so limits can be tightened at runtime (e.g., vol spike → reduce exposure).
+`RiskConfig` is **mutable** so limits can be tightened at runtime.
 
 ### Stage 5 — Execution Engine
 
@@ -198,295 +255,312 @@ Converts validated weights into exchange orders:
 ```
 ValidatedWeights
     │
-    ├─ 1. Snapshot mark prices from feeds
-    ├─ 2. Compute total portfolio value (NAV)
+    ├─ 1. Snapshot mark prices from _mark_prices dict (updated via KLINE events)
+    ├─ 2. Compute total portfolio value (ShadowBook.total_value())
     ├─ 3. For each symbol:
     │      target_qty = weight * total_value / price
     │      delta = target_qty - current_qty
-    │      weight_delta check (skip if < min_weight_delta)
-    │      Round to exchange step_size
+    │      weight_delta check (skip if < 0.001 threshold)
+    │      Round down to exchange step_size
     ├─ 4. Partition: SELLS first (free capital), then BUYS
     └─ 5. Submit each order to exchange connector
     │
     ▼
-RebalanceResult (intents, submitted, failed, errors)
+RebalanceResult (intents, submitted, failed, errors, submitted_orders)
 ```
 
-**Key behaviors:**
+After submission, `lock_for_order()` is called on the ShadowBook for each successfully submitted LIMIT order, reserving the required cash or quantity.
+
+**Key behaviours:**
 - **Sells before buys** — frees quote currency for subsequent buys
-- **Weight-delta filtering** — uses `min_weight_delta` from RiskConfig, not absolute quantity
+- **Weight-delta filtering** — skips legs with |Δw| < 0.001 to avoid noise-driven churn
 - **Per-order error isolation** — one failure doesn't block others
-- **Step-size rounding** — uses exchange's `_token_infos[symbol]["step_size"]`
+- **Step-size rounding** — uses `exchange._token_infos[symbol]["step_size"]`
+- **Stablecoin guard** — emits a warning and skips any stablecoin key that appears in the weight dict
 
 ### Stage 6 — Exchange Submission
 
-**Files:** `connectors/BinanceExchange.py`
+**Files:** `connectors/binance/BinanceExchange.py`, `connectors/aster/AsterExchange.py`
 
 The execution engine delegates to `SpotExchangeConnector` methods:
-- `place_market_order(symbol, side, quantity)`
-- `place_limit_order(symbol, side, price, quantity)`
+- `place_market_order(symbol, side, quantity, strategy_id)`
+- `place_limit_order(symbol, side, price, quantity, strategy_id)`
 
-Fill confirmations flow back as `OrderUpdateEvent` via the user data stream.
+Fill confirmations flow back as `OrderUpdateEvent` via the user data stream into the private EventBus, which triggers `ShadowBook._on_order_update()` for incremental fill attribution.
 
 ---
 
-## 3. Data Contracts (Frozen Dataclasses)
+## 4. Data Contracts (Frozen Dataclasses)
 
 All inter-stage data is carried in **frozen (immutable) dataclasses** defined in `core/signals.py` and `core/events.py`.
 
 ### Signal Pipeline Contracts
 
 ```
-┌─────────────────────┐
-│    TargetWeights     │  Stage 3 → 4
-├─────────────────────┤
-│ weights: {str: float}│  symbol → target weight
-│ timestamp: int       │  epoch ms
-│ strategy_id: str     │
-│ venue: Venue?        │
-│ metadata: dict       │
-└─────────────────────┘
-         │
-         ▼
-┌─────────────────────┐
-│  ValidatedWeights    │  Stage 4 → 5
-├─────────────────────┤
-│ original: Target...  │  audit trail
-│ weights: {str: float}│  risk-adjusted
-│ clipped: {str: float}│  per-symbol clip amounts
-│ rejected: bool       │
-│ rejection_reason: str│
-│ timestamp: int       │
-└─────────────────────┘
-         │
-         ▼
-┌─────────────────────┐
-│    OrderIntent       │  Stage 5 internal
-├─────────────────────┤
-│ symbol: str          │
-│ venue: Venue         │
-│ side: Side           │
-│ quantity: float      │  base asset qty
-│ order_type: OrderType│
-│ price: float?        │  None for market
-│ strategy_id: int     │  owning strategy (default 0)
-└─────────────────────┘
-         │
-         ▼
-┌─────────────────────┐
-│  RebalanceResult     │  Stage 5 → 3
-├─────────────────────┤
-│ intents: tuple       │  all generated intents
-│ submitted: int       │
-│ failed: int          │
-│ timestamp: int       │
-│ errors: tuple[str]   │
-└─────────────────────┘
+Strategy.compute_weights() → dict[str, float]
+        │
+        │  TargetWeights  (TargetWeights(weights, timestamp, strategy_id, venue, liquidate))
+        ▼
+PortfolioOptimizer.validate()
+        │
+        │  ValidatedWeights  (original, weights, clipped, rejected, rejection_reason, timestamp)
+        ▼
+ExecutionEngine.execute()
+        │
+        │  OrderIntent(symbol, venue, side, quantity, order_type, price, strategy_id)  [per order]
+        ▼
+        RebalanceResult(intents, submitted, failed, timestamp, errors, submitted_orders)
 ```
 
 ### Event Contracts
 
 | Event | Fields | Published By |
 |-------|--------|--------------|
-| `KlineEvent` | symbol, venue, kline, timestamp | KlineClientManager worker |
-| `OrderBookUpdateEvent` | symbol, venue, orderbook, timestamp | OBClientManager worker |
-| `OrderUpdateEvent` | symbol, venue, order, timestamp | UserDataClientManager |
-| `BalanceUpdateEvent` | asset, venue, delta, new_balance, timestamp | UserDataClientManager |
-| `RebalanceCompleteEvent` | result, validated_weights, timestamp | SpotStrategy.submit_weights() |
+| `KlineEvent` | symbol, venue, kline, timestamp | KlineClientManager worker (via Redis in production) |
+| `OrderBookUpdateEvent` | symbol, venue, orderbook, timestamp | OBClientManager worker (via Redis in production) |
+| `OrderUpdateEvent` | symbol, base_asset, quote_asset, venue, order, timestamp | BinanceUserDataClientManager (private bus) |
+| `BalanceUpdateEvent` | asset, venue, delta, new_balance, timestamp | BinanceUserDataClientManager (private bus) |
+| `RebalanceCompleteEvent` | result, validated_weights, timestamp, strategy_id | RebalanceFSM._on_enter_executing (private bus) |
+| `RebalanceCycleEvent` | old_state, new_state, trigger, timestamp | RebalanceFSM on every state transition |
 
 ---
 
-## 4. Portfolio System
-
-**File:** `core/portfolio.py`
-
-The `Portfolio` is the centralized source of truth for position, cash, and risk state. It operates in two modes:
-
-### Event-Driven Mode (production)
-
-```python
-portfolio.sync_from_exchange(exchange, venue, feeds)  # startup: full state sync
-portfolio.start(event_bus, feeds)                      # subscribe to KLINE + BALANCE_UPDATE + ORDER_UPDATE
-```
-
-After `start()`, the portfolio **automatically**:
-- Updates mark prices on every `KlineEvent`
-- Recomputes weight vector and NAV
-- Tracks peak equity and max drawdown
-- Syncs cash from stablecoin `BalanceUpdateEvent` (delta-based)
-- Applies incremental fills from `OrderUpdateEvent` via `_on_order_update()`, using `_fill_tracker` to prevent double-counting fills across partial-fill events
-
-### Standalone Mode (testing/backtesting)
-
-```python
-portfolio.mark_to_market({"ETHUSDT": 3200.0, "BTCUSDT": 64000.0})
-portfolio.update_position("ETHUSDT", qty_delta=1.5, price=3200.0)
-```
-
-### Key Properties
-
-| Property/Method | Description |
-|----------------|-------------|
-| `nav` | Cached NAV from last kline (zero-cost read) |
-| `cash` / `cash_dict` | Total cash / per-stablecoin breakdown |
-| `weights` | Cached weight vector |
-| `positions` / `active_positions` | All / non-flat positions |
-| `total_realized_pnl` | Cumulative realized P&L |
-| `peak_equity` / `max_drawdown` | Risk metrics |
-| `gross_exposure()` / `net_exposure()` | Exposure metrics |
-
-### Position Tracking
-
-`Position` (in `core/position.py`) tracks per-asset state:
-
-```python
-@dataclass
-class Position:
-    symbol: str
-    venue: Venue
-    quantity: float           # >0 long, <0 short
-    avg_entry_price: float    # VWAP entry
-    realized_pnl: float       # cumulative from closes
-    total_commission: float    # cumulative fees
-```
-
-Fill processing in `Portfolio.update_position()`:
-- **Same direction** (adding to position): updates average entry price via VWAP
-- **Opposite direction** (reducing/closing): computes realized P&L, handles position flips
-- Always updates mark price and refreshes derived state
-- Records fill in audit trail (ring buffer, 10k max)
-
-### Startup Sync: `sync_from_exchange()`
-
-Called once per exchange at startup after `exchange.run()`:
-
-1. **Cash** — stablecoin balances (USDT, USDC, BUSD) → `_cash_dict` / `_cash`
-2. **Positions** — non-stablecoin balances → `Position` objects (entry price seeded from feed)
-3. **Mark prices** — latest prices from all available feeds
-4. **Open orders** — snapshot of exchange's `_open_orders`
-5. **Derived state** — NAV, weights, drawdown via `_refresh_derived()`
-
-For multi-venue: call once per exchange — state accumulates.
-
-### ShadowBook
+## 5. ShadowBook — Per-Strategy Ledger
 
 **File:** `core/shadow_book.py`
 
-Each strategy owns a `ShadowBook` — a virtual position ledger that mirrors the strategy's attributed slice of the aggregate portfolio. It operates in event-driven mode after `start()` is called.
+Each strategy owns exactly one `ShadowBook` — the authoritative source for that strategy's positions, cash, weights, PnL, and outstanding orders. Strategies must read `self._shadow_book` (not the aggregate `Portfolio`) when computing weights.
 
 ```python
-shadow_book.start(event_bus, order_strategy_map)  # subscribe to ORDER_UPDATE
-shadow_book.stop()                                 # unsubscribe
+# CORRECT
+qty = self._shadow_book.position("ETHUSDT").quantity
+cash = self._shadow_book.free_cash           # excludes LIMIT BUY reservations
+
+# WRONG — Portfolio is a read-only aggregate across all strategies
+qty = self.portfolio.positions.get("ETHUSDT")
 ```
 
-**Event-driven fill attribution:**
+### Key ShadowBook Properties
 
-`_on_order_update(event)` fires on every `OrderUpdateEvent`. It filters events by looking up `_order_strategy_map.get(order.id) == self._strategy_id`, so each ShadowBook only processes fills belonging to its own strategy. Incremental fill deltas are tracked via `_fill_tracker` to handle partial fills without double-counting. `apply_fill()` is called with `price=order.avg_fill_price` and `commission=order.commission` (per-fill amount). Terminal orders are cleaned out of `_order_strategy_map` on completion.
+| Property | Description |
+|----------|-------------|
+| `nav` | Cached NAV (cash + sum of position notionals at mark prices) |
+| `cash` | Total stablecoin balance |
+| `free_cash` | `cash - _locked_cash` (cash available for new BUY orders) |
+| `free_quantity(symbol)` | `position.quantity - locked_quantity` (qty available for new SELL orders) |
+| `weights` | Cached weight vector from last mark price update |
+| `positions` / `active_positions` | All / non-flat positions |
+| `realized_pnl` | Cumulative realized P&L |
+| `total_commission()` | Commissions in USDT (non-stablecoin fees converted at mark price) |
+| `peak_equity` / `max_drawdown` | High-water mark and max drawdown fraction |
+| `active_orders` | Live `ActiveOrder` / `ActiveLimitOrder` objects keyed by `order_id` |
 
-`_order_strategy_map` is a shared `Dict[str, int]` owned by `ExecutionEngine` and passed into every `ShadowBook.start()` call. It maps `order_id → strategy_id` and is populated by `ExecutionEngine._submit_order()` after each exchange placement.
+### Initialization Paths
 
-`reconcile_shadow_books()` is retained as a periodic drift-correction pass but is no longer the primary accounting mechanism — event-driven attribution via `_on_order_update()` is the primary path.
-
-**Key methods:**
-
-| Method | Description |
+| Method | When to Use |
 |--------|-------------|
-| `start(event_bus, order_strategy_map)` | Subscribe to ORDER_UPDATE; store shared map reference |
-| `stop()` | Unsubscribe from EventBus |
-| `apply_fill(symbol, qty_delta, price, commission)` | Update virtual position with a fill |
-| `_on_order_update(event)` | Filter by strategy_id, compute delta, call apply_fill |
-| `_refresh_derived()` | Recompute NAV, weights, drawdown (excludes symbols absent from `_mark_prices`) |
+| `sync_from_exchange(exchange, feeds)` | Sub-account mode startup — reads real balances, open orders |
+| `init_from_portfolio_cash(cash, mark_prices)` | Fresh deployment with no prior positions |
 
-### Portfolio Snapshots
+### Event Handlers
 
-```python
-portfolio.save_snapshot(venue=Venue.BINANCE)
-```
+**`_on_kline(event)`** — updates `_mark_prices[symbol]` and calls `_refresh_derived()`. Also patches `avg_entry_price` for positions that were synced at startup before feed data was available.
 
-Persists to the `PortfolioSnapshot` PostgreSQL table (Peewee ORM):
+**`_on_order_update(event)`** — the primary fill attribution path:
+1. Wraps first-seen orders into `ActiveOrder` / `ActiveLimitOrder`
+2. Calls `active.sync_from_event(order)` to compute incremental `delta_filled`
+3. Calls `_partial_release_lock()` for limit orders
+4. Calls `apply_fill()` to update positions, cash, and realized PnL
+5. On terminal orders: drains remaining lock, removes from `_active_orders`, schedules DB trade recording
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `nav` | float | Total portfolio value |
-| `cash` | float | Stablecoin balance |
-| `unrealized_pnl` | float | Mark-to-market |
-| `realized_pnl` | float | Cumulative |
-| `total_commission` | float | Cumulative fees |
-| `peak_equity` | float | Highest NAV |
-| `max_drawdown` | float | As fraction (0.05 = 5%) |
-| `current_drawdown` | float | Current drawdown |
-| `gross_exposure` | float | Sum of abs(weights) |
-| `net_exposure` | float | Sum of weights |
-| `positions` | JSON | `{"ETHUSDT": {"qty": 1.5, "avg_entry": 3200, ...}}` |
-| `weights` | JSON | `{"ETHUSDT": 0.25, ...}` |
-| `mark_prices` | JSON | `{"ETHUSDT": 3250.0, ...}` |
-| `num_fills` | int | Fill count |
+**`_on_balance_update(event)`** — updates stablecoin cash totals; for non-stablecoins, maps the raw asset to its trading symbol and updates the position quantity.
+
+### Balance Reservation (LIMIT Orders)
+
+`lock_for_order(order_id, intent)` reserves balance when a LIMIT order is submitted:
+- **BUY**: locks `quantity × price` from `_cash` into `_locked_cash`
+- **SELL**: locks `quantity` from `position.quantity` into `position.locked_quantity`
+
+`_partial_release_lock()` proportionally releases the reservation as partial fills arrive. `release_all()` drains the remainder on terminal orders (FILLED / CANCELLED / EXPIRED / REJECTED).
+
+### Fill Attribution: `apply_fill()`
+
+- `qty_delta > 0` = BUY (position increases); `< 0` = SELL
+- **Same direction** (adding to position): computes new weighted-average entry price
+- **Opposing direction** (reducing / closing): computes realized PnL; handles position flips
+- Adjusts `_cash` immediately (credit SELL proceeds / debit BUY cost)
+- Commission handling:
+  - Stablecoin fees deducted from `_cash`
+  - Non-stablecoin fees (e.g. BNB) deducted from the corresponding position quantity, tracked separately to avoid double-counting in `net_pnl()`
+- Appends a `Fill` record to the ring buffer (`maxlen=10,000`)
 
 ---
 
-## 5. EventBus
+## 6. Portfolio — Aggregate NAV Monitor
+
+**File:** `core/portfolio.py`
+
+`Portfolio` is a **thin, read-only aggregator** across all registered `ShadowBook` instances. It owns no event subscriptions and performs no fill attribution. Its sole purpose is to produce aggregate reports and persist portfolio snapshots.
+
+```python
+portfolio.register_shadow_book(shadow_book)   # once per strategy
+nav = portfolio.aggregate_nav()               # sum of all shadow book NAVs
+portfolio.save_snapshot()                     # persist to DB
+```
+
+Do not write to `Portfolio` directly. All position tracking belongs in `ShadowBook`.
+
+---
+
+## 7. RebalanceFSM
+
+**File:** `core/rebalance_fsm.py`
+
+`RebalanceFSM` drives the compute → validate → execute → cooldown pipeline. It is the only permitted entry point to the Stage 3–5 pipeline.
+
+### States
+
+```
+                    +----------+
+            +------>|   IDLE   |<------+
+            |       +----------+       |
+            |            | signal      |
+            |            v             |
+            |      +-----------+       |
+            |      | COMPUTING |       |
+            |      +-----------+       |
+            |     /  weights_ready     |
+            |    /    no_signal → IDLE |
+            |   v                      |
+            | +-----------+            |
+            | | VALIDATING|            |
+            | +-----------+            |
+            |  / accepted              |
+            | /   rejected → COOLDOWN  |
+            |v                         |
+        +-----------+  complete → COOLDOWN → cooldown_done --|
+        | EXECUTING |                  ^                     |
+        +-----------+                  |                     |
+               |  failed               |---------------------|
+               v
+           +-------+   retry → IDLE
+           | ERROR |
+           +-------+
+
+           Any state --[suspend]--> SUSPENDED --[resume]--> IDLE
+```
+
+### Context Flow
+
+Each FSM callback enriches a shared `**ctx` dict:
+
+| Stage | Adds to ctx |
+|-------|-------------|
+| `_on_enter_computing` | `ctx["target_weights"]` (dict), `ctx["strategy_id"]` |
+| `_on_enter_validating` | `ctx["validated_weights"]` (ValidatedWeights) |
+| `_on_enter_executing` | `ctx["rebalance_result"]` (RebalanceResult) |
+
+Arbitrary kwargs passed to `request_rebalance(**ctx)` flow through the entire pipeline and are available in `compute_weights(**ctx)`.
+
+### Triggering
+
+```python
+# From any on_* hook — safe to call at any frequency
+await self.request_rebalance(trigger="kline", my_signal=0.42)
+
+# Timer-driven (in run_forever())
+while not self._stop_event.is_set():
+    await asyncio.sleep(60)
+    await self.request_rebalance()
+```
+
+`request_rebalance()` returns `True` if a cycle was started, `False` if the FSM was busy (cooldown, mid-cycle, suspended). There is no queue — dropped requests have no side effects.
+
+---
+
+## 8. EventBus
 
 **File:** `core/event_bus.py`
 
-In-process async pub/sub with zero serialization overhead:
+In-process async pub/sub with zero serialization overhead. Used for the **private per-strategy bus** (account events: `ORDER_UPDATE`, `BALANCE_UPDATE`, `REBALANCE_COMPLETE`, `REBALANCE_CYCLE`).
 
 ```python
-class EventBus:
-    subscribe(event_type: EventType, callback: Callable)
-    unsubscribe(event_type: EventType, callback: Callable)
-    async publish(event)  # awaited — natural backpressure
+bus.subscribe(EventType.ORDER_UPDATE, callback)
+await bus.publish(OrderUpdateEvent(...))   # awaits each subscriber sequentially
 ```
 
 **Design decisions:**
-- **Awaited dispatch** — `publish()` is `async` and awaits each subscriber sequentially. This provides natural backpressure: if a strategy hook is slow, the emitting worker waits.
-- **Error isolation** — exceptions in one callback are logged but don't prevent others from running.
-- **No serialization** — events are direct Python object references (copy if you need a snapshot).
+- **Awaited dispatch** — `publish()` awaits each subscriber sequentially. This provides natural backpressure: if a strategy hook is slow, the publisher waits.
+- **Error isolation** — exceptions in one callback are logged but do not prevent others from running.
+- **No serialization** — events are direct Python object references.
 
-**Subscriber registration:**
+### Two-Bus Architecture
 
-| Component | Subscribes To | Handler |
-|-----------|--------------|---------|
-| SpotStrategy | KLINE, ORDERBOOK_UPDATE, ORDER_UPDATE, BALANCE_UPDATE, REBALANCE_COMPLETE | `_dispatch_*` wrappers |
-| Portfolio | KLINE | `_on_kline` (mark prices, weights, drawdown) |
-| Portfolio | BALANCE_UPDATE | `_on_balance` (cash sync via delta; calls `_refresh_derived()`) |
-| Portfolio | ORDER_UPDATE | `_on_order_update` (incremental fill attribution via `_fill_tracker`) |
-| ShadowBook | ORDER_UPDATE | `_on_order_update` (per-strategy fill attribution filtered by `_order_strategy_map`) |
+| Bus | Carries | Wired By |
+|-----|---------|---------|
+| `shared_event_bus` (Redis in production) | `KLINE`, `ORDERBOOK_UPDATE` | MarketDataService → Redis → RedisEventBusSubscriber |
+| `private_event_bus` (in-process) | `ORDER_UPDATE`, `BALANCE_UPDATE`, `REBALANCE_COMPLETE`, `REBALANCE_CYCLE` | StrategyRunner._create_sub_account_exchange() |
+
+Never subscribe a strategy to account events on the shared bus. Cross-strategy fill contamination would corrupt ShadowBooks.
+
+### Subscription Map
+
+| Component | Subscribes To | Bus |
+|-----------|--------------|-----|
+| `SpotStrategy._dispatch_kline` | `KLINE` | shared |
+| `SpotStrategy._dispatch_ob` | `ORDERBOOK_UPDATE` | shared |
+| `SpotStrategy._dispatch_order` | `ORDER_UPDATE` | private |
+| `SpotStrategy._dispatch_balance` | `BALANCE_UPDATE` | private |
+| `SpotStrategy._dispatch_rebalance` | `REBALANCE_COMPLETE` | private |
+| `ShadowBook._on_kline` | `KLINE` | shared |
+| `SpotExchangeConnector._on_kline` | `KLINE` | shared |
+| `ExecutionEngine._on_kline` | `KLINE` | shared |
 
 ---
 
-## 6. StrategyRunner (Main Entry Point)
+## 9. StrategyRunner
 
 **File:** `run_strategy.py`
 
-Orchestrates all components in a single `asyncio` event loop.
+`StrategyRunner` orchestrates all components for one strategy container. It runs in a single `asyncio` event loop.
 
 ### Startup Sequence
 
 ```
 StrategyRunner.__init__()
-    ├─ Load configs (YAML → args, JSON → config_json)
-    ├─ Initialize 8 client managers (Binance/Aster × Spot/Futures × Kline/OB)
-    └─ Setup logging & environment (.env)
+    ├─ Load cfg (trading_config.yaml + strategy_NNN.yaml + config.json + .env)
+    └─ Create DB tables
 
-StrategyRunner.run(strategy)
+StrategyRunner.run()
     │
-    ├─ _setup_config()           → Load trading pairs from config.json
-    ├─ EventBus()                → Create shared event bus
-    ├─ _setup_exchanges()        → BinanceSpotExchange(event_bus=...)
-    ├─ Inject EventBus           → kline_manager.set_event_bus(), ob_manager.set_event_bus()
-    ├─ Wire strategy             → strategy._event_bus, ._exchanges, .args, .config_json
-    ├─ strategy.start()          → Subscribe hooks to EventBus
-    ├─ exchange.run()            → AsyncClient, user data stream
+    ├─ _state = CONFIGURING
+    ├─ Create RedisEventBusSubscriber (shared_event_bus)
     │
-    ├─ _setup_pipeline()         → Stage 3-5 wiring:
-    │   ├─ _setup_portfolio()    → sync_from_exchange() + portfolio.start()
-    │   ├─ _setup_risk()         → RiskConfig from args.risk.* + PortfolioOptimizer
-    │   ├─ _setup_execution()    → ExecutionEngine (shares RiskConfig)
-    │   └─ shadow_book.start(event_bus, execution_engine._order_strategy_map)
+    ├─ _state = CONNECTING
     │
-    └─ asyncio.gather(
-         _setup_binance_data_feeds(),   ← blocks forever (multiplex feeds)
-         strategy.run_forever()          ← optional long-running coroutine
+    ├─ _state = SYNCING
+    ├─ _setup_pipeline()                 → creates Portfolio per (asset_type, venue)
+    ├─ setup_strategy()
+    │   ├─ _create_sub_account_exchange()
+    │   │   ├─ Create private EventBus
+    │   │   ├─ Instantiate exchange connector (BinanceSpotExchange, etc.)
+    │   │   ├─ exchange.start(shared_event_bus)   ← subscribe to KLINE / OB for price feeds
+    │   │   └─ await exchange.run()               ← initialize + start user data stream
+    │   ├─ Create ShadowBook
+    │   ├─ shadow_book.sync_from_exchange()       ← seed positions, cash, open orders
+    │   ├─ shadow_book.start(shared_bus, private_bus)
+    │   ├─ Create PortfolioOptimizer (with strategy risk_config)
+    │   ├─ Create ExecutionEngine
+    │   ├─ execution_engine.start(shared_bus)     ← subscribe to KLINE for mark prices
+    │   ├─ portfolio.register_shadow_book()
+    │   ├─ Inject into strategy: shadow_book, optimizer, engine, exchanges, cfg
+    │   └─ await strategy.start()                 ← subscribe hooks, init FSM
+    │
+    ├─ _state = RUNNING
+    ├─ await shared_event_bus.start_listener(channels)
+    └─ await asyncio.gather(
+         redis_listener_task,
+         strategy.run_forever()
        )
 ```
 
@@ -494,367 +568,281 @@ StrategyRunner.run(strategy)
 
 ```
 finally:
-    ├─ exchange.cleanup()
-    ├─ portfolio.stop()          → Unsubscribe from EventBus
-    ├─ strategy._shadow_book.stop() → Unsubscribe ShadowBook from EventBus
-    ├─ strategy.stop()           → Unsubscribe hooks, shutdown ProcessPool
-    └─ _cleanup()                → Stop all client managers
+    strategy.stop()                → unsubscribe hooks, set _stop_event, stop executor, stop shadow_book
+    exchange.cleanup()             → stop user data stream, close HTTP client
+    snapshot tasks stop
+    redis subscriber close
 ```
 
 ---
 
-## 7. Concurrency Model
+## 10. Concurrency Model
 
 ```
-Main Thread — asyncio.run() — SINGLE EVENT LOOP
+Strategy Container — asyncio.run() — SINGLE EVENT LOOP
     │
-    ├─ KlineClientManager: 1 reader task + 4 worker tasks
-    │  └─ Workers: parse → mutate feed → publish KlineEvent
+    ├─ RedisEventBusSubscriber._listener_loop   ← asyncio.Task
+    │  └─ deserialise → dispatch KlineEvent / OrderBookUpdateEvent to subscribers
     │
-    ├─ OBClientManager: 1 reader task + 4 worker tasks
-    │  └─ Workers: parse → mutate feed → publish OrderBookUpdateEvent
+    ├─ BinanceUserDataClientManager._reader_loop   ← asyncio.Task
+    │  └─ dispatch OrderUpdateEvent / BalanceUpdateEvent on private bus
     │
-    ├─ UserDataClientManager: 1 reader loop
-    │  └─ Sync callbacks first → then publish OrderUpdateEvent / BalanceUpdateEvent
+    ├─ SpotStrategy._dispatch_*()   ← called from subscriber callbacks (same loop)
     │
-    ├─ Portfolio: subscribed handlers (mark price, cash sync)
+    ├─ RebalanceFSM._on_enter_*()   ← called from strategy hooks (same loop)
     │
-    ├─ Strategy hooks: run in same event loop
-    │  └─ For CPU-heavy work: strategy.run_heavy(fn) → ProcessPoolExecutor
+    ├─ ExecutionEngine.execute()    ← async, protected by asyncio.Lock
     │
-    └─ strategy.run_forever(): optional long-running coroutine
+    └─ strategy.run_forever()   ← asyncio.Task
 ```
 
 **Key design decisions:**
-- Everything runs in ONE event loop (no ThreadPoolExecutor for feeds)
-- `EventBus.publish()` is awaited — backpressure propagates from strategy to worker
-- `ProcessPoolExecutor` reserved ONLY for CPU-bound strategy calculations
-- Sync callbacks (exchange state mutation) run BEFORE async event dispatch
+- Everything runs in ONE asyncio event loop — no `ThreadPoolExecutor` for I/O
+- `EventBus.publish()` is awaited sequentially — backpressure propagates naturally
+- `ProcessPoolExecutor` reserved ONLY for CPU-bound strategy calculations via `strategy.run_heavy(fn, *args)`
+- `ExecutionEngine.execute()` is protected by `asyncio.Lock` to prevent concurrent rebalances
 
 ---
 
-## 8. Full Pipeline Call Chain
+## 11. Full Pipeline Call Chain (Stage 3→5)
 
-The Stage 3→5 pipeline uses **direct method calls**, NOT EventBus events:
+The Stage 3→5 pipeline uses **direct method calls** via the FSM, not EventBus events:
 
 ```
-strategy.submit_weights({"ETHUSDT": 0.4, "BTCUSDT": 0.5})
+await strategy.request_rebalance(**ctx)
     │
-    ├─ TargetWeights(weights=..., timestamp=now)
-    │
-    ├─ optimizer.validate(target)                    ← Stage 4
-    │   ├─ Rate-limit check
-    │   ├─ Symbol filter (whitelist/blacklist)
-    │   ├─ Per-asset weight clipping [0, 0.25]
-    │   ├─ Exposure scaling (gross ≤ 1.0)
-    │   ├─ Cash floor enforcement (≥ 5% cash)
-    │   └─ Turnover cap (Δw ≤ 0.5)
-    │   └─ → ValidatedWeights
-    │
-    ├─ execution_engine.execute(validated)            ← Stage 5
-    │   ├─ Snapshot mark prices
-    │   ├─ Compute NAV
-    │   ├─ compute_order_intents()
-    │   │   ├─ Extract strategy_id from validated.original.strategy_id
-    │   │   ├─ Stamp each OrderIntent with strategy_id
-    │   │   ├─ target_qty = weight * NAV / price
-    │   │   ├─ delta = target_qty - current_qty
-    │   │   ├─ Skip if weight_delta < min_weight_delta
-    │   │   └─ Round to step_size
-    │   ├─ Sort: sells first, then buys
-    │   ├─ _submit_order(): captures orderId from exchange response
-    │   │   └─ Stores in _order_strategy_map[orderId] = strategy_id
-    │   └─ → RebalanceResult
-    │
-    └─ event_bus.publish(RebalanceCompleteEvent)      ← Observability
-        └─ strategy.on_rebalance_complete()
+    └─ RebalanceFSM.request(**ctx)
+           │
+           ├─ [COMPUTING] strategy.compute_weights(**ctx)
+           │   └─ returns dict[str, float] or {}
+           │
+           ├─ [VALIDATING] optimizer.validate(TargetWeights(...), **ctx)
+           │   ├─ Input validation (drop NaN/Inf)
+           │   ├─ Symbol filter (whitelist/blacklist)
+           │   ├─ Per-asset clip → [0, max_weight_per_asset]
+           │   ├─ Exposure scaling → sum(|w|) ≤ max_total_exposure
+           │   ├─ Cash floor → long_exposure ≤ 1 - min_cash_weight
+           │   ├─ Turnover cap → sum(|Δw|) ≤ max_turnover_per_rebalance
+           │   └─ Min-delta prune → drop |Δw| < min_weight_delta
+           │       └─ → ValidatedWeights
+           │
+           ├─ [EXECUTING] execution_engine.execute(validated, **ctx)
+           │   ├─ Snapshot mark prices
+           │   ├─ compute_order_intents()
+           │   │   ├─ target_qty = weight × NAV / price
+           │   │   ├─ delta = target_qty - current_qty
+           │   │   ├─ Filter by weight_delta threshold (0.001)
+           │   │   └─ Round to step_size
+           │   ├─ Sells first, then buys
+           │   ├─ _submit_order() → exchange REST
+           │   └─ shadow_book.lock_for_order() for LIMIT orders
+           │       └─ → RebalanceResult
+           │
+           ├─ private_bus.publish(RebalanceCompleteEvent)
+           │
+           └─ [COOLDOWN] → wait cooldown_s → [IDLE]
 ```
 
 **Rationale for direct calls (not EventBus):**
 - The pipeline is inherently sequential (weights → risk → execute)
-- Nesting `EventBus.publish()` calls creates fragile, hard-to-debug chains
-- The strategy controls "when" to emit signals
 - Only `REBALANCE_COMPLETE` is published for post-execution observability
+- EventBus is reserved for fan-out notifications, not sequential pipelines
 
 ---
 
-## 9. Exchange Connector Architecture
+## 12. Exchange Connector Architecture
 
 ### Base Classes (`connectors/base.py`)
 
 ```
 AbstractDataFeed (ABC)
-    ├─ AbstractOrderBookFeed    → depth data, slippage pricing
-    └─ AbstractKlineFeed (ABC)  → candle data, rolling stats
+    ├─ create_new(asset, interval)      ← configure for a symbol
+    ├─ executed_buy_price(amount)       ← VWAP through the ask side
+    ├─ executed_sell_price(amount)      ← VWAP through the bid side
+    └─ update_current_stats()           ← background vol computation
 
-AbstractClientManager (ABC)
-    ├─ KlineClientManager       → multiplex kline socket
-    └─ OrderBookClientManager   → multiplex depth socket
+KlineClientManager (ABC)
+    ├─ register_feed(feed)
+    ├─ run_multiplex_feeds()            ← reader + worker pool
+    └─ set_event_bus(bus)
 
-SpotExchangeConnector (ABC)     → REST orders, balances, account state
-FuturesExchangeConnector (ABC)  → + positions, leverage, margin
+SpotExchangeConnector (ABC)
+    ├─ start(event_bus)                 ← subscribe to KLINE/OB for price feeds
+    ├─ stop()
+    ├─ initialize()
+    ├─ place_market_order(...)
+    ├─ place_limit_order(...)
+    ├─ get_balance(asset)
+    ├─ order_health_check(...)          ← validate balance + min-notional
+    └─ last_price(symbol)              ← OB mid → kline close → None
 ```
-
-### Account State (SpotExchangeConnector)
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `_balances` | `Dict[str, float]` | `{"USDT": 1000.0, "ETH": 2.5}` |
-| `_open_orders` | `Dict[str, OrderedDict]` | Per-symbol open orders |
-| `_token_infos` | `Dict[str, dict]` | `{"ETHUSDT": {"step_size": 0.001, "min_notional": 10, "base_asset": "ETH"}}` |
 
 ### Supported Venues
 
-| Venue | Spot | Futures | Data | Status |
-|-------|------|---------|------|--------|
-| Binance | `BinanceSpotExchange` | `BinanceFuturesExchange` | Kline + OB + UserData | Production |
-| Aster | `AsterSpotExchange` | `AsterPerpExchange` | Kline + OB | Production |
-| Bybit | — | — | — | Enum defined |
-| OKX | — | — | — | Enum defined |
+| Venue | Spot | Futures | User Data WS | Status |
+|-------|------|---------|--------------|--------|
+| Binance | `BinanceSpotExchange` | `BinanceFuturesExchange` | New WS API (`ws-api.binance.com`) | Production |
+| Aster | `AsterSpotExchange` | `AsterPerpDataConnectors` | listenKey approach | Production |
+
+**Binance User Data Note:** The deprecated listenKey approach was retired by Binance on 2026-02-20. `BinanceUserDataClientManager` now uses `userDataStream.subscribe.signature` on `wss://ws-api.binance.com:443/ws-api/v3`, which works with HMAC-SHA256 keys without requiring `session.logon`.
+
+### WebSocket Reconnection Pattern
+
+All managers implement exponential backoff:
+```python
+reconnect_delay = 1
+while self._running:
+    try:
+        async with websockets.connect(...) as ws:
+            reconnect_delay = 1  # reset on success
+            ...
+    except Exception:
+        pass
+    await asyncio.sleep(reconnect_delay)
+    reconnect_delay = min(reconnect_delay * 2, 60)
+```
 
 ---
 
-## 10. Persistence Layer
+## 13. Persistence Layer
 
 ### Database (`db/database.py`)
 
 - **ORM:** Peewee with `ReconnectPooledPostgresqlDatabase`
+- **Pool:** max 20 connections, 300s stale timeout
 - **Timezone:** UTC+8 for all timestamps
 
 ### Tables (`db/models.py`)
 
 | Table | Purpose | Key Fields |
 |-------|---------|------------|
-| `cex_trades` | CEX fill records | symbol, side, price, qty, commission, order_id |
+| `cex_trades` | CEX fill records | symbol, side, price, qty, commission, order_id, strategy_id |
 | `dex_trades` | DEX swap events | tx_digest, pool, amounts, sqrt_price |
-| `portfolio_snapshots` | Point-in-time portfolio state | nav, cash, pnl, exposure, positions (JSON) |
+| `portfolio_snapshots` | Point-in-time per-strategy state | strategy_id, nav, cash, pnl, exposure, positions (JSON) |
 | `account_snapshots` | Raw exchange balance captures | balances (JSON), total_usd_value |
+
+Trade recording happens asynchronously (`asyncio.create_task`) after each order reaches a terminal state, so it never blocks the event loop.
 
 ---
 
-## 11. Configuration
+## 14. Configuration
 
 ### Two-Tier Config System
 
-Configuration is split into a system-level file and per-strategy override files.
-
-#### `trading_config.yaml` (system-level) → `AppConfig`
+#### `trading_config.yaml` (system-level)
 
 ```yaml
 spot:
-  venues: [Binance, Aster]
-futures:
   venues: [Binance]
-database:
-  host: localhost
-  port: 5432
-  name: elysian
-risk:                          # System-wide RiskConfig defaults
-  max_weight_per_asset: 0.3
-  min_cash_weight: 0.10
-  min_rebalance_interval_ms: 30000
-venue_configs:                 # Per-venue execution/networking params
-  Binance:
-    ...
+futures:
+  venues: []
+portfolio:
+  snapshot_interval_s: 300
+execution:
+  default_order_type: "MARKET"
+  default_venue: "Binance"
+venue_configs:
+  spot_binance:
+    risk: {}
+    execution: {}
+    portfolio: {}
 ```
 
-`AppConfig` exposes helper methods to resolve the effective config for a given strategy:
-- `effective_risk_for(strategy_id)` — merges system risk with strategy `risk_overrides`
-- `effective_execution_for(strategy_id)` — merges system execution with `execution_overrides`
-- `effective_portfolio_for(strategy_id)` — merges system portfolio with `portfolio_overrides`
-
-#### `strategies/strategy_NNN.yaml` (per-strategy) → `StrategyConfig`
+#### `strategies/strategy_NNN.yaml` (per-strategy)
 
 ```yaml
-strategy_id: 1
-risk_overrides:
+strategy_id: 0
+strategy_name: "event_driven_momentum_binance_spot"
+class: "elysian_core.strategy.example_weight_strategy_v2_event_driven.EventDrivenStrategy"
+asset_type: "Spot"
+venue: "Binance"
+venues: ["Binance"]
+symbols: ["SUIUSDT", "BTCUSDT", "ETHUSDT"]
+risk:
   max_weight_per_asset: 0.25
-execution_overrides:
-  default_order_type: LIMIT
-portfolio_overrides:
-  initial_cash: 10000.0
+  min_cash_weight: 0.05
+params:
+  rebalance_interval_s: 60
 ```
 
-`StrategyConfig` fields `risk_overrides`, `execution_overrides`, and `portfolio_overrides` are all optional dicts that overlay the system-level defaults.
-
-#### `load_app_config()` signature
-
-```python
-load_app_config(
-    trading_config_yaml: str,           # path to trading_config.yaml
-    strategy_config_yamls: list[str],   # list of per-strategy yaml paths
-    yaml_path: str = None,              # deprecated single-file path (backward-compat)
-)
-```
-
-### `config.json` → `config_json` (dict)
-
-```json
-{
-  "Spot Trading Pairs": {
-    "Binance Pairs": ["ETHUSDT", "BTCUSDT", "SOLUSDT"],
-    "Binance Symbols": ["ETH", "BTC", "SOL"],
-    "Aster Pairs": [...],
-    "Aster Symbols": [...]
-  },
-  "Futures Trading Pairs": { ... },
-  "Spot Total Tokens": ["ETH", "BTC", "SOL"],
-  "Futures Total Tokens": [...]
-}
-```
-
-### `.env` — Credentials
+### Config Priority (highest wins)
 
 ```
-BINANCE_API_KEY=...
-BINANCE_API_SECRET=...
-ASTER_API_KEY=...
-ASTER_API_SECRET=...
-DATABASE_HOST=...
-DATABASE_PORT=...
-DATABASE_NAME=...
-DATABASE_USER=...
-DATABASE_PASSWORD=...
+strategy risk: section (strategy_NNN.yaml)
+  ↓ overrides
+venue_configs["{asset_type}_{venue}"] (trading_config.yaml)
+  ↓ overrides
+global risk: section (trading_config.yaml)
 ```
+
+`cfg.effective_risk_for(strategy_id=N)` returns the fully-merged `RiskConfig` for strategy N.
+
+### Sub-account Credentials
+
+API keys are resolved from environment variables using the pattern:
+```
+{VENUE}_API_KEY_{strategy_id}
+{VENUE}_API_SECRET_{strategy_id}
+```
+
+e.g., `BINANCE_API_KEY_0` and `BINANCE_API_SECRET_0` for strategy 0.
 
 ---
 
-## 12. Logging
+## 15. Adding a New Strategy (Checklist)
 
-All components use consistent log prefixes with structured severity:
-
-| Prefix | Component | Example |
-|--------|-----------|---------|
-| `[Runner]` | StrategyRunner | `[Runner] Pipeline complete: MyStrategy.portfolio -> Optimizer -> ExecutionEngine` |
-| `[Strategy]` | SpotStrategy | `[Strategy] submit_weights: 3 symbols, sum=0.9000` |
-| `[Optimizer]` | PortfolioOptimizer | `[Optimizer] Clipped 1 symbols: {'ETHUSDT': 0.05}` |
-| `[ExecutionEngine]` | ExecutionEngine | `[ExecutionEngine] Intent: Buy ETHUSDT qty=1.500000 @ ~3200.0000` |
-| `[Portfolio]` | Portfolio | `[Portfolio] New max drawdown: 0.0000% -> 2.3456%` |
-
-**Severity guidelines:**
-- `INFO` — pipeline transitions, state changes, summaries
-- `WARNING` — rejected signals, rate limits, new max drawdown
-- `ERROR` — order failures, sync failures (with `exc_info=True`)
-- `DEBUG` — skipped legs, intermediate calculations
+1. Subclass `SpotStrategy` in `elysian_core/strategy/`
+2. Create `elysian_core/config/strategies/strategy_NNN_<name>.yaml` with a unique `strategy_id`
+3. Add env vars `{VENUE}_API_KEY_{strategy_id}` and `{VENUE}_API_SECRET_{strategy_id}` to `.env`
+4. Register the YAML path in `run_strategy.py` (or via `STRATEGY_CONFIG_YAML` env var in Docker)
+5. Implement `compute_weights(**ctx)` as a pure function — no side effects
+6. All initialization that needs `self.cfg` or `self.strategy_config` goes in `on_start()`, not `__init__()`
+7. Use bounded collections (`deque(maxlen=N)`, `NumpySeries(maxlen=N)`) for all rolling state
+8. Gate rebalance triggers: check elapsed time before calling `request_rebalance()`
+9. Read `self._shadow_book` for position/cash state, never `self.portfolio`
+10. Never include stablecoin keys (`USDT`, `USDC`, `BUSD`) in the weight dict
 
 ---
 
-## 13. Error Handling & Resilience
+## 16. Adding a New Exchange Connector (Checklist)
 
-### Strategy Hook Isolation
-
-```python
-async def _dispatch_kline(self, event):
-    try:
-        await self.on_kline(event)
-    except Exception as e:
-        logger.error(f"on_kline error: {e}", exc_info=True)
-    # Exception does NOT propagate to worker or EventBus
-```
-
-### EventBus Error Isolation
-
-```python
-for cb in subscribers:
-    try:
-        await cb(event)
-    except Exception:
-        logger.error(...)
-    # Other subscribers still fire
-```
-
-### Execution Engine Per-Order Isolation
-
-Each order intent is submitted independently. One failure doesn't block others:
-```python
-for intent in sells + buys:
-    ok = await self._submit_order(intent)
-    if ok: submitted += 1
-    else:  failed += 1; errors.append(...)
-```
-
-### Shutdown
-
-```
-try:
-    ... (main loop)
-except asyncio.CancelledError:
-    logger.warning("Cancelled by user")
-except Exception:
-    logger.error("Fatal error", exc_info=True)
-    raise
-finally:
-    exchange.cleanup()
-    portfolio.stop()
-    strategy.stop()
-    _cleanup([])  # stop all client managers
-```
+1. Create `NewExchangeKlineFeed`, `NewExchangeOrderBookFeed` subclassing `AbstractDataFeed`
+2. Create `NewExchangeKlineClientManager`, `NewExchangeOrderBookClientManager` subclassing the abstract managers
+3. Create `NewExchangeUserDataClientManager` with `register()`, `set_event_bus()`, `start()`, `stop()`
+4. Worker coroutine must: update feed state first (sync), then `await self._event_bus.publish(...)` (async). Order matters — strategy hooks see consistent state
+5. Implement exponential backoff reconnection: start at 1s, double, cap at 60s
+6. Create `NewExchangeSpotExchange(SpotExchangeConnector)` with all abstract methods
+7. Add `Venue.NEW_EXCHANGE` to `core/enums.py`
+8. Register in `StrategyRunner._exchange_connector_callables`
 
 ---
 
-## 14. Writing a New Strategy
+## 17. What NOT to Do
 
-### Minimal Example
-
-```python
-from elysian_core.strategy.base_strategy import SpotStrategy
-from elysian_core.core.events import KlineEvent
-
-class MyStrategy(SpotStrategy):
-    async def on_kline(self, event: KlineEvent):
-        price = event.kline.close
-        # Your alpha logic here
-        weights = {"ETHUSDT": 0.5, "BTCUSDT": 0.4}
-        result = await self.submit_weights(weights)
-```
-
-### Available to Strategies
-
-| Method | Description |
-|--------|-------------|
-| `self.submit_weights(weights, metadata)` | Send weights through risk → execution pipeline |
-| `self.get_exchange(venue)` | Direct exchange access (escape hatch) |
-| `self.get_feed(symbol)` | Access raw feed data |
-| `self.get_current_price(pair, side)` | Smart price lookup (direct → inverted → synthetic) |
-| `self.get_current_vol(symbol)` | Annualised rolling vol in bps |
-| `self.run_heavy(fn, *args)` | Offload CPU work to ProcessPoolExecutor |
-| `self.portfolio` | Full portfolio state (cash, positions, weights, risk) |
-| `self.args` | Parsed config.yaml |
-| `self.config_json` | Parsed config.json |
-
-### Running a Strategy
-
-```python
-from elysian_core.run_strategy import StrategyRunner
-
-runner = StrategyRunner()
-strategy = MyStrategy(exchanges={}, event_bus=EventBus())
-await runner.run(strategy=strategy)
-```
-
-The runner handles all wiring: EventBus creation, exchange init, feed setup, pipeline injection.
+| Anti-pattern | Why it breaks Elysian |
+|---|---|
+| `await event_bus.publish()` inside `compute_weights()` | compute_weights must be pure; FSM is not re-entrant during execution |
+| Calling `optimizer.validate()` directly in a strategy | Bypasses FSM state machine; cooldown and error recovery break |
+| Subscribing to `ORDER_UPDATE` on the shared bus | All strategies receive all fills; ShadowBook corruption |
+| `threading.Thread` or a second event loop | Breaks single-loop invariant |
+| Reading `self.portfolio` for per-strategy state | Portfolio is an aggregate; use `self._shadow_book` |
+| `asyncio.create_task()` inside `on_kline` | Escapes backpressure; can cause unbounded queue growth |
+| `{"USDT": 1.0}` in compute_weights return value | ExecutionEngine will attempt to place `USDTUSDT` order (symbol doesn't exist) |
+| Return `{}` with stablecoin key | Same as above — return `{}` (empty dict) for all-cash |
+| Mutable objects in frozen event dataclasses | Downstream subscribers mutate shared state; copy if needed |
+| Hardcoding `strategy_id` references in API keys | Must match env var suffix exactly; reusing IDs corrupts ShadowBook routing |
 
 ---
 
-## 15. Performance Characteristics
+## 18. Performance Characteristics
 
 | Metric | Value |
 |--------|-------|
-| Feed latency | <100ms exchange → feed update |
-| Event dispatch | <1ms feed → strategy hook (in-process, zero serialization) |
-| Order latency | <500ms signal → exchange API call |
-| Kline throughput | ~1000 msg/s per socket |
-| OB throughput | ~10,000 msg/s per socket (~10/s per symbol) |
-| Queue capacity | 10,000 messages max (prevents unbounded memory) |
-| Memory footprint | ~200MB base + ~50MB per 1000 symbols |
-| CPU | 1-2 cores for I/O, scales with strategy complexity |
-
----
-
-## 16. Future Expansion Points
-
-- **Multi-exchange portfolios** — `sync_from_exchange()` is designed to be called once per venue; `_cash_dict` supports multi-stablecoin aggregation
-- **Futures strategies** — `FuturesExchangeConnector` base class exists with leverage/margin/position management; `RiskConfig` has `max_leverage` and `max_short_weight` fields
-- **Backtesting** — Portfolio works standalone (no EventBus required); `mark_to_market()` and `update_position()` can be driven by historical data
-- **Dynamic risk** — `RiskConfig` is mutable; tighten limits at runtime during vol spikes or drawdown breakers
-- **Custom order types** — `ExecutionEngine` reads `default_order_type` and supports both MARKET and LIMIT; extensible to TWAP/VWAP
+| Feed latency | < 100ms exchange → feed update |
+| Event dispatch (in-process) | < 1ms per subscriber (zero serialization) |
+| Redis serialization overhead | ~1ms per event (JSON encode/decode) |
+| Order latency | < 500ms signal → exchange REST |
+| Kline throughput | ~1,000 msg/s per Binance socket |
+| OB throughput | ~10,000 msg/s per Binance socket |
+| Queue capacity | 10,000–100,000 messages (bounded per manager) |
+| Fill history | 10,000 fills per ShadowBook (ring buffer) |
