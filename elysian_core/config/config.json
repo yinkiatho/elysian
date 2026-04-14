@@ -6,37 +6,11 @@
         "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT",
         "DOGEUSDT"
       ],
-      "futures": [
-        "BTCUSDT", "ETHUSDT",
-        "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT",
-        "DOGEUSDT", "AVAXUSDT", "DOTUSDT", "MATICUSDT",
-        "LINKUSDT", "UNIUSDT", "ATOMUSDT", "LTCUSDT",
-        "NEARUSDT", "APTUSDT", "ARBUSDT", "OPUSDT",
-        "INJUSDT", "TIAUSDT", "SEIUSDT", "SUIUSDT",
-        "STXUSDT", "WLDUSDT", "ORDIUSDT"
-      ]
+      "futures": []
     },
     "aster": {
-      "spot": [
-        "ASTERUSDT", "BTCUSDT", "ETHUSDT", "TESTUSDT",
-        "USD1USDT", "FORMUSDT", "USDCUSDT", "CDLUSDT",
-        "4USDT", "GIGGLEUSDT", "BIANLIFEUSDT", "PALUUSDT",
-        "BNBUSDT", "CSXHUSDT", "PUPUSDT", "SZNUSDT",
-        "DUSTUSDT", "CWZYUSDT", "WBULLUSDT", "YEPEUSDT",
-        "TEST1USDT", "TEST2USDT", "HEMIUSDT", "ATUSDT",
-        "DEXEUSDT", "BIOUSDT", "AVLUSDT", "GUAUSDT",
-        "TAGUSDT", "SKYAIUSDT", "CYSUSDT", "UUSDT",
-        "SENTISUSDT", "GAIXUSDT", "SOONUSDT", "BREVUSDT",
-        "STARUSDT", "VELOUSDT", "CMC20USDT", "ARTXUSDT",
-        "BMTUSDT"
-      ],
-      "futures": [
-        "ASTERUSDT", "BTCUSDT", "ETHUSDT", "BNBUSDT",
-        "SOLUSDT", "XRPUSDT", "DOGEUSDT", "HYPEUSDT",
-        "ADAUSDT", "DOTUSDT", "1000SHIBUSDT", "AXSUSDT",
-        "AVAXUSDT", "LTCUSDT", "GALAUSDT", "NEARUSDT",
-        "TRXUSDT", "ATOMUSDT", "CAKEUSDT"
-      ]
+      "spot": [],
+      "futures": []
     },
     "bybit": {
       "spot": [],

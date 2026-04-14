@@ -262,12 +262,12 @@ class MarketDataService:
 
         if self.binance_token_symbols:
             binance_ob_feeds = self._register_binance_spot_feeds()
-        # if self.binance_futures_token_symbols:
-        #     binance_futures_ob_feeds = self._register_binance_futures_feeds()
-        # if self.aster_token_symbols:
-        #     aster_ob_feeds = self._register_aster_spot_feeds()
-        # if self.aster_futures_token_symbols:
-        #     aster_futures_ob_feeds = self._register_aster_futures_feeds()
+        if self.binance_futures_token_symbols:
+            binance_futures_ob_feeds = self._register_binance_futures_feeds()
+        if self.aster_token_symbols:
+            aster_ob_feeds = self._register_aster_spot_feeds()
+        if self.aster_futures_token_symbols:
+            aster_futures_ob_feeds = self._register_aster_futures_feeds()
 
         self.logger.info(f"[MDS] Total feeds registered: {self._total_feeds}")
 
@@ -275,15 +275,15 @@ class MarketDataService:
         if self.binance_token_symbols:
             await self.binance_kline_manager.start()
             await self.binance_ob_manager.start()
-        # if self.binance_futures_token_symbols:
-        #     await self.binance_futures_kline_manager.start()
-        #     await self.binance_futures_ob_manager.start()
-        # if self.aster_token_symbols:
-        #     await self.aster_kline_manager.start()
-        #     await self.aster_ob_manager.start()
-        # if self.aster_futures_token_symbols:
-        #     await self.aster_futures_kline_manager.start()
-        #     await self.aster_futures_ob_manager.start()
+        if self.binance_futures_token_symbols:
+            await self.binance_futures_kline_manager.start()
+            await self.binance_futures_ob_manager.start()
+        if self.aster_token_symbols:
+            await self.aster_kline_manager.start()
+            await self.aster_ob_manager.start()
+        if self.aster_futures_token_symbols:
+            await self.aster_futures_kline_manager.start()
+            await self.aster_futures_ob_manager.start()
 
         # 5. Launch multiplex reader/worker tasks (background — run_forever)
         multiplex_tasks = []
@@ -295,36 +295,36 @@ class MarketDataService:
             multiplex_tasks.append(asyncio.create_task(
                 self.binance_ob_manager.run_multiplex_feeds(), name="binance-spot-ob"
             ))
-        # if self.binance_futures_kline_manager._active_feeds:
-        #     multiplex_tasks.append(asyncio.create_task(
-        #         self.binance_futures_kline_manager.run_multiplex_feeds(), name="binance-futures-kline"
-        #     ))
-        # if self.binance_futures_ob_manager._active_feeds:
-        #     multiplex_tasks.append(asyncio.create_task(
-        #         self.binance_futures_ob_manager.run_multiplex_feeds(), name="binance-futures-ob"
-        #     ))
-        # if self.aster_kline_manager._active_feeds:
-        #     multiplex_tasks.append(asyncio.create_task(
-        #         self.aster_kline_manager.run_multiplex_feeds(), name="aster-spot-kline"
-        #     ))
-        # if self.aster_ob_manager._active_feeds:
-        #     multiplex_tasks.append(asyncio.create_task(
-        #         self.aster_ob_manager.run_multiplex_feeds(), name="aster-spot-ob"
-        #     ))
-        # if self.aster_futures_kline_manager._active_feeds:
-        #     multiplex_tasks.append(asyncio.create_task(
-        #         self.aster_futures_kline_manager.run_multiplex_feeds(), name="aster-futures-kline"
-        #     ))
-        # if self.aster_futures_ob_manager._active_feeds:
-        #     multiplex_tasks.append(asyncio.create_task(
-        #         self.aster_futures_ob_manager.run_multiplex_feeds(), name="aster-futures-ob"
-        #     ))
+        if self.binance_futures_kline_manager._active_feeds:
+            multiplex_tasks.append(asyncio.create_task(
+                self.binance_futures_kline_manager.run_multiplex_feeds(), name="binance-futures-kline"
+            ))
+        if self.binance_futures_ob_manager._active_feeds:
+            multiplex_tasks.append(asyncio.create_task(
+                self.binance_futures_ob_manager.run_multiplex_feeds(), name="binance-futures-ob"
+            ))
+        if self.aster_kline_manager._active_feeds:
+            multiplex_tasks.append(asyncio.create_task(
+                self.aster_kline_manager.run_multiplex_feeds(), name="aster-spot-kline"
+            ))
+        if self.aster_ob_manager._active_feeds:
+            multiplex_tasks.append(asyncio.create_task(
+                self.aster_ob_manager.run_multiplex_feeds(), name="aster-spot-ob"
+            ))
+        if self.aster_futures_kline_manager._active_feeds:
+            multiplex_tasks.append(asyncio.create_task(
+                self.aster_futures_kline_manager.run_multiplex_feeds(), name="aster-futures-kline"
+            ))
+        if self.aster_futures_ob_manager._active_feeds:
+            multiplex_tasks.append(asyncio.create_task(
+                self.aster_futures_ob_manager.run_multiplex_feeds(), name="aster-futures-ob"
+            ))
 
         # 6. Wait for WebSocket connections to establish before fetching snapshots
         all_ob_feeds = (
             binance_ob_feeds 
-            # + binance_futures_ob_feeds
-            # + aster_ob_feeds + aster_futures_ob_feeds
+            + binance_futures_ob_feeds
+            + aster_ob_feeds + aster_futures_ob_feeds
         )
         if all_ob_feeds:
             self.logger.info("[MDS] Waiting 10s for WebSocket connections to stabilise...")
