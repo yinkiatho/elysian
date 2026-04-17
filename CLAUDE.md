@@ -22,152 +22,213 @@
 - Use `/examples` for example code
 
 ---
-
 ## Elysian System Architecture
 
-Elysian is a **single‑asyncio‑event‑loop, event‑driven, multi‑venue cryptocurrency trading system**. These guidelines describe the current design. You may propose changes, but any deviation must be justified by a performance benchmark or a concrete scalability requirement.
+Elysian is a **single‑asyncio‑event‑loop, event‑driven, multi‑venue cryptocurrency trading system**
+running as a set of Docker containers. Market data ingestion and strategy execution are separated into
+independent containers communicating over **Redis pub/sub**. These guidelines describe the current design.
+You may propose changes, but any deviation must be justified by a performance benchmark or a concrete
+scalability requirement.
 
 ### Core Design
 
-- **Single event loop** – all async I/O, feeds, and strategy hooks run in one loop. No threading, no `new_event_loop()` in threads.
+- **Single event loop per container** – all async I/O, feeds, and strategy hooks run in one loop per
+  process. No threading, no `new_event_loop()` in threads.
+- **Two‑container deployment** – a dedicated `elysian_market_data` container owns all WebSocket feed
+  managers and publishes events to Redis. Each `elysian_strategy_N` container subscribes to Redis and
+  runs the full Stage 3–5 pipeline independently.
 - **Six‑stage pipeline** (immutable in production, changeable in design):
-  1. Market data (WebSocket → feed managers)
-  2. EventBus (typed, immutable events to subscribers)
+  1. Market data (WebSocket → feed managers → `RedisEventBusPublisher`)
+  2. Redis pub/sub transport (`RedisEventBusSubscriber` in each strategy container)
   3. Strategy (`compute_weights`)
   4. Risk (portfolio optimisation)
   5. Execution (order intent → exchange REST)
   6. Exchange (Binance/Aster REST + user‑data WS)
 
-  Stages 3→5 use **direct method calls** (not EventBus) because they are sequential. Only `RebalanceCompleteEvent` goes on the bus after execution.
+  Stages 3→5 use **direct method calls** (not EventBus) because they are sequential.
+  Only `RebalanceCompleteEvent` goes on the private bus after execution.
 
-- **Two‑bus separation** – each strategy has a shared bus (market data) and a private bus (account events). Prevents cross‑strategy fill contamination.
-- **ShadowBook as authoritative ledger** – per‑strategy source of truth for positions, cash, locked funds, PnL. `Portfolio` is a read‑only aggregator.
-- **RebalanceFSM** – the only entry point to the Stage 3→5 pipeline. FSM states: `IDLE → COMPUTING → VALIDATING → EXECUTING → COOLDOWN → IDLE`.
+- **Two‑bus separation** – each strategy container has a `shared_event_bus` (Redis, for market data)
+  and a `private_event_bus` (in-process, for account events). Prevents cross‑strategy fill contamination.
+- **ShadowBook as authoritative ledger** – per‑strategy source of truth for positions, cash, locked
+  funds, PnL. `Portfolio` is a read‑only aggregator.
+- **RebalanceFSM** – the only entry point to the Stage 3→5 pipeline.
+  FSM states: `IDLE → COMPUTING → VALIDATING → EXECUTING → COOLDOWN → IDLE`.
 
 ### Invariants (Must Never Break)
 
 - **No threading** – never use `ThreadPoolExecutor`, `threading.Thread`, or create a second event loop.
-- **ShadowBook is per‑strategy truth** – always read `self._shadow_book` for a strategy’s own state, not `self.portfolio`.
-- **FSM controls rebalance cycles** – never call `optimizer.validate()` or `execution_engine.execute()` directly from a strategy.
-- **`compute_weights()` is pure** – no I/O, no EventBus publishes, no side effects. Returns `{}` or `None` to skip a cycle.
-- **Sub‑account exchange per strategy** – never share API keys or instantiate an exchange connector manually.
-- **`EventBus.publish()` is awaited** – never fire‑and‑forget inside a strategy hook (exceptions: exchange connectors for DB writes).
-- **No `asyncio.create_task()` inside strategy hooks** – breaks backpressure. Use `self.run_heavy()` for CPU‑heavy work.
+- **ShadowBook is per‑strategy truth** – always read `self._shadow_book` for a strategy's own state,
+  not `self.portfolio`.
+- **FSM controls rebalance cycles** – never call `optimizer.validate()` or
+  `execution_engine.execute()` directly from a strategy.
+- **`compute_weights()` is pure** – no I/O, no EventBus publishes, no side effects. Returns `{}` or
+  `None` to skip a cycle.
+- **Sub‑account exchange per strategy** – never share API keys or instantiate an exchange connector
+  manually inside a strategy.
+- **`EventBus.publish()` is awaited** – never fire‑and‑forget inside a strategy hook (exceptions:
+  exchange connectors for DB writes).
+- **No `asyncio.create_task()` inside strategy hooks** – breaks backpressure. Use `self.run_heavy()`
+  for CPU‑heavy work.
 - **No stablecoin keys in weight dicts** – return `{}` for all‑cash, not `{"USDT": 1.0}`.
 
 ### Modification Guidelines
 
-- You may **relax** an invariant if a benchmark shows the current design limits throughput or latency. Include the benchmark command and results in the PR.
-- You may **add** new event types, feed managers, or exchange connectors following the existing patterns (see checklists in `docs/architecture.md`).
-- You may **replace** the EventBus with a streaming broker (e.g., Redis Streams) if you preserve the backpressure semantics and event immutability.
-- When in doubt, preserve the **single‑loop, no‑shared‑mutable‑state** property – it eliminates entire classes of concurrency bugs.
+- You may **relax** an invariant if a benchmark shows the current design limits throughput or latency.
+  Include the benchmark command and results in the PR.
+- You may **add** new event types, feed managers, or exchange connectors following the existing patterns
+  (see checklists below).
+- You may **replace** the Redis transport with a streaming broker (e.g., Redis Streams, Kafka) if you
+  preserve backpressure semantics and event immutability.
+- When in doubt, preserve the **single‑loop, no‑shared‑mutable‑state** property – it eliminates entire
+  classes of concurrency bugs.
 
 
 ### 1. Current Six-Stage Pipeline
 
-Every market signal travels exactly this path: 
-
-```
+Every market signal travels exactly this path:
 Stage 1  Market Data     WebSocket feeds → KlineClientManager / OBClientManager workers
-Stage 2  EventBus        Typed, immutable event dispatch to all subscribers
+→ RedisEventBusPublisher → Redis pub/sub channels
+Stage 2  Transport       RedisEventBusSubscriber._listener_loop → dispatch to shared_event_bus
 Stage 3  Strategy        on_kline / on_orderbook_update → compute_weights(**ctx)
 Stage 4  Risk            PortfolioOptimizer.validate() → ValidatedWeights
 Stage 5  Execution       ExecutionEngine.execute() → OrderIntent → Exchange REST
 Stage 6  Exchange        BinanceSpotExchange / AsterSpotExchange REST + user-data WS
-```
 
-**Rule**: Stages 3→5 use direct method calls (not EventBus) because they are inherently sequential. Only `RebalanceCompleteEvent` is published to the bus post-execution for observability. Never re-route this chain through the EventBus.
+**Rule**: Stages 3→5 use direct method calls (not EventBus) because they are inherently sequential.
+Only `RebalanceCompleteEvent` is published to the **private** bus post-execution for observability.
+Never re-route this chain through the shared bus.
+
+**Redis channel naming:**
+elysian:md:{venue_lower}:{asset_type_lower}:kline:{SYMBOL}
+elysian:md:{venue_lower}:{asset_type_lower}:orderbook:{SYMBOL}
 
 ### 2. Event-First Design
 
-- All inter-component notifications are **frozen dataclasses** (`@dataclass(frozen=True)`) defined in `core/events.py`. Never pass mutable dicts between components.
-- Events are the sole mechanism for notifying downstream consumers of state changes. No polling, no direct callbacks outside the EventBus.
-- The canonical event types are: `KlineEvent`, `OrderBookUpdateEvent`, `OrderUpdateEvent`, `BalanceUpdateEvent`, `RebalanceCompleteEvent`, `LifecycleEvent`, `RebalanceCycleEvent`. Adding a new event type requires adding it to `EventType` enum **and** the frozen dataclass in `events.py`.
+- All inter-component notifications are **frozen dataclasses** (`@dataclass(frozen=True)`) defined in
+  `core/events.py`. Never pass mutable dicts between components.
+- Events are the sole mechanism for notifying downstream consumers of state changes. No polling, no
+  direct callbacks outside the EventBus.
+- Canonical event types: `KlineEvent`, `OrderBookUpdateEvent`, `OrderUpdateEvent`,
+  `BalanceUpdateEvent`, `RebalanceCompleteEvent`, `LifecycleEvent`, `RebalanceCycleEvent`.
+  Adding a new event type requires adding it to `EventType` enum **and** the frozen dataclass in `events.py`.
 - `EventBus.publish()` is always `await`ed — this is intentional backpressure. Never fire-and-forget.
 
 ### 3. Two-Bus Architecture (Shared vs Private)
 
-Every strategy uses **two separate EventBus instances**:
+Every strategy container uses **two separate EventBus instances**:
 
-| Bus | Carries | Subscribed by |
-|-----|---------|---------------|
-| `shared_event_bus` | `KLINE`, `ORDERBOOK_UPDATE` | All strategies, ShadowBook (`_on_kline`) |
-| `private_event_bus` | `ORDER_UPDATE`, `BALANCE_UPDATE`, `REBALANCE_COMPLETE` | One strategy only, its ShadowBook |
+| Bus | Carries | Transport | Subscribed by |
+|-----|---------|-----------|---------------|
+| `shared_event_bus` | `KLINE`, `ORDERBOOK_UPDATE` | Redis pub/sub (cross-container) | All strategies, ShadowBook (`_on_kline`), ExecutionEngine (`_on_kline`) |
+| `private_event_bus` | `ORDER_UPDATE`, `BALANCE_UPDATE`, `REBALANCE_COMPLETE`, `REBALANCE_CYCLE` | In-process EventBus | One strategy only, its ShadowBook |
 
-**Rule**: Never subscribe a strategy to account events (`ORDER_UPDATE`, `BALANCE_UPDATE`) on the shared bus. Cross-strategy fill contamination will corrupt all ShadowBooks. The private bus is created in `_create_sub_account_exchange()` and injected by the runner — never create it inside a strategy.
+**Rule**: Never subscribe a strategy to account events (`ORDER_UPDATE`, `BALANCE_UPDATE`) on the shared
+bus. Cross-strategy fill contamination will corrupt all ShadowBooks. The private bus is created in
+`_create_sub_account_exchange()` and injected by the runner — never create it inside a strategy.
+
+**Note on ORDER_UPDATE / BALANCE_UPDATE dispatch**: These are dispatched to the ShadowBook via
+`asyncio.gather()` inside the strategy's dispatch methods (not via direct ShadowBook subscription),
+giving concurrent strategy hook and ShadowBook update execution.
 
 ### 4. ShadowBook is the Authoritative Ledger (Not Portfolio)
 
-- Each strategy owns exactly one `ShadowBook`. It is the source of truth for that strategy's positions, cash, weights, PnL, and outstanding orders.
-- `Portfolio` is a **read-only aggregator** — it sums ShadowBook NAVs for monitoring only. Never write to Portfolio directly.
+- Each strategy owns exactly one `ShadowBook`. It is the source of truth for that strategy's
+  positions, cash, weights, PnL, and outstanding orders.
+- `Portfolio` is a **read-only aggregator** — it sums ShadowBook NAVs for monitoring only. Never
+  write to Portfolio directly.
 - Strategies must read `self._shadow_book` (not `self.portfolio`) when computing weights:
-  ```python
+```python
   # CORRECT
-  my_qty = self._shadow_book.position("ETHUSDT").quantity
-  my_cash = self._shadow_book.free_cash
+  my_qty  = self._shadow_book.position("ETHUSDT").quantity
+  my_cash = self._shadow_book.free_cash   # excludes locked LIMIT BUY reservations
 
   # WRONG — Portfolio is an aggregate, not this strategy's ledger
   my_qty = self.portfolio.positions.get("ETHUSDT")
-  ```
-- `free_cash` (not `cash`) is the correct field for computing how much capital is available — it excludes locked LIMIT BUY reservations.
+```
+- `free_cash` (not `cash`) is the correct field — it excludes cash locked for pending LIMIT BUY orders.
+- Non-stablecoin commissions (e.g. BNB fees) are tracked via `_asset_symbol_map` and
+  `_position_deducted_comm` to avoid double-counting in `net_pnl()`.
 
 ### 5. RebalanceFSM Controls All Rebalance Cycles
 
-- `RebalanceFSM` is the only permitted entry point to the Stage 3→5 pipeline. Never call `optimizer.validate()` or `execution_engine.execute()` directly from strategy code.
-- Trigger a cycle with `await self.request_rebalance(**ctx)`. It returns `False` silently if the FSM is busy — this is by design. Do not retry in a tight loop.
-- FSM states: `IDLE → COMPUTING → VALIDATING → EXECUTING → COOLDOWN → IDLE`. A suspended FSM (`SUSPENDED`) blocks all new cycles until `resume_rebalancing()` is called.
-- `compute_weights(**ctx)` must be **pure**: no exchange calls, no EventBus publishes, no mutable state mutations. It returns `{}` or `None` to skip a cycle.
+- `RebalanceFSM` is the only permitted entry point to the Stage 3→5 pipeline. Never call
+  `optimizer.validate()` or `execution_engine.execute()` directly from strategy code.
+- Trigger a cycle with `await self.request_rebalance(**ctx)`. Returns `False` silently if the FSM is
+  busy — this is by design. Do not retry in a tight loop.
+- FSM states: `IDLE → COMPUTING → VALIDATING → EXECUTING → COOLDOWN → IDLE`. A suspended FSM
+  (`SUSPENDED`) blocks all new cycles until `resume_rebalancing()` is called.
+- `compute_weights(**ctx)` must be **pure**: no exchange calls, no EventBus publishes, no mutable
+  state mutations. Returns `{}` or `None` to skip a cycle.
 
 ### 6. Sub-Account Mode (Always Active)
 
-- Every strategy gets a dedicated exchange connector with its own API keys, resolved from env vars as `{VENUE}_API_KEY_{strategy_id}` / `{VENUE}_API_SECRET_{strategy_id}`.
-- The sub-account exchange is created in `StrategyRunner._create_sub_account_exchange()`. Never instantiate `BinanceSpotExchange` directly inside a strategy.
-- Sub-account `strategy_id` values must be unique integers across all loaded strategies. Reusing an ID corrupts ShadowBook routing.
+- Every strategy gets a dedicated exchange connector with its own API keys, resolved from env vars as
+  `{VENUE}_API_KEY_{strategy_id}` / `{VENUE}_API_SECRET_{strategy_id}`.
+- The sub-account exchange is created in `StrategyRunner._create_sub_account_exchange()`. Never
+  instantiate `BinanceSpotExchange` directly inside a strategy.
+- Sub-account `strategy_id` values must be unique integers across all loaded strategies. Reusing an ID
+  corrupts ShadowBook routing.
+- The `STRATEGY_CONFIG_YAML` env var selects the per-strategy config for a given container.
+  Each strategy container runs exactly one strategy.
 
-### 7. Concurrency Model (Single Event Loop)
+### 7. Concurrency Model (Single Event Loop per Container)
 
-- **One asyncio event loop governs everything.** No `ThreadPoolExecutor` for I/O, no `new_event_loop()` in threads.
-- Each `KlineClientManager` / `OBClientManager` runs: 1 reader task + up to 8 worker tasks, all in the same loop.
-- `EventBus.publish()` is awaited sequentially per subscriber — this provides natural backpressure. If a strategy hook is slow, the feed worker waits. Do not spawn `asyncio.create_task()` inside hooks to escape this; it breaks backpressure.
-- CPU-heavy strategy calculations must be offloaded via `self.run_heavy(fn, *args)` (uses `ProcessPoolExecutor`). `fn` must be a top-level picklable function — not a lambda, method, or closure.
-- The only permitted `asyncio.create_task()` calls are in `StrategyRunner` for feed coroutines and in exchange connectors for fire-and-forget DB writes (`_record_trade`).
+- **One asyncio event loop governs everything inside a container.** No `ThreadPoolExecutor` for I/O,
+  no `new_event_loop()` in threads.
+- `MarketDataService` container: each `KlineClientManager` / `OBClientManager` runs 1 reader task +
+  up to 8 worker tasks, all in the same loop.
+- `elysian_strategy_N` container: two top-level tasks —
+  `RedisEventBusSubscriber._listener_loop` (market data) and `strategy.run_forever()`.
+  `BinanceUserDataClientManager` runs a third task for account events on the private bus.
+- `EventBus.publish()` is awaited sequentially per subscriber — natural backpressure. Do not spawn
+  `asyncio.create_task()` inside hooks to escape this; it breaks backpressure.
+- CPU-heavy strategy calculations must be offloaded via `self.run_heavy(fn, *args)`
+  (`ProcessPoolExecutor`). `fn` must be a top-level picklable function — not a lambda, method, or closure.
+- The only permitted `asyncio.create_task()` calls are in `StrategyRunner` for the Redis listener and
+  `run_forever()`, and in exchange connectors for fire-and-forget DB writes (`_record_trade`).
 
 ### 8. Configuration Hierarchy
 
 Config priority (highest wins):
-```
 strategy risk: section (strategy_NNN.yaml)
-  ↓ overrides
+↓ overrides
 venue_configs["{asset_type}_{venue}"] (trading_config.yaml)
-  ↓ overrides
+↓ overrides
 global risk: section (trading_config.yaml)
-```
 
 - `cfg.effective_risk_for(strategy_id=N)` returns the fully-merged `RiskConfig` for strategy N.
 - Never hardcode risk parameters in strategy code. Read from `self.strategy_config.params` or `self.cfg`.
 - Strategy YAML `strategy_id` must match the env var suffix: `BINANCE_API_KEY_{strategy_id}`.
+- `STRATEGY_CONFIG_YAML` env var (set per Docker service) selects which strategy YAML is loaded.
 
 ### 9. Adding a New Strategy (Checklist)
 
 1. Subclass `SpotStrategy` in `elysian_core/strategy/`.
 2. Create `elysian_core/config/strategies/strategy_NNN_<name>.yaml` with a unique `strategy_id`.
 3. Add env vars `{VENUE}_API_KEY_{strategy_id}` and `{VENUE}_API_SECRET_{strategy_id}` to `.env`.
-4. Register the YAML path in `run_strategy.py` `strategy_config_yamls` list.
+4. Add a new service block in `docker-compose.yml` with `STRATEGY_CONFIG_YAML` pointing to the new YAML.
 5. Implement `compute_weights(**ctx)` as a pure function — no side effects.
 6. All initialization that needs `self.cfg` or `self.strategy_config` goes in `on_start()`, not `__init__()`.
 7. Use bounded collections (`deque(maxlen=N)`, `NumpySeries(maxlen=N)`) for all rolling state.
-8. Gate rebalance triggers: check `time.monotonic() - self._last_rebalance_ts > self._rebalance_interval` before calling `request_rebalance()`.
+8. Gate rebalance triggers: check `time.monotonic() - self._last_rebalance_ts > self._rebalance_interval`
+   before calling `request_rebalance()`.
+9. Read `self._shadow_book` for position/cash state, never `self.portfolio`.
+10. Return `{}` (empty dict, not `{"USDT": 1.0}`) for all-cash — stablecoin keys cause invalid order placement.
 
 ### 10. Adding a New Exchange Connector (Checklist)
 
 1. Create `NewExchangeKlineFeed`, `NewExchangeOrderBookFeed` subclassing `AbstractDataFeed`.
-2. Create `NewExchangeKlineClientManager`, `NewExchangeOrderBookClientManager` subclassing `KlineClientManager` / `OrderBookClientManager`.
+2. Create `NewExchangeKlineClientManager`, `NewExchangeOrderBookClientManager` subclassing
+   `KlineClientManager` / `OrderBookClientManager`.
 3. Create `NewExchangeUserDataClientManager` with `register()`, `set_event_bus()`, `start()`, `stop()`.
-4. Worker coroutine must: update feed state first (sync), then `await self._event_bus.publish(...)` (async). Order matters — strategy hooks see consistent state.
+4. Worker coroutine must: update feed state first (sync), then `await self._event_bus.publish(...)`
+   (async). Order matters — strategy hooks see consistent state.
 5. Implement exponential backoff reconnection: start at 1s, double, cap at 60s.
 6. Create `NewExchangeSpotExchange(SpotExchangeConnector)` with all abstract methods.
 7. Add `Venue.NEW_EXCHANGE` to `core/enums.py`.
 8. Register in `StrategyRunner._exchange_connector_callables` and `_setup_exchanges()`.
+9. Register feed managers in `MarketDataService` (not in `StrategyRunner`).
 
 ### 11. What NOT to Do
 
@@ -180,6 +241,10 @@ global risk: section (trading_config.yaml)
 | Reading `self.portfolio` for per-strategy state | Portfolio is an aggregate; use `self._shadow_book` |
 | `asyncio.create_task()` inside `on_kline` | Escapes backpressure; can cause unbounded queue growth |
 | Mutable objects in frozen event dataclasses | Downstream subscribers mutate shared state; always use `copy.deepcopy` if you need a snapshot |
+| `{"USDT": 1.0}` in `compute_weights` return value | ExecutionEngine will attempt to place a `USDTUSDT` order |
+| Creating WebSocket feed managers in a strategy container | Feeds belong in `MarketDataService`; strategy containers only subscribe via Redis |
+| Hardcoding `strategy_id` in API key references | Must match env var suffix exactly; reusing IDs corrupts ShadowBook routing |
+| Running multiple Python processes inside one container | Breaks single-loop invariant; one container = one Python process |
 
 ---
 

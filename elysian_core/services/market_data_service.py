@@ -117,12 +117,18 @@ class MarketDataService:
 
     def _setup_config(self) -> None:
         sym = self.cfg.symbols
-        self.binance_token_symbols = sym.symbols_for("binance", "spot")
+        spot_syms = sym.symbols_for("binance", "spot")
+        margin_syms = sym.symbols_for("binance", "margin")
+        # Isolated margin shares Binance spot WebSocket streams — merge into one
+        # symbol set so the spot manager covers all symbols without duplicate feeds.
+        self.binance_token_symbols = list(
+            dict.fromkeys(spot_syms + [s for s in margin_syms if s not in spot_syms])
+        )
         self.binance_futures_token_symbols = sym.symbols_for("binance", "futures")
         self.aster_token_symbols = sym.symbols_for("aster", "spot")
         self.aster_futures_token_symbols = sym.symbols_for("aster", "futures")
         self.logger.info(
-            f"[MDS] Symbols — Binance Spot: {len(self.binance_token_symbols)}, "
+            f"[MDS] Symbols — Binance Spot+Margin: {len(self.binance_token_symbols)}, "
             f"Futures: {len(self.binance_futures_token_symbols)}, "
             f"Aster Spot: {len(self.aster_token_symbols)}, "
             f"Aster Futures: {len(self.aster_futures_token_symbols)}"
@@ -140,7 +146,7 @@ class MarketDataService:
             pub = self._make_publisher(Venue.BINANCE, AssetType.SPOT)
             self.binance_kline_manager.set_event_bus(pub)
             self.binance_ob_manager.set_event_bus(pub)
-            self.logger.info("[MDS] Publisher injected → Binance Spot managers")
+            self.logger.info("[MDS] Publisher injected → Binance Spot managers (covers spot + margin symbols)")
 
         if self.binance_futures_token_symbols:
             pub = self._make_publisher(Venue.BINANCE, AssetType.PERPETUAL)
@@ -322,7 +328,7 @@ class MarketDataService:
 
         # 6. Wait for WebSocket connections to establish before fetching snapshots
         all_ob_feeds = (
-            binance_ob_feeds 
+            binance_ob_feeds
             + binance_futures_ob_feeds
             + aster_ob_feeds + aster_futures_ob_feeds
         )

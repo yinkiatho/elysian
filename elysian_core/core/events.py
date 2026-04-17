@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Optional
 
-from elysian_core.core.enums import Venue
+from elysian_core.core.enums import AssetType, Venue
 from elysian_core.core.market_data import Kline, OrderBook
 from elysian_core.core.order import Order
 from elysian_core.core.signals import RebalanceResult, ValidatedWeights
@@ -52,6 +52,8 @@ class OrderUpdateEvent:
     venue: Venue
     order: Order
     timestamp: int
+    asset_type: AssetType = AssetType.SPOT   # SPOT | MARGIN | PERPETUAL — for sub-account routing
+    sub_account_id: int = 0                  # strategy sub-account that owns this event
     event_type: EventType = field(default=EventType.ORDER_UPDATE, init=False)
 
 
@@ -60,8 +62,10 @@ class BalanceUpdateEvent:
     asset: str
     venue: Venue
     delta: float
-    new_balance: float # Optional for Binance we dont receive this
+    new_balance: float  # Optional: Binance does not always send this
     timestamp: int
+    asset_type: AssetType = AssetType.SPOT   # SPOT | MARGIN | PERPETUAL — for sub-account routing
+    sub_account_id: int = 0                  # strategy sub-account that owns this event
     event_type: EventType = field(default=EventType.BALANCE_UPDATE, init=False)
 
 

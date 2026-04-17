@@ -27,8 +27,15 @@ from elysian_core.core.market_data import Kline, OrderBook
 def channel_prefix(venue: Venue, asset_type: AssetType) -> str:
     """Return the Redis channel prefix for a (venue, asset_type) pair.
 
-    e.g.  (Venue.BINANCE, AssetType.SPOT) → "elysian:md:binance:spot"
+    Isolated margin shares the same Binance WebSocket streams as spot, so
+    margin market data is routed to spot channels to avoid duplicate feeds.
+
+    e.g.  (Venue.BINANCE, AssetType.SPOT)   → "elysian:md:binance:spot"
+          (Venue.BINANCE, AssetType.MARGIN)  → "elysian:md:binance:spot"
+          (Venue.BINANCE, AssetType.PERPETUAL) → "elysian:md:binance:perpetual"
     """
+    if asset_type == AssetType.MARGIN:
+        asset_type = AssetType.SPOT
     return f"elysian:md:{venue.value.lower()}:{asset_type.value.lower()}"
 
 

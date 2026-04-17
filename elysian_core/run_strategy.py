@@ -23,6 +23,7 @@ from concurrent.futures import ProcessPoolExecutor
 
 from elysian_core.connectors.binance.BinanceExchange import BinanceSpotExchange
 from elysian_core.connectors.binance.BinanceFuturesExchange import BinanceFuturesExchange
+from elysian_core.connectors.binance.BinanceMarginExchange import BinanceMarginExchange
 from elysian_core.connectors.aster.AsterExchange import AsterSpotExchange
 
 from elysian_core.utils.logger import setup_custom_logger, shutdown_discord, init_discord_logging
@@ -85,7 +86,7 @@ class StrategyRunner:
         )
         
         self._portfolio_dict: Dict[AssetType, Dict[Venue, Portfolio]] = {
-            AssetType.SPOT: {}, AssetType.PERPETUAL: {},
+            AssetType.SPOT: {}, AssetType.PERPETUAL: {}, AssetType.MARGIN: {},
         }
         self._snapshot_interval_s = 0
         self._snapshot_task_dict: Dict[Any, PeriodicTask] = {}
@@ -95,6 +96,7 @@ class StrategyRunner:
         self._exchange_connector_callables = {
             (AssetType.SPOT, Venue.BINANCE): BinanceSpotExchange,
             (AssetType.PERPETUAL, Venue.BINANCE): BinanceFuturesExchange,
+            (AssetType.MARGIN, Venue.BINANCE): BinanceMarginExchange,
             (AssetType.SPOT, Venue.ASTER): AsterSpotExchange,
         }
 
@@ -360,3 +362,5 @@ if __name__ == "__main__":
         strategy_config_yaml=args.strategy_yaml,
         redis_url=args.redis_url,
     ))
+
+

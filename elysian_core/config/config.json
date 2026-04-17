@@ -6,7 +6,8 @@
         "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT",
         "DOGEUSDT"
       ],
-      "futures": []
+      "futures": [],
+      "margin": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "SUIUSDT"]
     },
     "aster": {
       "spot": [],

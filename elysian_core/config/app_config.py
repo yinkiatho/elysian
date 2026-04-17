@@ -117,6 +117,7 @@ class SecretsConfig:
 class VenueSymbols:
     spot: List[str] = field(default_factory=list)
     futures: List[str] = field(default_factory=list)
+    margin: List[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -500,6 +501,7 @@ def load_app_config(
         name: VenueSymbols(
             spot=v.get("spot", []),
             futures=v.get("futures", []),
+            margin=v.get("margin", []),
         )
         for name, v in venues_raw.items()
     }

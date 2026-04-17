@@ -10,7 +10,7 @@ These frozen dataclasses flow between stages:
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple
 
-from elysian_core.core.enums import OrderType, Side, Venue
+from elysian_core.core.enums import AssetType, MarginSideEffect, OrderType, Side, Venue
 
 
 @dataclass(frozen=True)
@@ -56,10 +56,13 @@ class OrderIntent:
     symbol: str
     venue: Venue
     side: Side
-    quantity: float                                 # base asset quantity
+    quantity: float                                      # base asset quantity
     order_type: OrderType = OrderType.MARKET
-    price: Optional[float] = None                   # None for market orders
-    strategy_id: int = 0                            # owning strategy — for ShadowBook routing
+    price: Optional[float] = None                        # None for market orders
+    strategy_id: int = 0                                 # owning strategy — for ShadowBook routing
+    asset_type: AssetType = AssetType.SPOT               # SPOT | MARGIN | PERPETUAL
+    sub_account_id: int = 0                              # sub-account within a strategy
+    side_effect: Optional[MarginSideEffect] = None       # None → exchange/connector default
 
 
 @dataclass(frozen=True)

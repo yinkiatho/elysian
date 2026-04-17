@@ -17,6 +17,14 @@ class AssetType(Enum):
     MARGIN = "Margin"
     
     
+class MarginSideEffect(Enum):
+    """Controls automatic borrow/repay behaviour on Binance isolated margin orders."""
+    NO_SIDE_EFFECT = "NO_SIDE_EFFECT"        # plain margin order, no auto-borrow or repay
+    MARGIN_BUY = "MARGIN_BUY"                # auto-borrow on BUY only
+    AUTO_REPAY = "AUTO_REPAY"                # auto-repay from proceeds on SELL only
+    AUTO_BORROW_REPAY = "AUTO_BORROW_REPAY"  # default: borrow on entry, repay on exit
+
+
 class OrderType(Enum):
     LIMIT = "Limit"
     MARKET = "Market"
