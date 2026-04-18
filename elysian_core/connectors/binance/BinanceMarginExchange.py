@@ -81,7 +81,7 @@ class BinanceMarginExchange(IsolatedMarginExchangeConnector):
         user_data_manager: Optional[BinanceMarginUserDataClientManager] = None,
         private_event_bus=None,
         strategy_config: Optional[StrategyConfig] = None,
-        max_leverage: int = 3,
+        max_leverage: int = 1,
         default_side_effect: MarginSideEffect = MarginSideEffect.AUTO_BORROW_REPAY,
     ):
         symbols = symbols or []
@@ -438,7 +438,7 @@ class BinanceMarginExchange(IsolatedMarginExchangeConnector):
         side: Side,
         quantity: float,
         price: float,
-        strategy_id: int = 0,
+        strategy_id: int,
         side_effect: Optional[MarginSideEffect] = None,
     ) -> Optional[Order]:
         """Place an isolated margin GTC limit order.

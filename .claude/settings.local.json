@@ -8,7 +8,12 @@
       "mcp__claude_ai_Atlassian__getPagesInConfluenceSpace",
       "mcp__claude_ai_Atlassian__getConfluencePageDescendants",
       "mcp__claude_ai_Atlassian__getConfluencePage",
-      "Bash(grep -r \"class SpotStrategy\\\\|class EventDrivenStrategy\" /c/Users/yinki/Coding Work/elysian/elysian_core --include=*.py -A 10)"
+      "Bash(grep -r \"class SpotStrategy\\\\|class EventDrivenStrategy\" /c/Users/yinki/Coding Work/elysian/elysian_core --include=*.py -A 10)",
+      "Bash(py -m pytest tests/test_sub_account_key.py tests/test_margin_shadow_book.py tests/test_optimizer_margin.py tests/test_engine_margin.py -v --tb=short)",
+      "Bash(py -m pytest tests/test_margin_shadow_book.py::TestApplyFill::test_sell_fill_decreases_position_increases_collateral tests/test_optimizer_margin.py::TestValidatePipelineMargin::test_margin_level_too_low_rejects -v --tb=long)",
+      "Bash(python -m pytest tests/test_sub_account_key.py tests/test_margin_shadow_book.py tests/test_optimizer_margin.py tests/test_engine_margin.py -v --tb=short)",
+      "Bash(py -m pytest tests/ --ignore=tests/test_sub_account_key.py --ignore=tests/test_margin_shadow_book.py --ignore=tests/test_optimizer_margin.py --ignore=tests/test_engine_margin.py -v --tb=short)",
+      "Bash(py -m pytest tests/test_optimizer.py::TestScaleExposure::test_within_limit_no_scaling tests/test_position.py::TestPnl::test_net_pnl tests/test_rebalance_fsm.py::TestRebalanceFSMHappyPath::test_initial_state_is_idle -v --tb=long)"
     ]
   },
   "enableAllProjectMcpServers": true,

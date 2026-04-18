@@ -236,7 +236,6 @@ class BinanceMarginUserDataClientManager:
         Reconnects with exponential backoff (1s → 60s) on any connection error.
         """
         reconnect_delay = 1
-
         while self._running:
             try:
                 listen_key = await self._get_listen_key(symbol)

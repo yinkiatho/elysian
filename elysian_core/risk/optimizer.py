@@ -108,6 +108,10 @@ class PortfolioOptimizer:
             sum(target.weights.values()) if target.weights else 0.0,
         )
 
+        # ── Margin level pre-check ───────────────────────────────────────
+        if not self._check_margin_level():
+            return self._reject(target, now_ms, reason="margin_level_too_low")
+
         # ── Fast-path: liquidate ──────────────────────────────────────────
         if target.liquidate:
             self.logger.info("[Optimizer] Liquidate flag — bypassing all constraints")
@@ -179,6 +183,16 @@ class PortfolioOptimizer:
                 invested_before,
                 invested_after,
                 cfg.min_cash_weight,
+            )
+
+        # ── Step 5: Zero-sum enforcement (market-neutral) ────────────────
+        weights, zero_sum_info = self._enforce_zero_sum(weights)
+        if zero_sum_info:
+            net_before, net_after = zero_sum_info
+            self.logger.info(
+                "[Optimizer] Zero-sum enforced: net %.4f -> %.4f",
+                net_before,
+                net_after,
             )
 
         # ── Step 6: Turnover cap ──────────────────────────────────────────
@@ -344,14 +358,79 @@ class PortfolioOptimizer:
         cfg = self._risk_config
         gross = sum(abs(w) for w in weights.values())
 
-        if gross == 0 or gross <= cfg.max_total_exposure:
+        # For margin sub-accounts, max_gross_exposure may be >1.0 (e.g. 2× leverage).
+        # When set it takes precedence over max_total_exposure.
+        exposure_cap = (
+            cfg.max_gross_exposure
+            if cfg.max_gross_exposure is not None
+            else cfg.max_total_exposure
+        )
+
+        if gross == 0 or gross <= exposure_cap:
             return weights, None
 
-        scale = cfg.max_total_exposure / gross
+        scale = exposure_cap / gross
         scaled = {sym: w * scale for sym, w in weights.items()}
         gross_after = sum(abs(w) for w in scaled.values())
 
         return scaled, (gross, gross_after)
+
+    def _enforce_zero_sum(
+        self, weights: Dict[str, float]
+    ) -> Tuple[Dict[str, float], Optional[Tuple[float, float]]]:
+        """Rescale longs and shorts so net sum ≈ 0 (market-neutral).
+
+        Only active when ``allow_zero_sum=True``.  Scales the smaller side
+        up to match the larger side, preserving each weight's sign.
+
+        Returns (weights, (net_before, net_after)) when rescaling occurred,
+        (weights, None) when the constraint is off or already satisfied.
+        """
+        cfg = self._risk_config
+        if not cfg.allow_zero_sum:
+            return weights, None
+
+        net = sum(weights.values())
+        if abs(net) <= cfg.zero_sum_tolerance:
+            return weights, None
+
+        pos_sum = sum(w for w in weights.values() if w > 0)
+        neg_sum = abs(sum(w for w in weights.values() if w < 0))
+
+        if pos_sum == 0 or neg_sum == 0:
+            self.logger.warning(
+                "[Optimizer] zero_sum: cannot balance — only one side has non-zero weights"
+            )
+            return weights, None
+
+        target = (pos_sum + neg_sum) / 2.0
+        out = {
+            s: (w * target / pos_sum if w > 0 else w * target / neg_sum)
+            for s, w in weights.items()
+        }
+        return out, (net, sum(out.values()))
+
+    def _check_margin_level(self) -> bool:
+        """Return False to reject the rebalance if margin_level is too low.
+
+        Only active when ``min_margin_level > 0`` and the ShadowBook is a
+        ``MarginShadowBook``.  Importing lazily here avoids a circular import.
+        """
+        cfg = self._risk_config
+        if cfg.min_margin_level <= 0:
+            return True
+        from elysian_core.core.margin_shadow_book import MarginShadowBook
+        if not isinstance(self._portfolio, MarginShadowBook):
+            return True
+        level = self._portfolio.margin_level()
+        if level < cfg.min_margin_level:
+            self.logger.warning(
+                "[Optimizer] Margin level %.2f < min %.2f — rejecting rebalance",
+                level,
+                cfg.min_margin_level,
+            )
+            return False
+        return True
 
     def _enforce_cash_floor(
         self, weights: Dict[str, float]
@@ -489,6 +568,7 @@ class PortfolioOptimizer:
             weights={},
             clipped={},
             rejected=True,
+            rejection_reason=reason,
             timestamp=now_ms,
             venue=target.venue,
         )

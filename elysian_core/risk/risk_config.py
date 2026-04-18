@@ -41,5 +41,11 @@ class RiskConfig:
     # ── Delta threshold ─────────────────────────────────────────────────────
     min_weight_delta: float = 0.005             # skip rebalance legs < 0.5% weight change
 
+    # ── Margin / leverage constraints ────────────────────────────────────────
+    allow_zero_sum: bool = False          # enforce |Σw| ≈ 0 (market-neutral)
+    zero_sum_tolerance: float = 0.02      # ±2% band considered sufficiently zero
+    min_margin_level: float = 0.0         # reject rebalance if margin_level < threshold (0 = disabled)
+    max_gross_exposure: Optional[float] = None  # Σ|w| cap; if set, used instead of max_total_exposure
+
     # ── Rate limiting ────────────────────────────────────────────────────────
     min_rebalance_interval_ms: int = 60_000     # 1 minute between rebalances

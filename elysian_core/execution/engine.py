@@ -21,7 +21,7 @@ from elysian_core.core.shadow_book import ShadowBook
 from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 from elysian_core.core.events import EventType
 from elysian_core.connectors.base import AbstractDataFeed, SpotExchangeConnector
-from elysian_core.core.enums import AssetType, OrderType, Side, Venue
+from elysian_core.core.enums import AssetType, MarginSideEffect, OrderType, Side, Venue
 
 from elysian_core.core.portfolio import Portfolio
 from elysian_core.core.signals import OrderIntent, RebalanceResult, ValidatedWeights
@@ -254,6 +254,11 @@ class ExecutionEngine:
             )
 
             effective_order_type = order_type if order_type is not None else self._default_order_type
+            _asset_type = self.asset_type or AssetType.SPOT
+            _side_effect = (
+                MarginSideEffect.AUTO_BORROW_REPAY
+                if _asset_type == AssetType.MARGIN else None
+            )
             intents.append(OrderIntent(
                 symbol=symbol,
                 venue=venue,
@@ -262,6 +267,8 @@ class ExecutionEngine:
                 order_type=effective_order_type,
                 price=None if effective_order_type == OrderType.MARKET else price,
                 strategy_id=strategy_id,
+                asset_type=_asset_type,
+                side_effect=_side_effect,
             ))
 
         self.logger.info(f"[ExecutionEngine] Generated {len(intents)} order intents")
@@ -286,6 +293,12 @@ class ExecutionEngine:
                 f"[ExecutionEngine] Submitting {intent.order_type.value} {intent.side.value} "
                 f"{intent.symbol} qty={intent.quantity:.6f} on {intent.venue.value}"
             )
+            # Pass side_effect kwarg only for MARGIN orders; SPOT connectors
+            # do not accept the parameter so we use **kwargs to avoid breaking them.
+            extra: Dict[str, Any] = {}
+            if intent.side_effect is not None:
+                extra["side_effect"] = intent.side_effect
+
             resp = None
             if intent.order_type == OrderType.MARKET:
                 resp = await exchange.place_market_order(
@@ -293,6 +306,7 @@ class ExecutionEngine:
                     side=intent.side,
                     quantity=intent.quantity,
                     strategy_id=intent.strategy_id,
+                    **extra,
                 )
             elif intent.order_type == OrderType.LIMIT and intent.price is not None:
                 resp = await exchange.place_limit_order(
@@ -300,7 +314,8 @@ class ExecutionEngine:
                     side=intent.side,
                     price=intent.price,
                     quantity=intent.quantity,
-                    strategy_id=intent.strategy_id
+                    strategy_id=intent.strategy_id,
+                    **extra,
                 )
             else:
                 self.logger.error(

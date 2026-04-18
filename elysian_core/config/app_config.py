@@ -165,6 +165,46 @@ class MetaConfig:
     futures_venues: List[str] = field(default_factory=list)
 
 
+# ── Per-sub-account config (used by MarginStrategy + MarginStrategyRunner) ─
+
+@dataclass
+class SubAccountConfig:
+    """Config for one sub-account pipeline within a multi-sub-account strategy.
+
+    Loaded from the ``sub_accounts:`` list in a strategy YAML::
+
+        sub_accounts:
+          - sub_account_id: 0
+            asset_type: "Spot"
+            venue: "Binance"
+            api_key_env: "BINANCE_API_KEY_2"
+            api_secret_env: "BINANCE_API_SECRET_2"
+            symbols: ["ETHUSDT"]
+          - sub_account_id: 1
+            asset_type: "Margin"
+            venue: "Binance"
+            api_key_env: "BINANCE_MARGIN_API_KEY_2"
+            api_secret_env: "BINANCE_MARGIN_API_SECRET_2"
+            isolated_symbol: "BTCUSDT"
+            symbols: ["BTCUSDT"]
+            risk_overrides:
+              max_short_weight: 1.0
+              max_leverage: 3.0
+    """
+    sub_account_id: int = 0
+    asset_type: str = "Spot"            # "Spot" | "Margin"
+    venue: str = "Binance"
+    api_key_env: str = ""               # env var name, e.g. "BINANCE_MARGIN_API_KEY_2"
+    api_secret_env: str = ""
+    symbols: List[str] = field(default_factory=list)
+    isolated_symbol: Optional[str] = None   # e.g. "BTCUSDT" (MARGIN only)
+    risk_overrides: Dict[str, Any] = field(default_factory=dict)
+    # Resolved at load time from environment:
+    api_key: str = field(default="", repr=False)
+    api_secret: str = field(default="", repr=False)
+    risk_config: Optional["RiskConfig"] = None
+
+
 # ── Per-strategy config ────────────────────────────────────────────────────
 
 @dataclass
@@ -206,9 +246,13 @@ class StrategyConfig:
     # Sub-account credentials (env var name or literal value; empty = shared account)
     sub_account_api_key: str = ""
     sub_account_api_secret: str = ""
-    
+
     # Risk Management Parameters
     risk_config: RiskConfig = field(default_factory=RiskConfig)
+
+    # Multi-sub-account pipelines (populated from sub_accounts: YAML section)
+    # Empty for legacy single-sub-account strategies — all existing strategies unaffected.
+    sub_accounts: List["SubAccountConfig"] = field(default_factory=list)
 
 
 # ── Per-(asset_type, venue) config overrides ─────────────────────────────────
@@ -355,6 +399,25 @@ def load_strategy_yaml(yaml_path: str) -> StrategyConfig:
     risk_config = _build_risk_config(s.get("risk", {}))
     
     
+    # Parse sub_accounts list for multi-sub-account (margin) strategies
+    sub_accounts: List[SubAccountConfig] = []
+    for sa_raw in s.get("sub_accounts", []) or []:
+        sa = SubAccountConfig(
+            sub_account_id=sa_raw.get("sub_account_id", 0),
+            asset_type=sa_raw.get("asset_type", "Spot"),
+            venue=sa_raw.get("venue", "Binance"),
+            api_key_env=sa_raw.get("api_key_env", ""),
+            api_secret_env=sa_raw.get("api_secret_env", ""),
+            symbols=sa_raw.get("symbols", []) or [],
+            isolated_symbol=sa_raw.get("isolated_symbol"),
+            risk_overrides=sa_raw.get("risk_overrides", {}) or {},
+        )
+        sa.api_key = os.getenv(sa.api_key_env, "") if sa.api_key_env else ""
+        sa.api_secret = os.getenv(sa.api_secret_env, "") if sa.api_secret_env else ""
+        # Merge risk: strategy-level risk_config is the base; sub-account overrides on top
+        sa.risk_config = _build_risk_config({**s.get("risk_overrides", {}), **sa.risk_overrides})
+        sub_accounts.append(sa)
+
     return StrategyConfig(
         strategy_id=s.get("strategy_id"),
         strategy_name=s.get("strategy_name", ""),
@@ -369,7 +432,8 @@ def load_strategy_yaml(yaml_path: str) -> StrategyConfig:
         portfolio_overrides=s.get("portfolio_overrides", {}) or {},
         sub_account_api_key=os.getenv(s.get("venue", "Binance").upper() + "_API_KEY_" + str(s.get("strategy_id", 0)), ""),
         sub_account_api_secret=os.getenv(s.get("venue", "Binance").upper() + "_API_SECRET_" + str(s.get("strategy_id", 0)), ""),
-        risk_config=risk_config
+        risk_config=risk_config,
+        sub_accounts=sub_accounts,
     )
 
 

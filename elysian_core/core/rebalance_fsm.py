@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from elysian_core.core.event_bus import EventBus
     from elysian_core.execution.engine import ExecutionEngine
     from elysian_core.risk.optimizer import PortfolioOptimizer
+    from elysian_core.core.sub_account_pipeline import SubAccountKey
 
 
 class RebalanceFSM(BaseFSM):
@@ -108,6 +109,7 @@ class RebalanceFSM(BaseFSM):
         event_bus: Optional["EventBus"] = None,
         cooldown_s: float = 0.0,
         name: str = "RebalanceFSM",
+        sub_account_key: Optional["SubAccountKey"] = None,
     ):
         super().__init__(
             initial_state=RebalanceState.IDLE,
@@ -119,6 +121,7 @@ class RebalanceFSM(BaseFSM):
         self._optimizer = optimizer
         self._execution_engine = execution_engine
         self._cooldown_s = cooldown_s
+        self._sub_account_key = sub_account_key  # None for single-pipeline (SPOT) strategies
 
         # Most recent rebalance result for inspection
         self._last_result: Optional[RebalanceResult] = None
@@ -172,6 +175,10 @@ class RebalanceFSM(BaseFSM):
                 f"weights={book.weights} "
                 f"active_orders={list(book.active_orders.keys())}"
             )
+
+        # Inject sub_account_key so MarginStrategy can return the right weight slice
+        if self._sub_account_key is not None:
+            ctx['sub_account_key'] = self._sub_account_key
 
         try:
             result = self._strategy.compute_weights(**ctx)

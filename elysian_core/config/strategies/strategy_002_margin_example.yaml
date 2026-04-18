@@ -1,0 +1,51 @@
+# Margin-neutral example strategy — SPOT long + isolated MARGIN short
+#
+# Two sub-account pipelines:
+#   sub_account_id=0  SPOT/Binance  — long ETH with spot account
+#   sub_account_id=1  MARGIN/Binance — short BTC with isolated margin account
+#
+# Env vars required:
+#   BINANCE_API_KEY_2 / BINANCE_API_SECRET_2        (SPOT sub-account)
+#   BINANCE_MARGIN_API_KEY_2 / BINANCE_MARGIN_API_SECRET_2  (MARGIN sub-account)
+#
+# Run with:
+#   STRATEGY_CONFIG_YAML=elysian_core/config/strategies/strategy_002_margin_example.yaml \
+#   python elysian_core/run_strategy_margin.py
+
+strategy_id: 2
+strategy_name: "eth_spot_btc_margin_short"
+class: "elysian_core.strategy.example_margin_neutral.MarginNeutralStrategy"
+
+# Sub-accounts: each becomes one SubAccountPipeline in MarginStrategyRunner
+sub_accounts:
+  - sub_account_id: 0
+    asset_type: "Spot"
+    venue: "Binance"
+    api_key_env: "BINANCE_API_KEY_2"
+    api_secret_env: "BINANCE_API_SECRET_2"
+    symbols:
+      - "ETHUSDT"
+    risk_overrides:
+      max_weight_per_asset: 1.0
+      max_short_weight: 0.0
+      min_cash_weight: 0.0
+      max_total_exposure: 1.0
+
+  - sub_account_id: 1
+    asset_type: "Margin"
+    venue: "Binance"
+    api_key_env: "BINANCE_MARGIN_API_KEY_2"
+    api_secret_env: "BINANCE_MARGIN_API_SECRET_2"
+    isolated_symbol: "BTCUSDT"          # isolated margin pair
+    symbols:
+      - "BTCUSDT"
+    risk_overrides:
+      max_weight_per_asset: 1.0
+      max_short_weight: 1.0             # allow full short position
+      max_leverage: 3.0                 # Binance max for most USDT pairs
+      max_gross_exposure: 2.0           # allow up to 2x gross (long + short)
+      allow_zero_sum: false             # per-sub-account, not cross-account
+      min_margin_level: 1.5            # reject rebalance if margin_level < 1.5
+
+params:
+  rebalance_interval_s: 60
