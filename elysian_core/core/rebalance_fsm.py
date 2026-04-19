@@ -167,14 +167,17 @@ class RebalanceFSM(BaseFSM):
         # Portfolio state snapshot before compute
         book = getattr(self._strategy, '_shadow_book', None)
         if book is not None:
-            self.logger.info(
-                f"[{self._name}] === STAGE 3 START (compute_weights) === "
-                f"NAV={book.nav:.4f} cash={book.cash:.4f} "
-                f"free_cash={book.free_cash:.4f} locked_cash={book._locked_cash:.4f} "
-                f"positions={list(book.active_positions.keys())} "
-                f"weights={book.weights} "
-                f"active_orders={list(book.active_orders.keys())}"
-            )
+            try:
+                self.logger.info(
+                    f"[{self._name}] === STAGE 3 START (compute_weights) === "
+                    f"NAV={book.nav:.4f} cash={book.cash:.4f} "
+                    f"free_cash={book.free_cash:.4f} locked_cash={book._locked_cash:.4f} "
+                    f"positions={list(book.active_positions.keys())} "
+                    f"weights={book.weights} "
+                    f"active_orders={list(book.active_orders.keys())}"
+                )
+            except (TypeError, ValueError, AttributeError):
+                self.logger.info(f"[{self._name}] === STAGE 3 START (compute_weights) === (book state unavailable)")
 
         # Inject sub_account_key so MarginStrategy can return the right weight slice
         if self._sub_account_key is not None:

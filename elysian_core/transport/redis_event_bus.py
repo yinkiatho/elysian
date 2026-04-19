@@ -18,7 +18,10 @@ import logging
 from collections import defaultdict
 from typing import Callable, Dict, List, Optional
 
-import redis.asyncio as aioredis
+try:
+    import redis.asyncio as aioredis
+except ImportError:  # pragma: no cover
+    aioredis = None  # deferred error: will fail at connection time, not import time
 
 from elysian_core.core.events import EventType
 from elysian_core.transport.event_serializer import (
