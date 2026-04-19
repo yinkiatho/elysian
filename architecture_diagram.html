@@ -73,6 +73,42 @@
             border-color: #16a34a;
             color: #86efac;
         }
+        .pill.pill-margin {
+            background: rgba(168, 85, 247, 0.2);
+            border-color: #a855f7;
+            color: #d8b4fe;
+        }
+        /* Download button */
+        .download-bar {
+            background: #0f172a;
+            padding: 12px 40px;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 16px;
+            border-bottom: 1px solid #1e3a5f;
+        }
+        .download-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: #fff;
+            text-decoration: none;
+            padding: 8px 20px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            border: none;
+            transition: opacity 0.2s;
+        }
+        .download-btn:hover { opacity: 0.85; }
+        .download-label {
+            color: #64748b;
+            font-size: 0.82rem;
+        }
         .container {
             max-width: 1400px;
             margin: 0 auto;
@@ -136,6 +172,16 @@
             margin-left: 6px;
             letter-spacing: 0.5px;
         }
+        .toc ol li .badge-margin {
+            background: #ede9fe;
+            color: #5b21b6;
+            font-size: 0.68rem;
+            font-weight: 700;
+            padding: 1px 6px;
+            border-radius: 4px;
+            margin-left: 6px;
+            letter-spacing: 0.5px;
+        }
         h2 {
             font-size: 1.5rem;
             font-weight: 400;
@@ -146,26 +192,19 @@
         }
         h2 span { color: #6b7280; font-size: 0.9rem; font-weight: 300; margin-left: 12px; }
         h2 .badge-new {
-            background: #dcfce7;
-            color: #15803d;
-            font-size: 0.72rem;
-            font-weight: 700;
-            padding: 2px 8px;
-            border-radius: 4px;
-            margin-left: 10px;
-            letter-spacing: 0.5px;
-            vertical-align: middle;
+            background: #dcfce7; color: #15803d; font-size: 0.72rem;
+            font-weight: 700; padding: 2px 8px; border-radius: 4px; margin-left: 10px;
+            letter-spacing: 0.5px; vertical-align: middle;
         }
         h2 .badge-updated {
-            background: #fef3c7;
-            color: #b45309;
-            font-size: 0.72rem;
-            font-weight: 700;
-            padding: 2px 8px;
-            border-radius: 4px;
-            margin-left: 10px;
-            letter-spacing: 0.5px;
-            vertical-align: middle;
+            background: #fef3c7; color: #b45309; font-size: 0.72rem;
+            font-weight: 700; padding: 2px 8px; border-radius: 4px; margin-left: 10px;
+            letter-spacing: 0.5px; vertical-align: middle;
+        }
+        h2 .badge-margin {
+            background: #ede9fe; color: #5b21b6; font-size: 0.72rem;
+            font-weight: 700; padding: 2px 8px; border-radius: 4px; margin-left: 10px;
+            letter-spacing: 0.5px; vertical-align: middle;
         }
         h3 { color: #374151; font-size: 1.05rem; margin: 24px 0 8px; font-weight: 600; }
         p.desc {
@@ -240,6 +279,11 @@
             border-left-color: #ea580c;
             color: #7c2d12;
         }
+        .note-box.note-purple {
+            background: #faf5ff;
+            border-left-color: #a855f7;
+            color: #3b0764;
+        }
         .legend {
             display: flex;
             gap: 20px;
@@ -266,6 +310,17 @@
         .change-list ul { padding-left: 18px; }
         .change-list ul li { margin-bottom: 4px; color: #374151; }
         .change-list ul li strong { color: #1e3a5f; }
+        .margin-box {
+            background: #faf5ff;
+            border: 1px solid #c4b5fd;
+            border-left: 4px solid #a855f7;
+            border-radius: 0 8px 8px 0;
+            padding: 14px 18px;
+            margin: 12px 0 20px;
+            font-size: 0.9rem;
+            color: #3b0764;
+        }
+        .margin-box strong { display: block; margin-bottom: 4px; }
     </style>
 </head>
 <body>
@@ -284,7 +339,17 @@
         <span class="pill pill-new">Redis Pub/Sub</span>
         <span class="pill pill-new">Docker Multi-Container</span>
         <span class="pill pill-new">MarketDataService</span>
+        <span class="pill pill-margin">Isolated Margin</span>
+        <span class="pill pill-margin">MarginShadowBook</span>
+        <span class="pill pill-margin">Multi-Sub-Account</span>
     </div>
+</div>
+
+<div class="download-bar">
+    <span class="download-label">Save this reference document:</span>
+    <a class="download-btn" href="architecture_diagram.html" download="elysian_architecture_diagram.html">
+        ⬇ Download HTML
+    </a>
 </div>
 
 <div class="container">
@@ -293,50 +358,59 @@
         <h3>Table of Contents</h3>
         <ol>
             <li><span>1.</span><a href="#s1">System Overview</a><span class="badge-updated">UPDATED</span></li>
-            <li><span>2.</span><a href="#s2">Docker Deployment Architecture</a><span class="badge-new">NEW</span></li>
-            <li><span>3.</span><a href="#s3">MarketDataService — Feed Layer</a><span class="badge-new">NEW</span></li>
-            <li><span>4.</span><a href="#s4">Redis Transport Layer</a><span class="badge-new">NEW</span></li>
-            <li><span>5.</span><a href="#s5">5-Stage Rebalance Pipeline</a></li>
+            <li><span>2.</span><a href="#s2">Docker Deployment Architecture</a><span class="badge-updated">UPDATED</span></li>
+            <li><span>3.</span><a href="#s3">MarketDataService — Feed Layer</a></li>
+            <li><span>4.</span><a href="#s4">Redis Transport Layer</a></li>
+            <li><span>5.</span><a href="#s5">6-Stage Rebalance Pipeline</a></li>
             <li><span>6.</span><a href="#s6">StrategyRunner Lifecycle</a><span class="badge-updated">UPDATED</span></li>
-            <li><span>7.</span><a href="#s7">Strategy Event Bus Wiring</a><span class="badge-updated">UPDATED</span></li>
+            <li><span>7.</span><a href="#s7">Strategy Event Bus Wiring</a></li>
             <li><span>8.</span><a href="#s8">Order Data Model Hierarchy</a></li>
             <li><span>9.</span><a href="#s9">Position &amp; ShadowBook</a><span class="badge-updated">UPDATED</span></li>
             <li><span>10.</span><a href="#s10">Signal Contract Flow</a></li>
-            <li><span>11.</span><a href="#s11">Connector &amp; Feed Layer</a></li>
-            <li><span>12.</span><a href="#s12">RiskConfig Constraints</a></li>
-            <li><span>13.</span><a href="#s13">Two-Tier Config System</a><span class="badge-new">NEW</span></li>
+            <li><span>11.</span><a href="#s11">Connector &amp; Feed Layer</a><span class="badge-updated">UPDATED</span></li>
+            <li><span>12.</span><a href="#s12">RiskConfig Constraints</a><span class="badge-updated">UPDATED</span></li>
+            <li><span>13.</span><a href="#s13">Two-Tier Config System</a></li>
             <li><span>14.</span><a href="#s14">Database &amp; Persistence</a></li>
+            <li><span>15.</span><a href="#s15">Isolated Margin Architecture</a><span class="badge-margin">MARGIN NEW</span></li>
+            <li><span>16.</span><a href="#s16">MarginShadowBook Ledger</a><span class="badge-margin">MARGIN NEW</span></li>
+            <li><span>17.</span><a href="#s17">Multi-Sub-Account Pipeline</a><span class="badge-margin">MARGIN NEW</span></li>
+            <li><span>18.</span><a href="#s18">MarginStrategyRunner Lifecycle</a><span class="badge-margin">MARGIN NEW</span></li>
+            <li><span>19.</span><a href="#s19">MarginStrategy Class Hierarchy</a><span class="badge-margin">MARGIN NEW</span></li>
+            <li><span>20.</span><a href="#s20">Margin Order Placement &amp; SideEffect</a><span class="badge-margin">MARGIN NEW</span></li>
         </ol>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- ═══ S1: System Overview ═══ -->
     <h2 id="s1">1. System Overview <span class="badge-updated">UPDATED</span> <span>Top-level component topology</span></h2>
     <p class="desc">
-        Elysian now runs as a <strong>multi-container Docker system</strong>. A dedicated
-        <code>MarketDataService</code> container owns all WebSocket feed managers and publishes market data events
-        to a <strong>Redis pub/sub</strong> broker. Each strategy runs in its own isolated container, subscribing
-        to the Redis channels relevant to its symbols. This replaces the former single-process model where
-        one <code>StrategyRunner</code> managed both feeds and strategies in the same asyncio event loop.
+        Elysian now supports three asset-type pipelines: <strong>Spot</strong>, <strong>Perpetual Futures</strong>, and
+        <strong>Isolated Margin</strong>. A dedicated <code>MarketDataService</code> container owns all WebSocket feed
+        managers and publishes market data events to <strong>Redis pub/sub</strong>. Each strategy runs in its own
+        container, subscribing to the Redis channels relevant to its symbols. Multi-sub-account strategies (mixing
+        SPOT long-book with isolated MARGIN short-book) are supported via the new <code>MarginStrategyRunner</code>
+        and <code>MarginShadowBook</code>.
     </p>
 
     <div class="change-list">
-        <h4>Key Changes from Previous Architecture</h4>
+        <h4>Key Changes — Margin Trading Integration</h4>
         <ul>
-            <li><strong>MarketDataService</strong> — new dedicated container that owns all WebSocket client managers (BinanceKlineClientManager, BinanceOrderBookClientManager, etc.)</li>
-            <li><strong>Redis pub/sub</strong> — new network boundary between market data and strategy layers; replaces in-process EventBus for market data distribution</li>
-            <li><strong>One container per strategy</strong> — <code>elysian_strategy_N</code> containers each run one strategy, subscribing to Redis for their symbols</li>
-            <li><strong>Private EventBus still in-process</strong> — account events (ORDER_UPDATE, BALANCE_UPDATE, REBALANCE_COMPLETE) remain on the in-process private EventBus inside each strategy container</li>
-            <li><strong>Two-tier YAML config</strong> — <code>trading_config.yaml</code> (system) + per-strategy YAML files (<code>strategy_NNN_*.yaml</code>)</li>
+            <li><strong>IsolatedMarginExchangeConnector</strong> — new abstract base class extending SpotExchangeConnector with margin-specific collateral/borrowed/interest ledgers, borrow/repay/transfer_in/transfer_out operations, and periodic margin poll loop (every 60 s)</li>
+            <li><strong>BinanceMarginExchange</strong> — concrete isolated margin connector; uses per-symbol listen keys via <code>POST /sapi/v1/userDataStream/isolated</code>; defaults to <code>AUTO_BORROW_REPAY</code> sideEffectType</li>
+            <li><strong>BinanceMarginUserDataClientManager</strong> — one WebSocket reader task per symbol (vs. one global for spot); keepalive every 55 min</li>
+            <li><strong>MarginShadowBook</strong> — extends ShadowBook; NAV formula subtracts borrowed + interest; overrides <code>_adjust_cash()</code>, <code>_track_commission()</code>, <code>_on_balance_update()</code> to route to <code>_collateral</code> dict instead of <code>_cash</code></li>
+            <li><strong>SubAccountKey + SubAccountPipeline</strong> — new routing primitives for multi-sub-account strategies</li>
+            <li><strong>MarginStrategy</strong> — extends SpotStrategy; <code>_pipelines</code> dict keyed by SubAccountKey; per-pipeline FSMs; concurrent dispatch via asyncio.gather</li>
+            <li><strong>MarginStrategyRunner</strong> — extends StrategyRunner; builds one SubAccountPipeline per sub_accounts YAML entry; injects MarginShadowBook for MARGIN type</li>
         </ul>
     </div>
 
     <div class="legend">
         <span class="legend-item"><span class="legend-color" style="background:#fef2f2;border-color:#ef4444"></span>Exchange / Infra</span>
         <span class="legend-item"><span class="legend-color" style="background:#fefce8;border-color:#ca8a04"></span>Data / Feeds</span>
-        <span class="legend-item"><span class="legend-color" style="background:#f0fdf4;border-color:#16a34a"></span>Strategy Layer</span>
+        <span class="legend-item"><span class="legend-color" style="background:#f0fdf4;border-color:#16a34a"></span>Spot Strategy Layer</span>
+        <span class="legend-item"><span class="legend-color" style="background:#faf5ff;border-color:#a855f7"></span>Margin Strategy Layer</span>
         <span class="legend-item"><span class="legend-color" style="background:#eff6ff;border-color:#2563eb"></span>Risk &amp; Execution</span>
-        <span class="legend-item"><span class="legend-color" style="background:#fdf4ff;border-color:#a855f7"></span>Ledger / Portfolio</span>
-        <span class="legend-item"><span class="legend-color" style="background:#ecfdf5;border-color:#059669"></span>Redis / Transport (NEW)</span>
+        <span class="legend-item"><span class="legend-color" style="background:#ecfdf5;border-color:#059669"></span>Redis / Transport</span>
     </div>
     <div class="diagram-card">
         <div class="mermaid">
@@ -347,9 +421,7 @@ graph TB
             BKM["BinanceKlineClientManager"]
             BOM["BinanceOrderBookClientManager"]
             BFKM["BinanceFuturesKlineClientManager"]
-            BFOM["BinanceFuturesOrderBookClientManager"]
             AKM["AsterKlineClientManager"]
-            AOM["AsterOrderBookClientManager"]
         end
         MDS["MarketDataService\nrun_market_data.py\nHealth: :8080/health"]
         FEEDS --> MDS
@@ -360,37 +432,47 @@ graph TB
         RCHK["elysian:md:binance:spot:kline:SYMBOL"]
         RCHOB["elysian:md:binance:spot:orderbook:SYMBOL"]
         RCHF["elysian:md:binance:futures:kline:SYMBOL"]
-        RCHA["elysian:md:aster:spot:kline:SYMBOL"]
     end
 
-    subgraph STRAT0["Strategy Container 0 (elysian_strategy_0)"]
+    subgraph STRAT0["Strategy Container 0 — SPOT (elysian_strategy_0)"]
         direction TB
-        SUB0["RedisEventBusSubscriber\nsubscribes to relevant channels"]
-        PBUS0["Private EventBus\n(in-process)\nORDER_UPDATE\nBALANCE_UPDATE\nREBALANCE_COMPLETE"]
-        SS0["SpotStrategy 0\n(e.g. EventDrivenStrategy)"]
+        SUB0["RedisEventBusSubscriber"]
+        PBUS0["Private EventBus (in-process)"]
+        SS0["SpotStrategy\n(EventDrivenStrategy)"]
         SB0["ShadowBook 0\npositions / cash / NAV"]
-        EX0["BinanceSpotExchange 0\nsub-account API keys"]
+        EX0["BinanceSpotExchange 0\nAPI keys: BINANCE_API_KEY_0"]
         OPT0["PortfolioOptimizer 0"]
         EE0["ExecutionEngine 0"]
         SUB0 -->|KlineEvent\nOrderBookUpdateEvent| SS0
-        EX0 -->|fills + balances\nvia user-data WS| PBUS0
+        EX0 -->|fills + balances\nBinanceUserDataClientManager\nuserDataStream.subscribe.signature| PBUS0
         PBUS0 -->|ORDER_UPDATE\nBALANCE_UPDATE| SS0
-        SS0 --> OPT0 --> EE0
-        EE0 --> EX0
+        SS0 --> OPT0 --> EE0 --> EX0
         SS0 --> SB0
     end
 
-    subgraph STRAT1["Strategy Container 1 (elysian_strategy_1)"]
+    subgraph STRAT2["Strategy Container 2 — MARGIN (elysian_strategy_2)"]
         direction TB
-        SUB1["RedisEventBusSubscriber"]
-        PBUS1["Private EventBus\n(in-process)"]
-        SS1["SpotStrategy 1\n(e.g. PrintEventsStrategy)"]
-        SB1["ShadowBook 1"]
-        EX1["BinanceSpotExchange 1\ndifferent sub-account keys"]
-        SUB1 -->|KlineEvent\nOrderBookUpdateEvent| SS1
-        EX1 -->|fills + balances| PBUS1
-        PBUS1 --> SS1
-        SS1 --> SB1
+        SUB2["RedisEventBusSubscriber\n(subscribes to spot channels\nmargin shares Binance spot WS)"]
+        subgraph SA0["Sub-Account 0: SPOT long-book"]
+            PBUS2A["Private EventBus A"]
+            BSE2["BinanceSpotExchange\nAPI: BINANCE_API_KEY_2"]
+            SB2A["ShadowBook (SPOT)\nstandard position/cash ledger"]
+            OPT2A["PortfolioOptimizer A"]
+            EE2A["ExecutionEngine A"]
+        end
+        subgraph SA1["Sub-Account 1: MARGIN short-book"]
+            PBUS2B["Private EventBus B"]
+            BME2["BinanceMarginExchange\nAPI: BINANCE_MARGIN_API_KEY_2\nAUTO_BORROW_REPAY\nPer-symbol listen keys"]
+            MSB2["MarginShadowBook\n_collateral / _borrowed / _accrued_interest\nNAV = collateral - borrowed - interest"]
+            OPT2B["PortfolioOptimizer B"]
+            EE2B["ExecutionEngine B"]
+        end
+        MS2["MarginStrategy\n_pipelines: Dict[SubAccountKey, SubAccountPipeline]\nRebalanceFSM per pipeline"]
+        SUB2 -->|market data| MS2
+        MS2 --> SA0
+        MS2 --> SA1
+        SA0 --> SB2A
+        SA1 --> MSB2
     end
 
     subgraph DB["PostgreSQL (elysian_postgres)"]
@@ -399,337 +481,240 @@ graph TB
 
     MDS -->|publish| REDIS
     REDIS -->|subscribe| SUB0
-    REDIS -->|subscribe| SUB1
+    REDIS -->|subscribe| SUB2
     SB0 -->|save_snapshot| DB
-    SB1 -->|save_snapshot| DB
-    EX0 -->|place_market/limit_order\nREST API| EX_NET(("Binance\nExchange"))
-    EX1 -->|REST API| EX_NET
+    MSB2 -->|save_snapshot| DB
+    EX0 -->|REST API| EX_NET(("Binance\nExchange"))
+    BME2 -->|isolated margin\nREST API| EX_NET
 
     style INFRA fill:#fef2f2,stroke:#ef4444,color:#991b1b
     style REDIS fill:#ecfdf5,stroke:#059669,color:#065f46
     style STRAT0 fill:#f0fdf4,stroke:#16a34a,color:#166534
-    style STRAT1 fill:#f0fdf4,stroke:#16a34a,color:#166534
+    style STRAT2 fill:#faf5ff,stroke:#a855f7,color:#3b0764
+    style SA0 fill:#f0fdf4,stroke:#16a34a,color:#166534
+    style SA1 fill:#faf5ff,stroke:#c4b5fd,color:#3b0764
     style DB fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
         </div>
     </div>
-    <div class="note-box note-green">
-        <strong>Private EventBus remains in-process</strong>
-        Only <em>market data</em> events (KLINE, ORDERBOOK_UPDATE) cross the Redis network boundary.
-        Account events — ORDER_UPDATE, BALANCE_UPDATE, REBALANCE_COMPLETE — travel on the per-strategy
-        <em>private EventBus</em> inside the strategy container. This preserves the sub-account isolation
-        invariant: fills from one strategy's exchange connection never reach another strategy's handlers.
-    </div>
 
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s2">2. Docker Deployment Architecture <span class="badge-new">NEW</span></h2>
+    <!-- ═══ S2: Docker Deployment ═══ -->
+    <h2 id="s2">2. Docker Deployment Architecture <span class="badge-updated">UPDATED</span></h2>
     <p class="desc">
-        The full Elysian stack is orchestrated by <code>docker-compose.yml</code>. Services are grouped
-        by Docker Compose profiles so operators can start only the containers needed. Each strategy runs
-        in a dedicated container and depends on <code>elysian_market_data</code> being healthy before it starts.
+        The Docker Compose stack now includes margin strategy services. The <code>MarginStrategyRunner</code> is
+        invoked via <code>run_strategy_margin.py</code> for strategies that mix SPOT and MARGIN sub-accounts.
+        Each sub-account pipeline gets its own API key pair, and the <code>sub_accounts:</code> YAML section drives
+        which connector type is instantiated per pipeline.
     </p>
     <div class="diagram-card">
         <div class="mermaid">
 graph TB
-    subgraph COMPOSE["docker-compose.yml (profiles: strategy_0 | strategy_1 | all | dev)"]
+    subgraph COMPOSE["docker-compose.yml (profiles: strategy_0 | strategy_1 | strategy_2 | all)"]
         direction TB
 
         subgraph INFRA_SVCS["Infrastructure Services (always)"]
-            PG["elysian_postgres\npostgres:15-alpine\nPort: 5432\nVolume: postgres_data\nHealthcheck: pg_isready"]
-            RD["elysian_redis\nredis:7-alpine\nPort: 6379\nVolume: redis_data\nHealthcheck: redis-cli ping"]
+            PG["elysian_postgres\npostgres:15-alpine\nHealthcheck: pg_isready"]
+            RD["elysian_redis\nredis:7-alpine\nHealthcheck: redis-cli ping"]
         end
 
-        subgraph MDS_SVC["Market Data Service (profiles: strategy_0, strategy_1, all)"]
-            MDC["elysian_market_data\nDockerfile (APP_ENV=production)\nCMD: python run_market_data.py\nHealthcheck: curl :8080/health\nDepends: redis (healthy)"]
+        subgraph MDS_SVC["Market Data Service"]
+            MDC["elysian_market_data\nCMD: python run_market_data.py\nHealthcheck: curl :8080/health\nSKIP_DB_INIT=true\nDepends: redis (healthy)"]
         end
 
-        subgraph STRAT_SVCS["Strategy Services (per profile)"]
-            S0["elysian_strategy_0\n(profile: strategy_0, all)\nENV: STRATEGY_CONFIG_YAML\n    BINANCE_API_KEY_0\n    BINANCE_API_SECRET_0\nCMD: python run_strategy.py\nDepends: postgres + market_data (healthy)"]
-            S1["elysian_strategy_1\n(profile: strategy_1, all)\nENV: STRATEGY_CONFIG_YAML\n    BINANCE_API_KEY_1\n    BINANCE_API_SECRET_1\nDepends: postgres + market_data (healthy)"]
+        subgraph STRAT_SVCS["Strategy Services"]
+            S0["elysian_strategy_0 (SPOT)\nCMD: python run_strategy.py\nBINANCE_API_KEY_0\nDepends: postgres + market_data"]
+            S1["elysian_strategy_1 (SPOT)\nCMD: python run_strategy.py\nBINANCE_API_KEY_1"]
+            S2["elysian_strategy_2 (MARGIN)\nCMD: python run_strategy_margin.py\nBINANCE_API_KEY_2\nBINANCE_MARGIN_API_KEY_2\nsub_accounts: Spot + Margin\nDepends: postgres + market_data"]
         end
 
-        subgraph DEV_SVC["Development Service (profile: dev)"]
-            DEV["elysian_dev\nVolume mount: .:/app\n(live source reload)\nAPP_ENV=development"]
-        end
-
-        subgraph VOLS["Named Volumes"]
-            V1["postgres_data"]
-            V2["redis_data"]
-            V3["elysian_logs\n/app/logs\n/app/elysian_core/utils/logs"]
-        end
-
-        RD -->|"healthy"| MDC
-        PG -->|"healthy"| S0
-        PG -->|"healthy"| S1
-        MDC -->|"healthy"| S0
-        MDC -->|"healthy"| S1
+        RD -->|healthy| MDC
+        PG -->|healthy| S0
+        PG -->|healthy| S1
+        PG -->|healthy| S2
+        MDC -->|healthy| S0
+        MDC -->|healthy| S1
+        MDC -->|healthy| S2
     end
 
-    ENTRYPOINT["docker/entrypoint.sh\n1. Wait for Postgres (psycopg2 poll)\n2. Create DB tables (safe=True)\n3. exec CMD\n(SKIP_DB_INIT=true for market_data)"]
+    ENTRYPOINT["docker/entrypoint.sh\n1. Skip if SKIP_DB_INIT=true (market_data)\n2. Wait for Postgres\n3. create_tables(safe=True)\n4. exec CMD"]
 
     S0 --> ENTRYPOINT
     S1 --> ENTRYPOINT
+    S2 --> ENTRYPOINT
 
-    style INFRA_SVCS fill:#f1f5f9,stroke:#94a3b8,color:#1a1a2e
+    style INFRA_SVCS fill:#f1f5f9,stroke:#94a3b8
     style MDS_SVC fill:#fef2f2,stroke:#ef4444,color:#991b1b
     style STRAT_SVCS fill:#f0fdf4,stroke:#16a34a,color:#166534
-    style DEV_SVC fill:#fefce8,stroke:#ca8a04,color:#713f12
-    style VOLS fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
         </div>
     </div>
-
-    <h3>Docker Service Reference</h3>
     <table>
         <thead>
-            <tr><th>Service</th><th>Image / Dockerfile</th><th>Profiles</th><th>Healthcheck</th><th>Key ENV</th></tr>
+            <tr><th>Service</th><th>Runner Script</th><th>Key ENV Vars</th><th>Notes</th></tr>
         </thead>
         <tbody>
-            <tr><td><code>elysian_postgres</code></td><td><code>postgres:15-alpine</code></td><td>always</td><td><code>pg_isready</code></td><td>POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB</td></tr>
-            <tr><td><code>elysian_redis</code></td><td><code>redis:7-alpine</code></td><td>always</td><td><code>redis-cli ping</code></td><td>—</td></tr>
-            <tr><td><code>elysian_market_data</code></td><td>Dockerfile (production)</td><td>strategy_0, strategy_1, all</td><td><code>curl :8080/health</code></td><td>REDIS_HOST, REDIS_PORT, SKIP_DB_INIT=true</td></tr>
-            <tr><td><code>elysian_strategy_N</code></td><td>Dockerfile (production)</td><td>strategy_N, all</td><td>—</td><td>STRATEGY_CONFIG_YAML, BINANCE_API_KEY_N, BINANCE_API_SECRET_N</td></tr>
-            <tr><td><code>elysian_dev</code></td><td>Dockerfile (development)</td><td>dev</td><td>—</td><td>Source volume mount <code>.:/app</code></td></tr>
+            <tr><td><code>elysian_strategy_N</code> (SPOT)</td><td><code>run_strategy.py</code></td><td>BINANCE_API_KEY_N, STRATEGY_CONFIG_YAML</td><td>Single sub-account; standard ShadowBook</td></tr>
+            <tr><td><code>elysian_strategy_N</code> (MARGIN)</td><td><code>run_strategy_margin.py</code></td><td>BINANCE_API_KEY_N, BINANCE_MARGIN_API_KEY_N, STRATEGY_CONFIG_YAML</td><td>Multi-sub-account; MarginShadowBook for MARGIN pipelines</td></tr>
+            <tr><td><code>elysian_market_data</code></td><td><code>run_market_data.py</code></td><td>REDIS_HOST, REDIS_PORT, SKIP_DB_INIT=true</td><td>No Postgres dependency; isolated margin shares Binance spot WS feeds</td></tr>
         </tbody>
     </table>
-    <div class="note-box note-orange">
-        <strong>SKIP_DB_INIT=true on market_data container</strong>
-        The entrypoint.sh normally waits for Postgres and creates tables. The market_data container
-        does not need a Postgres connection — it only uses Redis. Setting SKIP_DB_INIT=true bypasses
-        the Postgres wait and table creation steps, avoiding a hard dependency on Postgres for the
-        market data service.
+
+    <div class="note-box note-purple">
+        <strong>MARGIN asset type shares Binance SPOT WebSocket channels</strong>
+        Isolated margin market data (klines, order book) is served on the same Binance WebSocket streams
+        as spot. The <code>channel_prefix()</code> function in <code>event_serializer.py</code> maps
+        <code>AssetType.MARGIN → AssetType.SPOT</code> so margin strategies subscribe to
+        <code>elysian:md:binance:spot:kline:SYMBOL</code> channels — no duplicate feed connections.
+        <code>MarginStrategyRunner._compute_channels()</code> explicitly uses <code>AssetType.SPOT</code>
+        for MARGIN sub-accounts when building the channel list.
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s3">3. MarketDataService — Feed Layer <span class="badge-new">NEW</span></h2>
+    <!-- ═══ S3: MarketDataService ═══ -->
+    <h2 id="s3">3. MarketDataService — Feed Layer <span>Dedicated feed container (unchanged)</span></h2>
     <p class="desc">
-        <code>MarketDataService</code> (<code>elysian_core/services/market_data_service.py</code>) is the
-        dedicated feed container. It instantiates all WebSocket client managers, registers feeds for every
-        configured symbol, and injects a <code>RedisEventBusPublisher</code> as the event bus for each
-        manager so that market data events are serialised and published to Redis. It does not run any
-        strategies, sub-account exchanges, or risk/execution components.
+        <code>MarketDataService</code> instantiates all WebSocket client managers and injects
+        <code>RedisEventBusPublisher</code> instances. Isolated margin symbols are merged into the Binance
+        spot symbol list (<code>margin_syms</code> appended to <code>spot_syms</code>) so one
+        <code>BinanceKlineClientManager</code> feeds both SPOT and MARGIN strategies.
     </p>
     <div class="diagram-card">
         <div class="mermaid">
 flowchart TB
-    subgraph CONFIG["Configuration (trading_config.yaml + config.json)"]
-        CFG["symbols_for('binance', 'spot')\nsymbols_for('binance', 'futures')\nsymbols_for('aster', 'spot')\nsymbols_for('aster', 'futures')"]
+    subgraph CONFIG["Configuration"]
+        CFG["symbols_for('binance', 'spot') + symbols_for('binance', 'margin')\n→ merged into binance_token_symbols (deduped)\nsymbols_for('binance', 'futures')\nsymbols_for('aster', 'spot')"]
     end
 
-    subgraph PUBLISHERS["RedisEventBusPublisher (one per venue/asset_type)"]
-        P1["Publisher\nprefix: elysian:md:binance:spot"]
-        P2["Publisher\nprefix: elysian:md:binance:futures"]
-        P3["Publisher\nprefix: elysian:md:aster:spot"]
-        P4["Publisher\nprefix: elysian:md:aster:futures"]
+    subgraph PUBLISHERS["RedisEventBusPublisher per (venue, asset_type)"]
+        P1["Publisher: elysian:md:binance:spot\n(covers spot + margin symbols)"]
+        P2["Publisher: elysian:md:binance:perpetual"]
+        P3["Publisher: elysian:md:aster:spot"]
     end
 
-    subgraph MANAGERS["WebSocket Client Managers (set_event_bus → publisher)"]
-        direction LR
-        BKM2["BinanceKlineClientManager\nset_event_bus(P1)"]
-        BOM2["BinanceOrderBookClientManager\nset_event_bus(P1)"]
-        BFKM2["BinanceFuturesKlineClientManager\nset_event_bus(P2)"]
-        BFOM2["BinanceFuturesOrderBookClientManager\nset_event_bus(P2)"]
-        AKM2["AsterKlineClientManager\nset_event_bus(P3)"]
-        AOM2["AsterOrderBookClientManager\nset_event_bus(P3)"]
-        AFKM["AsterPerpKlineClientManager\nset_event_bus(P4)"]
-        AFOM["AsterPerpOrderBookClientManager\nset_event_bus(P4)"]
+    subgraph MANAGERS["WebSocket Client Managers"]
+        BKM2["BinanceKlineClientManager\n(spot + margin symbols)"]
+        BOM2["BinanceOrderBookClientManager"]
+        BFKM2["BinanceFuturesKlineClientManager"]
+        AKM2["AsterKlineClientManager"]
     end
 
-    subgraph FEEDS_REG["Feed Registration (per symbol)"]
-        direction LR
-        KF["BinanceKlineFeed\nper symbol"]
-        OBF["BinanceOrderBookFeed\nper symbol"]
-        SNAP["get_initial_snapshot()\n(after 10s WS settle)"]
-        KF --> SNAP
-        OBF --> SNAP
+    subgraph STARTUP["Startup Sequence"]
+        SS1["1. _setup_config()"]
+        SS2["2. _inject_publishers()"]
+        SS3["3. _register_*_feeds()"]
+        SS4["4. manager.start()"]
+        SS5["5. asyncio.create_task(run_multiplex_feeds())"]
+        SS6["6. await sleep(10s) — WS stabilise"]
+        SS7["7. asyncio.gather(*[feed.get_initial_snapshot()])"]
+        SS8["8. asyncio.gather(*multiplex_tasks, _health_server())"]
+        SS1 --> SS2 --> SS3 --> SS4 --> SS5 --> SS6 --> SS7 --> SS8
     end
 
-    subgraph REDIS2["Redis Channels Published"]
-        RC1["elysian:md:binance:spot:kline:SUIUSDT"]
-        RC2["elysian:md:binance:spot:orderbook:SUIUSDT"]
-        RC3["elysian:md:binance:spot:kline:BTCUSDT"]
-        RC4["..."]
-    end
-
-    subgraph HEALTH["Health Server (:8080)"]
-        HE["GET /health\n→ {status, feeds, uptime_s}"]
-    end
-
-    CFG --> MANAGERS
-    CFG --> PUBLISHERS
+    CONFIG --> MANAGERS
+    CONFIG --> PUBLISHERS
     PUBLISHERS --> MANAGERS
-    MANAGERS --> FEEDS_REG
-    FEEDS_REG -->|"KlineEvent / OrderBookUpdateEvent\n(serialised JSON)"| REDIS2
-    MDS_MAIN["MarketDataService.run()\nasyncio.gather(\n  *multiplex_tasks,\n  health_server()\n)"] --> MANAGERS
-    MDS_MAIN --> HEALTH
+    MANAGERS --> STARTUP
 
-    style CONFIG fill:#f1f5f9,stroke:#94a3b8,color:#1a1a2e
+    style CONFIG fill:#f1f5f9,stroke:#94a3b8
     style PUBLISHERS fill:#ecfdf5,stroke:#059669,color:#065f46
     style MANAGERS fill:#fef2f2,stroke:#ef4444,color:#991b1b
-    style FEEDS_REG fill:#fefce8,stroke:#ca8a04,color:#713f12
-    style REDIS2 fill:#ecfdf5,stroke:#059669,color:#065f46
-    style HEALTH fill:#eff6ff,stroke:#2563eb,color:#1e40af
         </div>
     </div>
     <div class="note-box">
-        <strong>Startup sequencing</strong>
-        MarketDataService waits 10 seconds after WebSocket connections are established before fetching
-        REST order-book snapshots. This ensures the snapshot's <code>lastUpdateId</code> can be matched
-        against already-buffered WebSocket depth events, following the Binance/Aster order-book
-        synchronisation protocol.
+        <strong>Margin symbol deduplication</strong>
+        <code>_setup_config()</code> merges spot and margin symbol lists:
+        <code>binance_token_symbols = list(dict.fromkeys(spot_syms + [s for s in margin_syms if s not in spot_syms]))</code>.
+        This ensures each symbol has exactly one kline feed and one order-book feed, even when it appears
+        in both the spot and margin symbol lists in <code>config.json</code>.
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s4">4. Redis Transport Layer <span class="badge-new">NEW</span></h2>
+    <!-- ═══ S4: Redis Transport ═══ -->
+    <h2 id="s4">4. Redis Transport Layer <span>JSON serialisation codec</span></h2>
     <p class="desc">
-        The <code>elysian_core/transport/</code> module provides the JSON serialisation codec and the
-        Redis-backed EventBus implementations that replace the in-process EventBus for market data.
-        Only <code>KlineEvent</code> and <code>OrderBookUpdateEvent</code> cross the Redis network boundary.
+        The transport layer is unchanged in design. The key point for margin is that
+        <code>channel_prefix(Venue.BINANCE, AssetType.MARGIN)</code> returns
+        <code>"elysian:md:binance:spot"</code> — identical to the spot prefix — because
+        <code>AssetType.MARGIN</code> is remapped to <code>AssetType.SPOT</code> inside the function.
+        This means margin strategies call <code>strategy_channels()</code> with <code>AssetType.SPOT</code>
+        (or the runner does the remapping) so they subscribe to the correct channels.
     </p>
     <div class="diagram-card">
         <div class="mermaid">
 flowchart LR
-    subgraph MDS_SIDE["Market Data Container"]
+    subgraph SERIALIZER["event_serializer.py — Channel & Codec Logic"]
         direction TB
-        WS["WebSocket Worker\n(KlineClientManager)"]
-        PUB["RedisEventBusPublisher\n(elysian_core/transport/redis_event_bus.py)\nredis_url + channel_prefix\n\nawait r.publish(channel, payload)"]
-        SER["event_serializer.serialize_event(event)\n→ JSON bytes\n\nChannel: {prefix}:kline:{symbol}\nor {prefix}:orderbook:{symbol}"]
-        WS -->|"KlineEvent / OBUpdateEvent"| PUB
-        PUB --> SER
+        CP["channel_prefix(venue, asset_type)\nAssetType.MARGIN → remapped to SPOT\ne.g. Venue.BINANCE + AssetType.MARGIN\n→ 'elysian:md:binance:spot'"]
+        SC["strategy_channels(symbols, venue, asset_type)\n→ kline + orderbook channels per symbol\nUsed by both StrategyRunner and\nMarginStrategyRunner._compute_channels()"]
+        SER["serialize_event(event)\n→ JSON bytes\nKlineEvent / OrderBookUpdateEvent only"]
+        DES["deserialize_event(payload)\n→ reconstructed as plain OrderBook\n(not BinanceOrderBook or AsterOrderBook)"]
+        CP --> SC
     end
 
-    subgraph REDIS_BROKER["Redis (elysian_redis)"]
-        CHAN["Channels:\nelysian:md:binance:spot:kline:BTCUSDT\nelysian:md:binance:spot:orderbook:SUIUSDT\nelysian:md:aster:spot:kline:ASTERUSDT\n..."]
+    subgraph MDS_SIDE2["Market Data Container"]
+        PUB2["RedisEventBusPublisher\nawait r.publish(channel, payload)"]
     end
 
-    subgraph STRAT_SIDE["Strategy Container"]
-        direction TB
-        SUB2["RedisEventBusSubscriber\n(elysian_core/transport/redis_event_bus.py)\n\nstart_listener(channels)\n→ asyncio Task: _listener_loop()"]
-        DESER["event_serializer.deserialize_event(payload)\n→ KlineEvent | OrderBookUpdateEvent"]
-        CB["Dispatch to registered callbacks\n(sequential, backpressure preserved)\n\nsubscribe(EventType.KLINE, callback)\nunsubscribe(EventType.KLINE, callback)"]
-        SUB2 --> DESER --> CB
+    subgraph STRAT_SIDE2["Strategy Container\n(SPOT or MARGIN)"]
+        SUB2["RedisEventBusSubscriber\n._listener_loop()"]
     end
 
-    subgraph CHANNELS_HELPER["strategy_channels() helper"]
-        CH_FN["strategy_channels(symbols, venue, asset_type)\n→ List of Redis channel strings\nfor all symbols (kline + orderbook)"]
-    end
+    SER --> MDS_SIDE2
+    MDS_SIDE2 -->|"r.publish()"| BROKER(["Redis"])
+    BROKER -->|"ps.listen()"| STRAT_SIDE2
+    STRAT_SIDE2 --> DES
 
-    SER -->|"r.publish(channel, JSON bytes)"| REDIS_BROKER
-    REDIS_BROKER -->|"ps.listen() messages"| SUB2
-    CHANNELS_HELPER -->|"channels list"| SUB2
-
-    style MDS_SIDE fill:#fef2f2,stroke:#ef4444,color:#991b1b
-    style REDIS_BROKER fill:#ecfdf5,stroke:#059669,color:#065f46
-    style STRAT_SIDE fill:#f0fdf4,stroke:#16a34a,color:#166534
-    style CHANNELS_HELPER fill:#eff6ff,stroke:#2563eb,color:#1e40af
+    style SERIALIZER fill:#eff6ff,stroke:#2563eb,color:#1e3a5f
+    style MDS_SIDE2 fill:#fef2f2,stroke:#ef4444,color:#991b1b
+    style STRAT_SIDE2 fill:#faf5ff,stroke:#a855f7,color:#3b0764
         </div>
     </div>
 
-    <h3>Channel Naming Convention</h3>
-    <table>
-        <thead>
-            <tr><th>Pattern</th><th>Example</th><th>Event Type</th></tr>
-        </thead>
-        <tbody>
-            <tr><td><code>elysian:md:{venue}:{asset_type}:kline:{SYMBOL}</code></td><td><code>elysian:md:binance:spot:kline:BTCUSDT</code></td><td>KlineEvent</td></tr>
-            <tr><td><code>elysian:md:{venue}:{asset_type}:orderbook:{SYMBOL}</code></td><td><code>elysian:md:binance:spot:orderbook:ETHUSDT</code></td><td>OrderBookUpdateEvent</td></tr>
-            <tr><td><code>elysian:md:binance:perpetual:kline:{SYMBOL}</code></td><td><code>elysian:md:binance:perpetual:kline:BTCUSDT</code></td><td>KlineEvent (futures)</td></tr>
-            <tr><td><code>elysian:md:aster:spot:kline:{SYMBOL}</code></td><td><code>elysian:md:aster:spot:kline:ASTERUSDT</code></td><td>KlineEvent (Aster)</td></tr>
-        </tbody>
-    </table>
-    <div class="note-box">
-        <strong>EventBus interface compatibility</strong>
-        <code>RedisEventBusSubscriber</code> implements the same <code>subscribe()</code> / <code>unsubscribe()</code> /
-        <code>publish()</code> interface as the in-process <code>EventBus</code>. Strategies call
-        <code>shared_event_bus.subscribe(EventType.KLINE, cb)</code> identically regardless of whether
-        the bus is backed by Redis or an in-process deque. <code>publish()</code> on the subscriber side
-        is a no-op — strategies never publish to the shared bus.
-    </div>
-    <div class="note-box">
-        <strong>Serialisation</strong>
-        Events are serialised as JSON via <code>_EventEncoder</code> (handles <code>datetime</code>,
-        enums, and <code>SortedDict</code>). OrderBook bid/ask levels are serialised as lists of
-        <code>[price, qty]</code> pairs and reconstructed into a plain <code>OrderBook</code>
-        (not a <code>BinanceOrderBook</code> or <code>AsterOrderBook</code>) on the subscriber side.
-        This is intentional — only the level data matters for mark-price and signal computation.
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s5">5. 5-Stage Rebalance Pipeline <span>Data flow through a single rebalance cycle</span></h2>
+    <!-- ═══ S5: Pipeline ═══ -->
+    <h2 id="s5">5. Six-Stage Rebalance Pipeline <span>Data flow through a single rebalance cycle</span></h2>
     <p class="desc">
-        The six-stage pipeline is unchanged in structure. The only architectural difference is that
-        Stage 1 (market data) now runs in a <em>separate container</em> and delivers events to Stage 2
-        (strategy dispatch) via Redis rather than in-process. Stages 3–5 remain sequential direct
-        method calls within the strategy container.
+        The six-stage pipeline is identical for SPOT and MARGIN strategies. The only difference is in Stage 5
+        (Execution): MARGIN <code>OrderIntent</code> carries <code>asset_type=AssetType.MARGIN</code> and
+        <code>side_effect=MarginSideEffect.AUTO_BORROW_REPAY</code>, and the ExecutionEngine passes
+        <code>side_effect</code> as an extra kwarg to <code>place_market_order()</code> /
+        <code>place_limit_order()</code> — which <code>BinanceMarginExchange</code> picks up and sends
+        as <code>sideEffectType</code> to the Binance API.
     </p>
     <div class="diagram-card">
         <div class="mermaid">
 flowchart LR
-    subgraph ST1["Stage 1: Market Data (MarketDataService Container)"]
-        direction TB
-        WS1["BinanceKlineClientManager\nBinanceFuturesKlineClientManager\nBinanceOrderBookClientManager\nAsterKlineClientManager\nAsterPerpKlineClientManager"]
-        DF["KlineFeed\nOHLCV ring buffer\nrolling vol\nlatest_price"]
-        OBF2["OrderBookFeed\nL2 SortedDict depth\nbid / ask / mid / spread"]
-        WS1 -->|"raw WS msg"| DF
-        WS1 -->|"raw WS msg"| OBF2
+    subgraph ST1["Stage 1: Market Data (MarketDataService)"]
+        WS1["BinanceKlineClientManager\n(spot + margin symbols shared)"]
     end
 
-    subgraph TRANSPORT["Redis Transport (NEW)"]
-        direction TB
-        PUB2["RedisEventBusPublisher\nserialise → JSON bytes\nr.publish(channel, payload)"]
-        REDIS3["Redis Broker\nelysian:md:...\nchannels"]
-        SUB3["RedisEventBusSubscriber\nps.listen() → deserialise\n→ EventBus dispatch"]
-        PUB2 --> REDIS3 --> SUB3
+    subgraph TRANSPORT["Redis Transport"]
+        PUB3["Publisher → Redis"]
+        SUB3["Subscriber → dispatch"]
+        PUB3 --> SUB3
     end
 
     subgraph ST2["Stage 2: Signal Dispatch (Strategy Container)"]
-        direction TB
-        DISP["SpotStrategy\n_dispatch_kline()\n_dispatch_ob()\n_dispatch_order()\n_dispatch_balance()"]
-        CB["on_kline()\non_orderbook_update()\non_order_update()\non_balance_update()"]
-        RRQ["request_rebalance(**ctx)\nor timer_tick (interval_s)"]
-        DISP --> CB --> RRQ
+        DISP["SpotStrategy or MarginStrategy\n_dispatch_kline / _dispatch_order\n_dispatch_balance"]
     end
 
     subgraph ST3["Stage 3: compute_weights()"]
-        direction TB
-        CW["SpotStrategy.compute_weights(**ctx)\n→ Dict[symbol, float]"]
-        TW["TargetWeights\nweights: Dict[str,float]\ntimestamp: float\nstrategy_id: int\nvenue: Venue\nmetadata: dict\nprice_overrides: dict"]
-        CW --> TW
+        CW["ctx['sub_account_key'] injected\nfor MarginStrategy pipelines\n→ Dict[symbol, float]"]
     end
 
     subgraph ST4["Stage 4: Risk Validation"]
-        direction TB
-        OPT["PortfolioOptimizer.validate(TargetWeights)"]
-        R1["1. Input validation NaN/Inf"]
-        R2["2. Symbol whitelist / blacklist"]
-        R3["3. Per-asset weight clip\nmax_weight_per_asset"]
-        R4["4. Total-exposure scaling\nmax_total_exposure"]
-        R5["5. Cash-floor enforcement\nmin_cash_weight"]
-        R6["6. Turnover cap\nmax_turnover_per_rebalance"]
-        R7["7. Min-delta prune\nmin_weight_delta"]
-        VW["ValidatedWeights\noriginal / weights\nclipped / rejected\nrejection_reason"]
-        OPT --> R1 --> R2 --> R3 --> R4 --> R5 --> R6 --> R7 --> VW
+        OPT2["PortfolioOptimizer.validate()\nMarginShadowBook.margin_level()\npre-check if min_margin_level > 0"]
     end
 
     subgraph ST5["Stage 5: Execution"]
-        direction TB
-        EE2["ExecutionEngine.execute(ValidatedWeights)"]
-        E1["1. Snapshot mark prices from _mark_prices dict\n(updated via KLINE subscription on shared_bus)"]
-        E2["2. Compute portfolio total_value()"]
-        E3["3. Compute delta_qty per symbol"]
-        E4["4. Round to step_size"]
-        E5["5. Filter weight_delta < 0.001"]
-        E6["6. Execute SELLS first, then BUYS"]
-        E7["7. ShadowBook.lock_for_order()\nActiveLimitOrder reservation"]
-        RR["RebalanceResult\nintents / submitted / failed\ntimestamp / errors\nsubmitted_orders"]
-        EE2 --> E1 --> E2 --> E3 --> E4 --> E5 --> E6 --> E7 --> RR
+        EE2["ExecutionEngine.execute()\nOrderIntent:\n  asset_type=SPOT|MARGIN|PERPETUAL\n  side_effect=AUTO_BORROW_REPAY (MARGIN)\nplace_market_order(**extra)\nplace_limit_order(**extra)"]
     end
 
-    DF -->|"KlineEvent\n→ Publisher"| PUB2
-    OBF2 -->|"OrderBookUpdateEvent\n→ Publisher"| PUB2
-    SUB3 -->|"KlineEvent / OBUpdateEvent\ndispatched via shared_event_bus"| DISP
-    RRQ -->|"COMPUTING trigger"| CW
-    TW -->|"VALIDATING trigger"| OPT
-    VW -->|"EXECUTING trigger"| EE2
-    RR -->|"RebalanceCompleteEvent\non Private EventBus"| CB
+    subgraph ST6["Stage 6: Exchange"]
+        CONN["BinanceSpotExchange\nor BinanceMarginExchange\nor BinanceFuturesExchange\nREST API"]
+    end
+
+    WS1 --> PUB3
+    SUB3 --> DISP
+    DISP --> CW
+    CW --> OPT2
+    OPT2 --> EE2
+    EE2 --> CONN
 
     style ST1 fill:#fef2f2,stroke:#ef4444,color:#991b1b
     style TRANSPORT fill:#ecfdf5,stroke:#059669,color:#065f46
@@ -737,340 +722,195 @@ flowchart LR
     style ST3 fill:#f0fdf4,stroke:#16a34a,color:#166534
     style ST4 fill:#eff6ff,stroke:#2563eb,color:#1e40af
     style ST5 fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
+    style ST6 fill:#fef2f2,stroke:#ef4444,color:#991b1b
         </div>
     </div>
-    <div class="note-box">
-        <strong>ExecutionEngine mark prices</strong>
-        ExecutionEngine now maintains its own <code>_mark_prices</code> dict (keyed by <code>Venue</code>)
-        updated via <code>_on_kline()</code> subscribed to the shared event bus. This allows it to
-        snapshot prices at execution time without needing live feed references. It calls
-        <code>execution_engine.start(shared_event_bus)</code> in <code>StrategyRunner.setup_strategy()</code>.
+    <div class="note-box note-purple">
+        <strong>MarginSideEffect kwarg forwarding in ExecutionEngine</strong>
+        <code>_submit_order()</code> passes <code>side_effect</code> only when <code>intent.side_effect is not None</code>:
+        <code>extra = {"side_effect": intent.side_effect}</code> is appended to the connector call via <code>**extra</code>.
+        SPOT connectors do not accept this parameter — the conditional prevents breaking them.
+        For MARGIN intents, <code>compute_order_intents()</code> sets
+        <code>side_effect=MarginSideEffect.AUTO_BORROW_REPAY</code> when <code>asset_type == AssetType.MARGIN</code>.
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s6">6. StrategyRunner Lifecycle <span class="badge-updated">UPDATED</span> <span>Startup, steady state, and shutdown</span></h2>
+    <!-- ═══ S6: StrategyRunner Lifecycle ═══ -->
+    <h2 id="s6">6. StrategyRunner Lifecycle <span class="badge-updated">UPDATED</span> <span>Single-strategy container</span></h2>
     <p class="desc">
-        <code>StrategyRunner</code> (in <code>run_strategy.py</code>) has been restructured for single-strategy
-        container deployment. It reads <code>STRATEGY_CONFIG_YAML</code> from the environment, constructs a
-        <code>RedisEventBusSubscriber</code> as the shared event bus, and no longer creates any WebSocket
-        client managers (those live in the MarketDataService container).
-    </p>
-
-    <div class="change-list">
-        <h4>Changes from Previous StrategyRunner</h4>
-        <ul>
-            <li><strong>Removed</strong>: KlineClientManager, OrderBookClientManager creation — now in MarketDataService</li>
-            <li><strong>Added</strong>: <code>RedisEventBusSubscriber</code> as <code>shared_event_bus</code></li>
-            <li><strong>Added</strong>: <code>_compute_channels()</code> — derives Redis channels for this strategy's symbols</li>
-            <li><strong>Added</strong>: <code>start_listener(channels)</code> call to begin Redis subscription</li>
-            <li><strong>Added</strong>: <code>execution_engine.start(shared_event_bus)</code> in setup_strategy</li>
-            <li><strong>Changed</strong>: Reads single strategy from <code>STRATEGY_CONFIG_YAML</code> env var</li>
-            <li><strong>Changed</strong>: <code>strategy_config_yaml</code> (singular) instead of list</li>
-        </ul>
-    </div>
-
-    <div class="diagram-card">
-        <div class="mermaid">
-flowchart TB
-    subgraph INIT["__init__ — Configuration"]
-        direction TB
-        LC["load_app_config(\n  trading_config_yaml,\n  strategy_config_yamls=[strategy_yaml],\n  json_path, env_path\n)"]
-        AC["AppConfig\n{meta, portfolio, risk,\nexecution, venue_configs,\nstrategies: Dict[int, StrategyConfig]}"]
-        LC --> AC
-    end
-
-    subgraph REDIS_SETUP["Redis Setup (NEW)"]
-        direction TB
-        RSub["RedisEventBusSubscriber\n(redis_url from env)\nshared_event_bus = RSub"]
-    end
-
-    subgraph SETUP["setup_strategy(strategy_config)"]
-        direction TB
-        SP1["_create_sub_account_exchange()\n→ (private_exchange, private_bus)\nprivate_exchange.start(shared_event_bus)\n(subscribes to KLINE+OB on shared bus)"]
-        SS2["create ShadowBook(strategy_id, venue,\n  strategy_config=strat_cfg)\nshadow_book.sync_from_exchange(private_exchange, {})\nshadow_book.start(shared_event_bus, private_event_bus)"]
-        SPO["create PortfolioOptimizer(risk_config, shadow_book)"]
-        SEE["create ExecutionEngine(\n  exchanges, shadow_book,\n  default_venue, cfg\n)\nexecution_engine.start(shared_event_bus)  ← NEW"]
-        PRG["portfolio.register_shadow_book(sb)"]
-        SST["strategy.start()\n(subscribes 5 event types\non shared + private buses)"]
-        SP1 --> SS2 --> SPO --> SEE --> PRG --> SST
-    end
-
-    subgraph CHANNELS["Channel Computation (NEW)"]
-        direction TB
-        CC["_compute_channels(cfg)\n→ strategy_channels(symbols, venue, asset_type)\n→ List of Redis channel strings\n(kline + orderbook per symbol)"]
-    end
-
-    subgraph STATES["RunnerState FSM"]
-        direction LR
-        CREATED(["CREATED"])
-        CONFIGURING(["CONFIGURING"])
-        CONNECTING(["CONNECTING"])
-        SYNCING(["SYNCING"])
-        RUNNING(["RUNNING"])
-        STOPPING(["STOPPING"])
-        STOPPED(["STOPPED"])
-        CREATED --> CONFIGURING --> CONNECTING --> SYNCING --> RUNNING --> STOPPING --> STOPPED
-    end
-
-    subgraph MAIN_LOOP["asyncio.gather() — Main Run Loop"]
-        LT["shared_event_bus._listener_task\n(Redis subscription loop)"]
-        RF["strategy.run_forever()\n(timer-based or event-driven)"]
-    end
-
-    INIT --> REDIS_SETUP
-    REDIS_SETUP --> SETUP
-    SETUP --> CHANNELS
-    CHANNELS -->|"start_listener(channels)"| MAIN_LOOP
-    MAIN_LOOP --> STATES
-
-    style INIT fill:#fef2f2,stroke:#ef4444,color:#991b1b
-    style REDIS_SETUP fill:#ecfdf5,stroke:#059669,color:#065f46
-    style SETUP fill:#fefce8,stroke:#ca8a04,color:#713f12
-    style CHANNELS fill:#eff6ff,stroke:#2563eb,color:#1e40af
-    style STATES fill:#eff6ff,stroke:#2563eb,color:#1e40af
-    style MAIN_LOOP fill:#f0fdf4,stroke:#16a34a,color:#166534
-    style CREATED fill:#dbeafe,stroke:#2563eb,color:#1e40af
-    style CONFIGURING fill:#dbeafe,stroke:#2563eb,color:#1e40af
-    style CONNECTING fill:#dbeafe,stroke:#2563eb,color:#1e40af
-    style SYNCING fill:#dbeafe,stroke:#2563eb,color:#1e40af
-    style RUNNING fill:#bbf7d0,stroke:#16a34a,color:#166534
-    style STOPPING fill:#fed7aa,stroke:#ea580c,color:#9a3412
-    style STOPPED fill:#fee2e2,stroke:#ef4444,color:#991b1b
-        </div>
-    </div>
-    <div class="note-box note-green">
-        <strong>asyncio.gather() — concurrent main coroutines</strong>
-        <code>run()</code> gathers two coroutines: <code>shared_event_bus._listener_task</code> (the Redis
-        subscription loop that deserialises messages and dispatches to strategy callbacks) and
-        <code>strategy.run_forever()</code> (the strategy's timer or event loop). Both run concurrently
-        on the single asyncio event loop. When either exits (e.g. on shutdown), the other is cancelled.
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s7">7. Strategy Event Bus Wiring <span class="badge-updated">UPDATED</span> <span>Shared vs private buses across two containers</span></h2>
-    <p class="desc">
-        The two-bus architecture is preserved but now the <strong>shared bus is backed by Redis</strong>
-        while the <strong>private bus remains in-process</strong>. The strategy subscribes to 5 event types
-        across the two buses. The ShadowBook also subscribes to KLINE on the shared bus for mark price
-        updates. ORDER_UPDATE and BALANCE_UPDATE are dispatched by the strategy to the ShadowBook via
-        <code>asyncio.gather()</code> rather than ShadowBook subscribing directly.
+        <code>StrategyRunner</code> (in <code>run_strategy.py</code>) handles SPOT and FUTURES strategies.
+        <code>MarginStrategyRunner</code> (in <code>run_strategy_margin.py</code>) extends it for multi-sub-account
+        MARGIN strategies. Both share the same Redis subscriber construction and channel computation patterns.
     </p>
     <div class="diagram-card">
         <div class="mermaid">
 flowchart TB
-    subgraph SHARED_BUS["Shared EventBus — RedisEventBusSubscriber (market data)"]
-        direction LR
-        subgraph SHARED_PRODUCERS["Producers (Market Data Container → Redis)"]
-            BKP["BinanceKlineFeed"]
-            BOP["BinanceOrderBookFeed"]
-            BFKP["BinanceFuturesKlineFeed"]
-            AKP["AsterKlineFeed"]
-        end
-        subgraph SHARED_EVENTS["Events (via Redis → deserialise)"]
-            KE["KlineEvent\n{symbol, venue, kline, timestamp}"]
-            OE["OrderBookUpdateEvent\n{symbol, venue, orderbook, timestamp}"]
-        end
-        subgraph SHARED_CONSUMERS["Consumers (Strategy Container)"]
-            SDK["SpotStrategy._dispatch_kline\n(filters by venue + symbols)"]
-            SDOB["SpotStrategy._dispatch_ob\n(filters by venue)"]
-            SBKL["ShadowBook._on_kline\n→ update _mark_prices\n→ _refresh_derived()"]
-            EEK["ExecutionEngine._on_kline\n→ update _mark_prices[venue][symbol]"]
-            SPEX["SpotExchangeConnector._on_kline\n→ kline_feeds[symbol]"]
-        end
-        SHARED_PRODUCERS --> SHARED_EVENTS --> SHARED_CONSUMERS
+    subgraph RUNNER["StrategyRunner.run()"]
+        direction TB
+        R1["CONFIGURING: load_app_config()\nread STRATEGY_CONFIG_YAML"]
+        R2["CONNECTING: RedisEventBusSubscriber(redis_url)\nshared_event_bus = subscriber"]
+        R3["SYNCING:\n_setup_pipeline() → Portfolio per (AssetType, Venue)\n_setup_strategy() → for each strategy\n  _create_sub_account_exchange()\n  ShadowBook.sync_from_exchange()\n  ShadowBook.start(shared_bus, private_bus)\n  PortfolioOptimizer\n  ExecutionEngine.start(shared_bus)\n  strategy.start()\n_compute_channels()\nstart_listener(channels)"]
+        R4["RUNNING:\nasyncio.gather(\n  shared_event_bus._listener_task,\n  strategy.run_forever()\n)"]
+        R5["STOPPING:\nstrategy.stop()\nexchange.cleanup()\nsnapshot_tasks.stop()\nshared_event_bus.close()"]
+        R1 --> R2 --> R3 --> R4 --> R5
     end
 
-    subgraph PRIVATE_BUS["Private EventBus — in-process (per-strategy, per-container)"]
-        direction LR
-        subgraph PRIVATE_PRODUCERS["Producers"]
-            UDS["BinanceSpotExchange\n._user_data_stream()\nBinanceUserDataClientManager\nuserDataStream.subscribe.signature"]
-        end
-        subgraph PRIVATE_EVENTS["Events"]
-            OUE["OrderUpdateEvent\n{symbol, base_asset, quote_asset,\nvenue, order, timestamp}"]
-            BAE["BalanceUpdateEvent\n{asset, venue, delta,\nnew_balance, timestamp}"]
-            RCE["RebalanceCycleEvent\n{old_state, new_state,\ntrigger, timestamp}"]
-            RCO["RebalanceCompleteEvent\n{result, validated_weights,\ntimestamp, strategy_id}"]
-        end
-        subgraph PRIVATE_CONSUMERS["Consumers"]
-            PDO["SpotStrategy._dispatch_order\n→ asyncio.gather(\n    on_order_update(event),\n    shadow_book._on_order_update(event)\n  )"]
-            PDB["SpotStrategy._dispatch_balance\n→ asyncio.gather(\n    on_balance_update(event),\n    shadow_book._on_balance_update(event)\n  )"]
-            PDR["SpotStrategy._dispatch_rebalance\n→ on_rebalance_complete()"]
-        end
-        PRIVATE_PRODUCERS --> PRIVATE_EVENTS
-        OUE --> PDO
-        BAE --> PDB
-        RCO --> PDR
+    subgraph MARGIN_RUNNER["MarginStrategyRunner.run() — additional steps"]
+        direction TB
+        MR1["setup_strategy() detects strat_cfg.sub_accounts\n→ iterates sub-account list"]
+        MR2["_build_margin_pipeline(sub_cfg):\n  private_bus = EventBus()\n  exchange = BinanceMarginExchange or BinanceSpotExchange\n  exchange.start(shared_event_bus)\n  exchange.run()\n  shadow_book = MarginShadowBook (if MARGIN)\n               or ShadowBook (if SPOT)\n  shadow_book.sync_from_exchange()\n  shadow_book.start(shared_bus, private_bus)\n  optimizer = PortfolioOptimizer(sub_risk_config)\n  execution_engine = ExecutionEngine\n  execution_engine.start(shared_bus)\n  → SubAccountPipeline(key, exchange, private_bus, ...)\n  store in strategy._pipelines[SubAccountKey]"]
+        MR3["_compute_channels() (instance method):\n  MARGIN sub-accounts → use AssetType.SPOT channel\n  (Binance margin shares spot WS streams)"]
+        MR1 --> MR2 --> MR3
     end
 
-    style SHARED_BUS fill:#eff6ff,stroke:#2563eb,color:#1e40af
-    style SHARED_PRODUCERS fill:#ecfdf5,stroke:#059669,color:#065f46
-    style SHARED_EVENTS fill:#f8faff,stroke:#93c5fd,color:#1e40af
-    style SHARED_CONSUMERS fill:#dbeafe,stroke:#2563eb,color:#1e40af
-    style PRIVATE_BUS fill:#f0fdf4,stroke:#16a34a,color:#166534
-    style PRIVATE_PRODUCERS fill:#dcfce7,stroke:#16a34a,color:#166534
-    style PRIVATE_EVENTS fill:#f8fff9,stroke:#86efac,color:#166534
-    style PRIVATE_CONSUMERS fill:#dcfce7,stroke:#16a34a,color:#166534
+    RUNNER -.->|"extends"| MARGIN_RUNNER
+
+    style RUNNER fill:#f0fdf4,stroke:#16a34a,color:#166534
+    style MARGIN_RUNNER fill:#faf5ff,stroke:#a855f7,color:#3b0764
         </div>
     </div>
-    <div class="note-box">
-        <strong>ShadowBook ORDER_UPDATE / BALANCE_UPDATE dispatch</strong>
-        Unlike the KLINE subscription (which ShadowBook registers itself via <code>start()</code>),
-        ORDER_UPDATE and BALANCE_UPDATE are dispatched to the ShadowBook by the strategy's
-        <code>_dispatch_order()</code> and <code>_dispatch_balance()</code> handlers using
-        <code>asyncio.gather()</code>. This means both the strategy's user hook (<code>on_order_update()</code>)
-        and the ShadowBook's internal handler (<code>_on_order_update()</code>) run concurrently for each event.
+
+    <!-- ═══ S7: Event Bus Wiring ═══ -->
+    <h2 id="s7">7. Strategy Event Bus Wiring <span>Shared vs private buses — SPOT and MARGIN</span></h2>
+    <p class="desc">
+        Each sub-account pipeline in a <code>MarginStrategy</code> has its own private EventBus. ORDER_UPDATE
+        and BALANCE_UPDATE events are tagged with <code>asset_type</code> and <code>sub_account_id</code>
+        so <code>MarginStrategy._dispatch_order()</code> can route to the correct pipeline's ShadowBook.
+    </p>
+    <div class="diagram-card">
+        <div class="mermaid">
+flowchart TB
+    subgraph SHARED_BUS2["Shared EventBus — RedisEventBusSubscriber"]
+        KE2["KlineEvent / OrderBookUpdateEvent\nVenue.BINANCE + AssetType.SPOT channels\n(covers spot + margin symbols)"]
+    end
+
+    subgraph MARGIN_STRATEGY["MarginStrategy Container"]
+        direction TB
+        MS3["MarginStrategy\n_dispatch_kline → on_kline() (all pipelines)\n_dispatch_order → routes by (asset_type, sub_account_id)\n_dispatch_balance → routes by (asset_type, sub_account_id)"]
+
+        subgraph PIPELINE_A["Sub-Account Pipeline 0: SPOT"]
+            PBUS_A["Private EventBus A\n(in-process)"]
+            BSE_A["BinanceSpotExchange\nuserDataStream.subscribe.signature WS"]
+            SB_A["ShadowBook\n_cash, _positions\nstandard ledger"]
+            FSM_A["RebalanceFSM A\nSubAccountKey(strategy_id=2,\n  asset_type=SPOT, venue=BINANCE,\n  sub_account_id=0)"]
+            EE_A["ExecutionEngine A\nOrderIntent.side_effect=None"]
+        end
+
+        subgraph PIPELINE_B["Sub-Account Pipeline 1: MARGIN"]
+            PBUS_B["Private EventBus B\n(in-process)"]
+            BME_B["BinanceMarginExchange\nPer-symbol listen keys\nPOST /sapi/v1/userDataStream/isolated\nKeepalive every 55 min\nPeriodicMarginPoll every 60s"]
+            MSB_B["MarginShadowBook\n_collateral (USDT/BUSD)\n_borrowed (base asset)\n_accrued_interest\nNAV = collateral + long_pos - borrowed - interest"]
+            FSM_B["RebalanceFSM B\nSubAccountKey(strategy_id=2,\n  asset_type=MARGIN, venue=BINANCE,\n  sub_account_id=1)"]
+            EE_B["ExecutionEngine B\nOrderIntent.side_effect=AUTO_BORROW_REPAY"]
+        end
+
+        SHARED_BUS2 -->|KlineEvent| MS3
+        MS3 -->|routes by SubAccountKey| PIPELINE_A
+        MS3 -->|routes by SubAccountKey| PIPELINE_B
+        BSE_A --> PBUS_A --> MS3
+        BME_B --> PBUS_B --> MS3
+    end
+
+    style SHARED_BUS2 fill:#eff6ff,stroke:#2563eb,color:#1e40af
+    style PIPELINE_A fill:#f0fdf4,stroke:#16a34a,color:#166534
+    style PIPELINE_B fill:#faf5ff,stroke:#a855f7,color:#3b0764
+        </div>
     </div>
-    <div class="note-box">
-        <strong>Three shared-bus consumers per KlineEvent</strong>
-        Every KLINE event on the shared bus is consumed by three independent subscribers:
-        (1) <code>SpotStrategy._dispatch_kline</code> (drives strategy logic + rebalance trigger),
-        (2) <code>ShadowBook._on_kline</code> (updates mark prices and refreshes NAV/weights),
-        (3) <code>ExecutionEngine._on_kline</code> (updates internal price snapshot for execution sizing),
-        and (4) <code>SpotExchangeConnector._on_kline</code> (keeps kline_feeds for order health checks).
+    <div class="note-box note-purple">
+        <strong>ORDER_UPDATE routing in MarginStrategy</strong>
+        <code>_dispatch_order(event)</code> constructs a <code>SubAccountKey</code> from
+        <code>event.asset_type</code>, <code>event.venue</code>, and <code>event.sub_account_id</code>,
+        then looks up the matching pipeline. Both the strategy's <code>on_order_update()</code> hook and
+        the pipeline's <code>shadow_book._on_order_update()</code> run via <code>asyncio.gather()</code>.
+        If no matching pipeline is found, a warning is logged and the event is dropped — preventing
+        cross-strategy fill contamination.
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s8">8. Order Data Model Hierarchy <span>src/core/order.py</span></h2>
+    <!-- ═══ S8: Order Data Model ═══ -->
+    <h2 id="s8">8. Order Data Model Hierarchy <span>elysian_core/core/order.py</span></h2>
     <p class="desc">
-        Orders follow a strict inheritance chain. The base <code>Order</code> holds the canonical exchange fields.
-        <code>ActiveOrder</code> adds fill-delta bookkeeping for streaming partial fills. <code>ActiveLimitOrder</code>
-        further adds reservation accounting so the <code>ShadowBook</code> can lock cash or base-asset qty the moment
-        a limit order is submitted — before any exchange acknowledgment arrives.
+        The order hierarchy is unchanged. <code>ActiveLimitOrder</code> carries reservation state for both
+        SPOT and MARGIN limit orders. The <code>OrderIntent</code> signal contract now includes
+        <code>asset_type</code>, <code>sub_account_id</code>, and <code>side_effect</code> fields for
+        multi-sub-account routing.
+    </p>
+    <div class="diagram-card">
+        <div class="mermaid">
+        classDiagram
+            class Order {
+                +str id
+                +str symbol
+                +Side side
+                +OrderType order_type
+                +float quantity
+                +float price
+                +float avg_fill_price
+                +float last_fill_price
+                +float filled_qty
+                +OrderStatus status
+                +Venue venue
+                +float commission
+                +str commission_asset
+                +int strategy_id
+                +transition_to(new_status)
+                +update_fill(filled_qty, fill_price)
+                +remaining_qty : float
+                +is_filled : bool
+                +is_terminal : bool
+            }
+
+            class ActiveOrder {
+                +float _prev_filled
+                +sync_from_event(event_order) float
+            }
+
+            class ActiveLimitOrder {
+                +float reserved_cash
+                +float reserved_qty
+                +initialize_reservation()
+                +release_partial(delta_filled) tuple
+                +release_all() tuple
+            }
+
+            class OrderIntent {
+                +str symbol
+                +Venue venue
+                +Side side
+                +float quantity
+                +OrderType order_type
+                +float price
+                +int strategy_id
+                +AssetType asset_type
+                +int sub_account_id
+                +MarginSideEffect side_effect
+            }
+
+            class MarginSideEffect {
+                NO_SIDE_EFFECT
+                MARGIN_BUY
+                AUTO_REPAY
+                AUTO_BORROW_REPAY
+            }
+
+            Order <|-- ActiveOrder
+            ActiveOrder <|-- ActiveLimitOrder
+            OrderIntent --> MarginSideEffect
+        </div>
+    </div>
+
+    <!-- ═══ S9: ShadowBook ═══ -->
+    <h2 id="s9">9. Position &amp; ShadowBook <span class="badge-updated">UPDATED</span></h2>
+    <p class="desc">
+        <code>ShadowBook</code> is the standard ledger for SPOT and FUTURES strategies.
+        <code>MarginShadowBook</code> extends it with isolated margin state. Both are registered
+        in the Portfolio for NAV aggregation. Key additions are detailed in Section 16.
     </p>
     <div class="diagram-card">
         <div class="mermaid">
 classDiagram
-    class Order {
-        +str id
-        +str symbol
-        +Side side
-        +OrderType order_type
-        +float quantity
-        +float price
-        +float avg_fill_price
-        +float last_fill_price
-        +float filled_qty
-        +OrderStatus status
-        +Venue venue
-        +float commission
-        +str commission_asset
-        +int strategy_id
-        +transition_to(new_status)
-        +update_fill(filled_qty, fill_price)
-        +remaining_qty : float
-        +is_filled : bool
-        +is_terminal : bool
-    }
-
-    class ActiveOrder {
-        +float _prev_filled
-        +sync_from_event(event_order) float
-    }
-
-    class ActiveLimitOrder {
-        +float reserved_cash
-        +float reserved_qty
-        +initialize_reservation()
-        +release_partial(delta_filled) tuple
-        +release_all() tuple
-    }
-
-    class LimitOrder {
-        +str id
-        +str base_asset
-        +str quote_asset
-        +Side side
-        +float price
-        +float amount
-    }
-
-    class RangeOrder {
-        +float lower_price
-        +float upper_price
-        +OrderType order_type
-    }
-
-    class Side {
-        &lt;&lt;enum&gt;&gt;
-        BUY
-        SELL
-    }
-
-    class OrderType {
-        &lt;&lt;enum&gt;&gt;
-        MARKET
-        LIMIT
-        STOP_MARKET
-        TAKE_PROFIT_MARKET
-    }
-
-    class OrderStatus {
-        &lt;&lt;enum&gt;&gt;
-        PENDING
-        OPEN
-        PARTIALLY_FILLED
-        FILLED
-        CANCELLED
-        REJECTED
-        EXPIRED
-    }
-
-    Order <|-- ActiveOrder
-    ActiveOrder <|-- ActiveLimitOrder
-    Order <|-- LimitOrder
-    Order <|-- RangeOrder
-    Order --> Side
-    Order --> OrderType
-    Order --> OrderStatus
-        </div>
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s9">9. Position &amp; ShadowBook <span class="badge-updated">UPDATED</span> <span>Per-strategy virtual ledger</span></h2>
-    <p class="desc">
-        The <code>ShadowBook</code> architecture is largely unchanged except for how it wires to event buses.
-        <code>start(event_bus, private_event_bus)</code> now <em>requires</em> both buses explicitly.
-        KLINE is subscribed internally; ORDER_UPDATE and BALANCE_UPDATE are dispatched externally
-        by the strategy via <code>asyncio.gather()</code>. The <code>_asset_symbol_map</code> and
-        <code>_position_deducted_comm</code> fields have been added for precise non-stablecoin commission tracking.
-    </p>
-    <div class="diagram-card">
-        <div class="mermaid">
-classDiagram
-    class Position {
-        +str symbol
-        +Venue venue
-        +float quantity
-        +float avg_entry_price
-        +float realized_pnl
-        +Dict commission_by_asset
-        +float locked_quantity
-        +free_quantity : float
-        +unrealized_pnl(mark_price) float
-        +total_pnl(mark_price) float
-        +net_pnl(mark_price, asset_prices) float
-        +notional(mark_price) float
-        +is_flat() bool
-        +is_long() bool
-        +is_short() bool
-    }
-
-    class Fill {
-        +str order_id
-        +str symbol
-        +Side side
-        +float quantity
-        +float price
-        +float commission
-        +str commission_asset
-        +Venue venue
-        +float timestamp
-        +timestamp_str : str
-    }
-
     class ShadowBook {
         +int strategy_id
         +Venue venue
+        +AssetType _asset_type
         +Dict _positions
         +float _cash
         +Dict _cash_dict
@@ -1078,48 +918,37 @@ classDiagram
         +Dict _klines
         +float _realized_pnl
         +Dict _total_commission_dict
-        +Dict _asset_symbol_map  ← NEW
-        +Dict _position_deducted_comm  ← NEW
+        +Dict _asset_symbol_map
+        +Dict _position_deducted_comm
         +Deque _fills
         +Dict _active_orders
         +float _locked_cash
-        +Set _completed_order_ids
         +float _nav
         +Dict _weights
-        +float _peak_equity
-        +float _max_drawdown
         +sync_from_exchange(exchange, feeds)
-        +init_from_portfolio_cash(portfolio_cash, mark_prices)
         +start(event_bus, private_event_bus)
-        +stop()
-        +_on_kline(event)  ← subscribed internally
-        +_on_order_update(event)  ← dispatched externally by strategy
-        +_on_balance_update(event)  ← dispatched externally by strategy
         +apply_fill(symbol, base_asset, quote_asset, ...)
         +lock_for_order(order_id, intent)
-        +mark_to_market(mark_prices)
-        +position(symbol) Position
-        +cash : float
-        +nav : float
-        +weights : Dict
-        +free_cash : float
-        +free_quantity(symbol) float
         +total_value() float
-        +current_weights() Dict
-        +unrealized_pnl() float
-        +gross_exposure() float
-        +net_exposure() float
-        +long_exposure() float
-        +short_exposure() float
-        +total_commission() float
-        +realized_pnl : float
-        +net_pnl() float
-        +peak_equity : float
-        +max_drawdown : float
-        +current_drawdown() float
-        +snapshot() dict
-        +log_snapshot() str
+        +free_cash : float
+        +nav : float
         +save_snapshot()
+    }
+
+    class MarginShadowBook {
+        +Dict _collateral
+        +Dict _borrowed
+        +Dict _accrued_interest
+        +float _max_leverage
+        +str _isolated_symbol
+        +total_value(mark_prices) float
+        +free_cash : float
+        +margin_level(prices) float
+        +liquidation_price(symbol, mmr) float
+        +sync_from_exchange(exchange, feeds)
+        +_on_balance_update(event) ← routes USDT to _collateral
+        +_adjust_cash(qty_delta, price, quote_asset) ← updates _collateral
+        +_track_commission(...) ← routes stablecoin fees to _collateral
     }
 
     class Portfolio {
@@ -1127,439 +956,546 @@ classDiagram
         +Dict _shadow_books
         +register_shadow_book(sb)
         +aggregate_nav() float
-        +aggregate_cash() float
         +aggregate_positions() Dict
-        +nav : float
-        +cash : float
-        +positions : Dict
-        +unrealized_pnl : float
-        +realized_pnl : float
-        +gross_exposure() float
-        +net_exposure() float
-        +save_snapshot()
     }
 
-    ShadowBook "1" --> "*" Position : tracks
-    ShadowBook "1" --> "*" Fill : ring buffer (maxlen=10000)
-    ShadowBook "1" --> "*" ActiveLimitOrder : _active_orders
+    ShadowBook <|-- MarginShadowBook
     Portfolio "1" --> "*" ShadowBook : aggregates
+    Portfolio "1" --> "*" MarginShadowBook : aggregates
         </div>
     </div>
-    <div class="note-box">
-        <strong>_asset_symbol_map and _position_deducted_comm (new fields)</strong>
-        <code>_asset_symbol_map</code> maps raw base asset names (e.g. <code>"BNB"</code>) to trading
-        symbols (e.g. <code>"BNBUSDT"</code>), populated whenever <code>apply_fill()</code> is called with a
-        <code>base_asset</code>. This allows non-stablecoin commission assets (e.g. BNB fee on an ETHUSDT trade)
-        to be resolved to their position and have their qty deducted, mirroring the real exchange balance.
-        <code>_position_deducted_comm</code> tracks these position-side deductions so they are excluded from
-        <code>total_commission()</code> in USDT to avoid double-counting in <code>net_pnl()</code>.
+
+    <h3>ShadowBook NAV Formulas</h3>
+    <table>
+        <thead>
+            <tr><th>Type</th><th>NAV Formula</th><th>Cash Field</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>ShadowBook</code> (SPOT/FUTURES)</td><td><code>_cash + Σ(position.qty × mark_price)</code></td><td><code>_cash</code> (USDT free balance)</td></tr>
+            <tr><td><code>MarginShadowBook</code> (MARGIN)</td><td><code>Σ(collateral × price) + Σ(long_pos.qty × price) − Σ(borrowed × price) − Σ(interest × price)</code></td><td><code>_collateral</code> dict (stablecoins only)</td></tr>
+        </tbody>
+    </table>
+
+    <div class="note-box note-purple">
+        <strong>Short positions in MarginShadowBook NAV</strong>
+        Short positions (qty &lt; 0) are intentionally excluded from the NAV sum. Their USDT proceeds
+        from the sale are already captured in <code>_collateral["USDT"]</code>. Including negative
+        position values would double-subtract the short exposure and understate NAV.
+        Only long positions (qty &gt; 0) contribute to the position term of the formula.
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- ═══ S10: Signal Contracts ═══ -->
     <h2 id="s10">10. Signal Contract Flow <span>Type-safe handoffs between pipeline stages</span></h2>
     <p class="desc">
-        Each stage boundary is a typed dataclass, making the full pipeline statically verifiable.
-        The sequence below shows one complete rebalance cycle from the strategy emitting weights
-        to the completion event being delivered back.
+        The signal contract is unchanged in structure. <code>OrderIntent</code> now carries
+        <code>asset_type</code>, <code>sub_account_id</code>, and <code>side_effect</code> for margin routing.
+        The RebalanceFSM injects <code>ctx['sub_account_key']</code> when built inside MarginStrategy so
+        <code>compute_weights()</code> can return the right weight slice per pipeline.
     </p>
     <div class="diagram-card">
         <div class="mermaid">
-    sequenceDiagram
-        participant STRAT as SpotStrategy
-        participant FSM as RebalanceFSM
-        participant POpt as PortfolioOptimizer
-        participant EE as ExecutionEngine
-        participant CONN as SpotExchangeConnector
-        participant SB as ShadowBook
-        participant PBUS as "Private EventBus"
+sequenceDiagram
+    participant STRAT as MarginStrategy
+    participant FSM as RebalanceFSM (per pipeline)
+    participant POpt as PortfolioOptimizer
+    participant EE as ExecutionEngine
+    participant CONN as BinanceMarginExchange
+    participant MSB as MarginShadowBook
+    participant PBUS as Private EventBus
 
-        STRAT->>FSM: request_rebalance(**ctx)  OR  timer_tick fires
-        FSM->>STRAT: compute_weights(**ctx)
-        STRAT-->>FSM: TargetWeights{weights, timestamp, strategy_id, venue, metadata, price_overrides}
+    STRAT->>FSM: request_rebalance(sub_account_key=key)
+    FSM->>STRAT: compute_weights(sub_account_key=key, **ctx)
+    Note over STRAT: Returns weights for this sub-account\ne.g. MARGIN: {"BTCUSDT": -0.5}
+    STRAT-->>FSM: TargetWeights{weights, liquidate=False, venue=BINANCE}
 
-        FSM->>POpt: validate(TargetWeights)
-        POpt-->>FSM: ValidatedWeights{original, weights, clipped, rejected, rejection_reason}
+    FSM->>POpt: validate(TargetWeights)
+    Note over POpt: Checks min_margin_level via\nMarginShadowBook.margin_level()
+    POpt-->>FSM: ValidatedWeights{weights, clipped, rejected=False}
 
-        FSM->>EE: execute(ValidatedWeights)
-        EE->>EE: snapshot _mark_prices[venue] (from KLINE subscription)
-        EE->>SB: total_value()
-        SB-->>EE: nav: float
-        EE->>EE: compute delta_qty per symbol
-        EE->>EE: round to step_size / filter threshold
+    FSM->>EE: execute(ValidatedWeights)
+    EE->>EE: snapshot _mark_prices[BINANCE]
+    EE->>MSB: total_value() → collateral+long_pos−borrowed−interest
+    EE->>EE: compute delta_qty per symbol
+    EE->>EE: OrderIntent(asset_type=MARGIN,\n  side_effect=AUTO_BORROW_REPAY)
 
-        loop For each SELL intent
-            EE->>CONN: place_limit_order(symbol, SELL, price, qty, strategy_id)
-            CONN-->>EE: order_id: str
-            EE->>SB: lock_for_order(order_id, intent)
-            SB-->>EE: ActiveLimitOrder created (reserved_qty locked)
-        end
+    loop For each intent (SELL first, then BUY)
+        EE->>CONN: place_limit_order(..., side_effect=AUTO_BORROW_REPAY)
+        CONN-->>EE: order_id
+        EE->>MSB: lock_for_order(order_id, intent)
+    end
 
-        loop For each BUY intent
-            EE->>CONN: place_limit_order(symbol, BUY, price, qty, strategy_id)
-            CONN-->>EE: order_id: str
-            EE->>SB: lock_for_order(order_id, intent)
-            SB-->>EE: ActiveLimitOrder created (reserved_cash locked)
-        end
-
-        EE-->>FSM: RebalanceResult{intents, submitted, failed, timestamp, errors, submitted_orders}
-        FSM->>PBUS: publish RebalanceCompleteEvent{result, validated_weights, timestamp, strategy_id}
-        PBUS->>STRAT: on_rebalance_complete(event)
+    EE-->>FSM: RebalanceResult{submitted, failed, submitted_orders}
+    FSM->>PBUS: RebalanceCompleteEvent
+    PBUS->>STRAT: on_rebalance_complete(event)
         </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s11">11. Connector &amp; Feed Layer <span>Exchange connectivity and WebSocket client managers</span></h2>
+    <!-- ═══ S11: Connector Layer ═══ -->
+    <h2 id="s11">11. Connector &amp; Feed Layer <span class="badge-updated">UPDATED</span></h2>
     <p class="desc">
-        In the new architecture, the connector and feed layer is <strong>split across two containers</strong>.
-        The <em>data feeds</em> (kline feeds, order book feeds, and their client managers) live exclusively in the
-        <code>MarketDataService</code> container. The <em>exchange connectors</em>
-        (<code>BinanceSpotExchange</code>, <code>AsterSpotExchange</code>) live in the strategy containers,
-        handling authenticated REST order placement and user-data WebSocket streams.
+        The connector layer now includes <code>IsolatedMarginExchangeConnector</code> (abstract) and
+        <code>BinanceMarginExchange</code> (concrete). Margin connectors share the same event bus interface
+        as spot connectors but override <code>order_health_check()</code> to skip balance sufficiency checks
+        (Binance handles borrow automatically) and add margin-specific operations.
     </p>
     <div class="diagram-card">
         <div class="mermaid">
-flowchart TB
-    subgraph MDS_LAYER["Market Data Container — Feed & Client Manager Layer"]
-        direction TB
-        subgraph CONNBASE["AbstractDataFeed / AbstractClientManager"]
-            CA1["AbstractDataFeed\n_historical deque (maxlen=60)\n_vol rolling stdev\nlatest_price property"]
-            CA2["KlineClientManager\nset_event_bus(publisher)\nregister_feed()\nrun_multiplex_feeds()"]
-            CA3["OrderBookClientManager\nset_event_bus(publisher)"]
-        end
+        flowchart TB
+            subgraph SPOT_CONN["SpotExchangeConnector (abstract)"]
+                direction TB
+                SC1["place_market_order()\nplace_limit_order()\ncancel_order()\nget_balance()\norder_health_check()\nstart(event_bus) / stop()\n_on_kline / _on_orderbook_update"]
+            end
 
-        subgraph KFEEDS["Kline Feeds (one per symbol per venue)"]
-            BKF2["BinanceKlineFeed\nOHLCV ring buffer\nrolling vol σ"]
-            BFKF2["BinanceFuturesKlineFeed"]
-            AKF2["AsterKlineFeed"]
-            APF2["AsterPerpKlineFeed"]
-        end
+            subgraph MARGIN_BASE["IsolatedMarginExchangeConnector (abstract)"]
+                direction TB
+                MC1["Extends SpotExchangeConnector\n+_collateral: Dict[symbol, Dict[asset, float]]\n+_borrowed: Dict[symbol, Dict[asset, float]]\n+_accrued_interest: Dict[symbol, Dict[asset, float]]\n+_margin_level: Dict[symbol, float]\n+_max_leverage: int\n+_default_side_effect: MarginSideEffect\nborrow(symbol, asset, amount)\nrepay(symbol, asset, amount)\ntransfer_in(symbol, asset, amount)\ntransfer_out(symbol, asset, amount)\nrefresh_margin_account()\n_margin_poll_loop() every 60s\norder_health_check() — skips balance check\n  only validates min_notional"]
+            end
 
-        subgraph OBFEEDS["OrderBook Feeds (one per symbol per venue)"]
-            BOF2["BinanceOrderBookFeed\nL2 SortedDict\nbid/ask/mid/spread\nget_initial_snapshot()"]
-            BFOF["BinanceFuturesOrderBookFeed"]
-            AOF["AsterOrderBookFeed"]
-        end
+            subgraph BINANCE_MARGIN["BinanceMarginExchange"]
+                direction TB
+                BM1["initialize()\n  create AsyncClient\n  _fetch_symbol_info()\n  refresh_margin_account()\n  user_data_manager.start()"]
+                BM2["place_market_order(\n  ..., side_effect=AUTO_BORROW_REPAY)\n  create_margin_order(isIsolated=TRUE,\n    sideEffectType=..., newOrderRespType=FULL)"]
+                BM3["place_limit_order(\n  ..., sideEffectType=...)"]
+                BM4["borrow() → create_margin_loan(isIsolated=TRUE)\nrepay() → repay_margin_loan(isIsolated=TRUE)\ntransfer_in() → transfer_spot_to_isolated_margin()\ntransfer_out() → transfer_isolated_margin_to_spot()"]
+                BM5["refresh_margin_account()\n  get_isolated_margin_account(symbols=symbol)\n  updates _collateral / _borrowed\n  _accrued_interest / _margin_level"]
+            end
 
-        subgraph WSMGRS["WebSocket Client Managers"]
-            BKM3["BinanceKlineClientManager"]
-            BOM3["BinanceOrderBookClientManager"]
-            BFKM3["BinanceFuturesKlineClientManager"]
-            AKM3["AsterKlineClientManager"]
-            APKM["AsterPerpKlineClientManager"]
-        end
-        WSMGRS -->|"raw WS frames → feeds"| KFEEDS
-        WSMGRS -->|"raw WS frames → feeds"| OBFEEDS
-        KFEEDS -->|"KlineEvent → publisher"| CA2
-        OBFEEDS -->|"OBUpdateEvent → publisher"| CA3
-    end
+            subgraph MARGIN_USER_DATA["BinanceMarginUserDataClientManager"]
+                direction TB
+                MUD1["One reader task per symbol\n(vs one global for spot)\nListen key: POST /sapi/v1/userDataStream/isolated\nWS: wss://stream.binance.com:9443/ws/{listenKey}\nKeepalive: PUT every 55 min\nClose: DELETE on stop"]
+                MUD2["Events dispatched:\nOrderUpdateEvent(asset_type=AssetType.MARGIN)\nBalanceUpdateEvent(asset_type=AssetType.MARGIN)\n→ published to private EventBus\n→ also raw callback to BinanceMarginExchange"]
+            end
 
-    subgraph STRAT_CONN["Strategy Containers — Exchange Connector Layer"]
-        direction TB
-        subgraph CONNBASE2["SpotExchangeConnector (abstract base)"]
-            CB1["place_market_order()"]
-            CB2["place_limit_order()"]
-            CB3["cancel_order()"]
-            CB4["get_balance()"]
-            CB5["order_health_check()"]
-            CB6["_balances / _open_orders / _token_infos"]
-            CB7["kline_feeds / ob_feeds\n(updated via _on_kline / _on_orderbook_update)"]
-            CB8["start(shared_event_bus)\nstop()"]
-        end
-        subgraph CONNIMPL["Concrete Connectors"]
-            BSE2["BinanceSpotExchange\nuser_data_manager:\nBinanceUserDataClientManager\n(userDataStream.subscribe.signature)\nstart(shared_event_bus)"]
-            ASE2["AsterSpotExchange\nAsterUserDataClientManager\nListen key lifecycle"]
-            BFE2["BinanceFuturesExchange\nBinanceFuturesUserDataClientManager\nlistenKey approach"]
-        end
-        subgraph USERDATA["User Data Managers"]
-            BUD["BinanceUserDataClientManager\nwss://ws-api.binance.com:443/ws-api/v3\nuserDataStream.subscribe.signature\n(HMAC key, no Ed25519 required)\nPublishes to private EventBus"]
-            AUD["AsterUserDataClientManager\nListenKey: POST/PUT/DELETE\nwss://sstream.asterdex.com/ws"]
-        end
-        CONNBASE2 --> CONNIMPL
-        CONNIMPL --> USERDATA
-    end
+            SPOT_CONN -->|extends| MARGIN_BASE
+            MARGIN_BASE -->|extends| BINANCE_MARGIN
+            BINANCE_MARGIN -->|uses| MARGIN_USER_DATA
 
-    MDS_LAYER -->|"Redis pub/sub\nKlineEvent / OBUpdateEvent"| STRAT_CONN
-
-    style MDS_LAYER fill:#fef2f2,stroke:#ef4444,color:#991b1b
-    style STRAT_CONN fill:#f0fdf4,stroke:#16a34a,color:#166534
+            style SPOT_CONN fill:#f1f5f9,stroke:#94a3b8
+            style MARGIN_BASE fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
+            style BINANCE_MARGIN fill:#faf5ff,stroke:#c4b5fd,color:#3b0764
+            style MARGIN_USER_DATA fill:#faf5ff,stroke:#c4b5fd,color:#3b0764
         </div>
     </div>
-    <div class="note-box">
-        <strong>BinanceUserDataClientManager — new WS API</strong>
-        The user-data stream has migrated from the deprecated <code>/api/v3/userDataStream</code> listenKey
-        approach (retired 2026-02-20) to the new Binance WebSocket API at
-        <code>wss://ws-api.binance.com:443/ws-api/v3</code> using
-        <code>userDataStream.subscribe.signature</code>. This method works with HMAC-SHA256 keys
-        without requiring an Ed25519 session login. Events arrive in the envelope
-        <code>{"subscriptionId": 0, "event": {...}}</code> rather than raw event objects.
+
+    <div class="note-box note-orange">
+        <strong>Margin order_health_check() override</strong>
+        <code>IsolatedMarginExchangeConnector.order_health_check()</code> intentionally does NOT check
+        <code>_balances</code> sufficiency. With <code>AUTO_BORROW_REPAY</code>, Binance borrows the required
+        base or quote asset automatically. Only the minimum notional filter is enforced. This is in contrast to
+        <code>SpotExchangeConnector.order_health_check()</code> which checks free balance for both BUY and SELL.
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s12">12. RiskConfig Constraints <span>PortfolioOptimizer validation pipeline</span></h2>
+    <!-- ═══ S12: RiskConfig ═══ -->
+    <h2 id="s12">12. RiskConfig Constraints <span class="badge-updated">UPDATED</span></h2>
     <p class="desc">
-        The <code>RiskConfig</code> drives Stage 4 of the rebalance pipeline. The optimizer now runs
-        a 7-step ordered constraint pipeline (previously 6 steps), adding an input validation step
-        at the front to drop NaN / Inf / non-numeric weights before any constraint is applied.
+        <code>RiskConfig</code> has been extended with four new fields for margin/market-neutral strategies:
+        <code>allow_zero_sum</code>, <code>zero_sum_tolerance</code>, <code>min_margin_level</code>, and
+        <code>max_gross_exposure</code>. The PortfolioOptimizer's 7-step pipeline now includes a Step 0
+        margin level pre-check and Step 5 zero-sum enforcement.
     </p>
-
     <div class="diagram-card">
         <div class="mermaid">
 flowchart LR
     TW2["TargetWeights\nfrom strategy"]
 
-    subgraph PIPE["PortfolioOptimizer.validate() — 7-step ordered constraint pipeline"]
+    subgraph PIPE["PortfolioOptimizer.validate() — 8-step pipeline"]
         direction LR
-        C0["0. Liquidate fast-path\nif target.liquidate → bypass all\nreturn as-is"]
-        C1["1. Input validation\ndrop NaN / Inf / non-numeric\nweights before any constraint"]
-        C2["2. Symbol filter\nwhitelist / blacklist\n→ drop prohibited symbols"]
-        C3["3. Per-asset weight clip\nmax_weight_per_asset\nmax_short_weight\n→ clip each symbol weight"]
-        C4["4. Total-exposure scale\nmax_total_exposure\nsum(|w|) ≤ limit\n→ scale all weights down"]
-        C5["5. Cash-floor\nmin_cash_weight\n→ ensure long_invested ≤ 1 - min_cash\nscale long weights only"]
-        C6["6. Turnover cap\nmax_turnover_per_rebalance\n→ blend toward current weights\n(partial rebalance)"]
-        C7["7. Min-delta prune\nmin_weight_delta\n→ drop legs with\n|target_w - current_w| < threshold"]
-        C0 --> C1 --> C2 --> C3 --> C4 --> C5 --> C6 --> C7
+        C_PRE["0. Margin level pre-check\nif min_margin_level > 0\nand portfolio is MarginShadowBook:\ncheck margin_level() >= threshold"]
+        C0["0b. Liquidate fast-path\nif target.liquidate → bypass all"]
+        C1["1. Input validation\ndrop NaN / Inf / non-numeric"]
+        C2["2. Symbol filter\nwhitelist / blacklist"]
+        C3["3. Per-asset clip\nmax_weight_per_asset\nmax_short_weight\n(short floor = -max_short_weight)"]
+        C4["4. Total-exposure scale\nmax_total_exposure OR\nmax_gross_exposure (if set)"]
+        C5["5. Cash-floor enforcement\nmin_cash_weight\n(long weights only)"]
+        C5Z["5b. Zero-sum enforcement\nif allow_zero_sum=True\nbalance long + short sides\nnet sum ≈ 0 ± zero_sum_tolerance"]
+        C6["6. Turnover cap\nmax_turnover_per_rebalance"]
+        C7["7. Min-delta prune\nmin_weight_delta"]
+        C_PRE --> C0 --> C1 --> C2 --> C3 --> C4 --> C5 --> C5Z --> C6 --> C7
     end
 
     VW2["ValidatedWeights\n{original, weights,\nclipped, rejected,\nrejection_reason}"]
 
-    TW2 --> C0
+    TW2 --> C_PRE
     C7 --> VW2
 
     style PIPE fill:#eff6ff,stroke:#2563eb,color:#1e40af
         </div>
     </div>
 
-    <h3>RiskConfig Field Reference</h3>
+    <h3>RiskConfig Fields — Including New Margin Fields</h3>
     <table>
         <thead>
-            <tr>
-                <th>Field</th>
-                <th>Type</th>
-                <th>Default</th>
-                <th>Description</th>
-            </tr>
+            <tr><th>Field</th><th>Default</th><th>Description</th><th>Used By</th></tr>
         </thead>
         <tbody>
-            <tr>
-                <td><code>max_weight_per_asset</code></td>
-                <td>float</td>
-                <td>0.25</td>
-                <td>Maximum fraction of portfolio NAV in any single symbol.</td>
-            </tr>
-            <tr>
-                <td><code>min_weight_per_asset</code></td>
-                <td>float</td>
-                <td>0.0</td>
-                <td>Minimum weight floor per asset (0 = long-only is fine).</td>
-            </tr>
-            <tr>
-                <td><code>max_total_exposure</code></td>
-                <td>float</td>
-                <td>1.0</td>
-                <td>Maximum sum of absolute weights. &lt;1.0 enforces a cash buffer at portfolio level.</td>
-            </tr>
-            <tr>
-                <td><code>min_cash_weight</code></td>
-                <td>float</td>
-                <td>0.05</td>
-                <td>Minimum fraction kept as stablecoin cash. Only long weights are scaled down.</td>
-            </tr>
-            <tr>
-                <td><code>max_turnover_per_rebalance</code></td>
-                <td>float</td>
-                <td>0.5</td>
-                <td>Maximum portfolio turnover per cycle (sum of absolute weight changes).</td>
-            </tr>
-            <tr>
-                <td><code>max_leverage</code></td>
-                <td>float</td>
-                <td>1.0</td>
-                <td>Maximum gross leverage (1.0 = spot-only, unlevered).</td>
-            </tr>
-            <tr>
-                <td><code>max_short_weight</code></td>
-                <td>float</td>
-                <td>0.0</td>
-                <td>Maximum short weight per asset (0 = no shorts; long-only spot).</td>
-            </tr>
-            <tr>
-                <td><code>min_order_notional</code></td>
-                <td>float</td>
-                <td>10.0</td>
-                <td>Skip orders below this USD notional threshold.</td>
-            </tr>
-            <tr>
-                <td><code>max_order_notional</code></td>
-                <td>float</td>
-                <td>100,000</td>
-                <td>Cap single-order notional size.</td>
-            </tr>
-            <tr>
-                <td><code>min_weight_delta</code></td>
-                <td>float</td>
-                <td>0.005</td>
-                <td>Prune rebalance legs with |target_w - current_w| below this threshold.</td>
-            </tr>
-            <tr>
-                <td><code>min_rebalance_interval_ms</code></td>
-                <td>int</td>
-                <td>60,000</td>
-                <td>Rate limiter — minimum ms between consecutive rebalance cycles.</td>
-            </tr>
+            <tr><td><code>max_weight_per_asset</code></td><td>0.25</td><td>Maximum weight per single symbol (long)</td><td>All</td></tr>
+            <tr><td><code>min_weight_per_asset</code></td><td>0.0</td><td>Minimum weight floor per asset</td><td>All</td></tr>
+            <tr><td><code>max_total_exposure</code></td><td>1.0</td><td>Sum(|w|) cap; used when max_gross_exposure is None</td><td>SPOT</td></tr>
+            <tr><td><code>min_cash_weight</code></td><td>0.05</td><td>Minimum cash floor; only long weights scaled</td><td>SPOT</td></tr>
+            <tr><td><code>max_turnover_per_rebalance</code></td><td>0.5</td><td>Max Σ|Δw| per cycle; partial rebalance blending</td><td>All</td></tr>
+            <tr><td><code>max_leverage</code></td><td>1.0</td><td>Max gross leverage (1.0 = unlevered)</td><td>MARGIN, FUTURES</td></tr>
+            <tr><td><code>max_short_weight</code></td><td>0.0</td><td>Max short weight per asset (0 = no shorts)</td><td>MARGIN, FUTURES</td></tr>
+            <tr><td><code>min_order_notional</code></td><td>10.0</td><td>Skip orders below this USD notional</td><td>All</td></tr>
+            <tr><td><code>max_order_notional</code></td><td>100,000</td><td>Cap single-order notional</td><td>All</td></tr>
+            <tr><td><code>min_weight_delta</code></td><td>0.005</td><td>Prune legs with |Δw| &lt; threshold</td><td>All</td></tr>
+            <tr><td><code>allow_zero_sum</code> ★</td><td>False</td><td>Enforce |Σw| ≈ 0 for market-neutral strategies</td><td>MARGIN</td></tr>
+            <tr><td><code>zero_sum_tolerance</code> ★</td><td>0.02</td><td>±2% band considered sufficiently zero-sum</td><td>MARGIN</td></tr>
+            <tr><td><code>min_margin_level</code> ★</td><td>0.0</td><td>Reject rebalance if margin_level &lt; threshold (0 = disabled)</td><td>MARGIN</td></tr>
+            <tr><td><code>max_gross_exposure</code> ★</td><td>None</td><td>Σ|w| cap; overrides max_total_exposure if set; allows &gt;1.0 for levered margin</td><td>MARGIN, FUTURES</td></tr>
+        </tbody>
+    </table>
+    <p class="desc" style="font-size:0.82rem; color:#6b7280;">★ New margin-specific fields added in this release.</p>
+
+    <!-- ═══ S13: Config System ═══ -->
+    <h2 id="s13">13. Two-Tier Config System <span>trading_config.yaml + strategy YAMLs</span></h2>
+    <p class="desc">
+        The config system is extended to support the <code>sub_accounts:</code> list in strategy YAMLs.
+        Each sub-account entry specifies its own <code>api_key_env</code>, <code>asset_type</code>,
+        <code>isolated_symbol</code>, and <code>risk_overrides</code>. These are parsed into
+        <code>SubAccountConfig</code> dataclasses and loaded into <code>StrategyConfig.sub_accounts</code>.
+    </p>
+    <div class="diagram-card">
+        <div class="mermaid">
+flowchart TB
+    subgraph TIER2M["Tier 2 (Margin): strategy_002_margin_example.yaml"]
+        T2M["strategy_id: 2\nstrategy_name: eth_spot_btc_margin_short\nclass: MarginNeutralStrategy\n\nsub_accounts:\n  - sub_account_id: 0\n    asset_type: Spot\n    venue: Binance\n    api_key_env: BINANCE_API_KEY_2\n    api_secret_env: BINANCE_API_SECRET_2\n    symbols: [ETHUSDT]\n    risk_overrides:\n      max_weight_per_asset: 1.0\n\n  - sub_account_id: 1\n    asset_type: Margin\n    venue: Binance\n    api_key_env: BINANCE_MARGIN_API_KEY_2\n    api_secret_env: BINANCE_MARGIN_API_SECRET_2\n    isolated_symbol: BTCUSDT\n    symbols: [BTCUSDT]\n    risk_overrides:\n      max_short_weight: 1.0\n      max_leverage: 3.0\n      allow_zero_sum: false\n      min_margin_level: 1.5"]
+    end
+
+    subgraph PARSED["load_strategy_yaml() → StrategyConfig"]
+        P1["StrategyConfig.sub_accounts: List[SubAccountConfig]\nEach SubAccountConfig:\n  sub_account_id: int\n  asset_type: str\n  venue: str\n  api_key_env: str  → resolved via os.getenv()\n  api_secret_env: str → resolved via os.getenv()\n  symbols: List[str]\n  isolated_symbol: Optional[str]\n  risk_overrides: Dict\n  api_key: str (resolved)\n  api_secret: str (resolved)\n  risk_config: RiskConfig (merged)"]
+    end
+
+    subgraph RUNNER_USE["MarginStrategyRunner usage"]
+        RU["for sub_cfg in strat_cfg.sub_accounts:\n  exchange_cls = _exchange_connector_callables[\n    (AssetType[sub_cfg.asset_type], Venue[sub_cfg.venue])\n  ]\n  exchange = exchange_cls(api_key=sub_cfg.api_key, ...)\n  if sub_cfg.asset_type == 'Margin':\n    shadow_book = MarginShadowBook(...)\n  else:\n    shadow_book = ShadowBook(...)\n  risk_config = sub_cfg.risk_config  # sub-account level\n                or effective_risk_for(...)  # fallback"]
+    end
+
+    TIER2M --> PARSED --> RUNNER_USE
+
+    style TIER2M fill:#faf5ff,stroke:#a855f7,color:#3b0764
+    style PARSED fill:#eff6ff,stroke:#2563eb,color:#1e40af
+    style RUNNER_USE fill:#f0fdf4,stroke:#16a34a,color:#166534
+        </div>
+    </div>
+
+    <!-- ═══ S14: Database ═══ -->
+    <h2 id="s14">14. Database &amp; Persistence <span>Peewee ORM snapshots</span></h2>
+    <p class="desc">
+        Margin strategies persist state using the same <code>PortfolioSnapshot</code> and <code>CexTrade</code>
+        models as spot. <code>CexTrade</code> records margin orders with <code>asset_type=AssetType.MARGIN</code>.
+        <code>MarginShadowBook.save_snapshot()</code> inherits from <code>ShadowBook</code> and records
+        the NAV computed by the overridden <code>total_value()</code> formula — correctly subtracting
+        borrowed and interest amounts.
+    </p>
+    <table>
+        <thead>
+            <tr><th>Table</th><th>Key Fields for Margin</th><th>Written By</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>portfolio_snapshots</code></td><td>nav (collateral−borrowed−interest formula), positions (net long qty), strategy_id</td><td><code>MarginShadowBook.save_snapshot()</code> via PeriodicTask</td></tr>
+            <tr><td><code>cex_trades</code></td><td>asset_type=MARGIN, symbol, side, base_amount (filled_qty), commission</td><td><code>MarginShadowBook._async_record_trade()</code> on terminal order</td></tr>
         </tbody>
     </table>
 
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s13">13. Two-Tier Config System <span class="badge-new">NEW</span></h2>
+    <!-- ═══ S15: Isolated Margin Architecture ═══ -->
+    <h2 id="s15">15. Isolated Margin Architecture <span class="badge-margin">MARGIN NEW</span></h2>
     <p class="desc">
-        Configuration is now split into two tiers. <code>trading_config.yaml</code> holds system-level
-        settings shared across all strategies. Individual <code>strategies/strategy_NNN_*.yaml</code> files
-        hold per-strategy settings. Both are loaded by <code>load_app_config()</code> and merged into a single
-        <code>AppConfig</code> object. Strategy YAML files also accept placeholder substitution (e.g.
-        <code>{strategy_name}</code> in <code>log_dir</code>).
+        Isolated margin in Elysian maps each sub-account entry in the strategy YAML to a dedicated
+        <code>BinanceMarginExchange</code> connector. Each isolated margin symbol has its own WebSocket
+        listen key, its own collateral wallet, and its own position book tracked in
+        <code>MarginShadowBook</code>. The Binance <code>AUTO_BORROW_REPAY</code> side-effect type means
+        the system never needs to call <code>borrow()</code> / <code>repay()</code> manually — Binance
+        handles the loan lifecycle automatically on each order.
     </p>
     <div class="diagram-card">
         <div class="mermaid">
 flowchart TB
-    subgraph TIER1["Tier 1: trading_config.yaml (system-level)"]
+    subgraph MARGIN_LIFECYCLE["Isolated Margin Order Lifecycle"]
         direction TB
-        T1A["version_name\nlogging.enable_discord"]
-        T1B["spot.venues / futures.venues"]
-        T1C["portfolio:\n  max_history: 10000\n  snapshot_interval_s: 300"]
-        T1D["execution:\n  default_order_type: MARKET\n  default_venue: Binance"]
-        T1E["venue_configs:\n  spot_binance: {risk: {}, execution: {}, portfolio: {}}\n  perpetual_binance: {...}\n  spot_aster: {...}"]
-        T1F["global risk: (defaults only,\n  per-strategy overrides in YAML)"]
+        ML1["Strategy calls place_limit_order(\n  symbol=BTCUSDT, side=SELL,\n  qty=0.01, price=95000,\n  side_effect=AUTO_BORROW_REPAY\n)"]
+        ML2["Binance receives order:\n  isIsolated=TRUE\n  sideEffectType=AUTO_BORROW_REPAY\n  Binance borrows 0.01 BTC from margin pool\n  Places SELL limit order at 95000"]
+        ML3["Order fills:\n  Binance delivers USDT proceeds\n  to isolated margin wallet\n  user-data stream fires executionReport"]
+        ML4["BinanceMarginUserDataClientManager:\n  deserialise executionReport\n  → OrderUpdateEvent(asset_type=MARGIN)\n  → publish to private EventBus B"]
+        ML5["MarginStrategy._dispatch_order:\n  SubAccountKey(MARGIN, BINANCE, sub_account_id=1)\n  asyncio.gather(\n    on_order_update(event),\n    shadow_book._on_order_update(event)\n  )"]
+        ML6["MarginShadowBook._on_order_update:\n  ActiveOrder.sync_from_event(order)\n  _process_fill_delta:\n    _adjust_cash → _collateral[USDT] += notional\n    _update_position_on_fill → pos.qty -= delta\n  _finalize_terminal_order → release_all()"]
+        ML7["MarginShadowBook._refresh_derived:\n  _nav = collateral_USDT\n         + long_pos.qty × mark_price\n         − borrowed × mark_price\n         − interest × mark_price"]
+
+        ML1 --> ML2 --> ML3 --> ML4 --> ML5 --> ML6 --> ML7
     end
 
-    subgraph TIER2["Tier 2: strategies/strategy_NNN_*.yaml (per-strategy)"]
-        direction TB
-        T2A["strategy_id: 0\nstrategy_name: event_driven_...\nclass: elysian_core.strategy...EventDrivenStrategy\nasset_type: Spot / venue: Binance"]
-        T2B["symbols: [SUIUSDT, BTCUSDT, ...]\n(empty → load from config.json for venue)"]
-        T2C["risk:\n  max_weight_per_asset: 0.25\n  min_cash_weight: 0.05\n  ... (full RiskConfig)"]
-        T2D["execution_overrides: {}\nportfolio_overrides: {}"]
-        T2E["params:\n  rebalance_interval_s: 60\n  (arbitrary strategy params)"]
+    subgraph MARGIN_POLL["Background Margin Poll (every 60s)"]
+        MP1["_margin_poll_loop()\nawait refresh_margin_account()\nget_isolated_margin_account(symbols=sym)\nupdate _collateral / _borrowed\n_accrued_interest / _margin_level\n(Interest accrual not pushed via WS —\nmust be polled)"]
     end
 
-    subgraph JSON["config.json (symbol lists)"]
-        direction TB
-        J1["venues.binance.spot: [SUIUSDT, ...]"]
-        J2["venues.aster.spot: [ASTERUSDT, ...]"]
-        J3["tokens.spot / tokens.futures"]
-    end
-
-    subgraph ENV[".env (secrets)"]
-        E1["BINANCE_API_KEY_N\nBINANCE_API_SECRET_N\n(N = strategy_id)"]
-        E2["POSTGRES_* / REDIS_*"]
-    end
-
-    subgraph MERGE["load_app_config() → AppConfig"]
-        direction TB
-        M1["AppConfig.risk (global RiskConfig)"]
-        M2["AppConfig.venue_configs (VenueConfig per pair)"]
-        M3["AppConfig.strategies: Dict[int, StrategyConfig]"]
-        M4["AppConfig.portfolio / execution / symbols / secrets"]
-        M5["StrategyConfig.sub_account_api_key\n← os.getenv(VENUE_API_KEY_strategyid)"]
-        M6["effective_risk_for(strategy_id=N)\n→ StrategyConfig.risk_config\n(built from strategy YAML risk section)"]
-    end
-
-    subgraph PRIORITY["Risk Config Priority (highest wins)"]
-        direction LR
-        P1["strategy YAML risk:\n(strategy_NNN.yaml)"]
-        P2["venue_configs[spot_binance].risk"]
-        P3["global risk: (trading_config.yaml)"]
-        P1 -->|"overrides"| P2 -->|"overrides"| P3
-    end
-
-    TIER1 --> MERGE
-    TIER2 --> MERGE
-    JSON --> MERGE
-    ENV --> MERGE
-    MERGE --> PRIORITY
-
-    style TIER1 fill:#fef2f2,stroke:#ef4444,color:#991b1b
-    style TIER2 fill:#f0fdf4,stroke:#16a34a,color:#166534
-    style JSON fill:#fefce8,stroke:#ca8a04,color:#713f12
-    style ENV fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
-    style MERGE fill:#eff6ff,stroke:#2563eb,color:#1e40af
-    style PRIORITY fill:#f1f5f9,stroke:#94a3b8,color:#1a1a2e
+    style MARGIN_LIFECYCLE fill:#faf5ff,stroke:#a855f7,color:#3b0764
+    style MARGIN_POLL fill:#fdf4ff,stroke:#c4b5fd,color:#3b0764
         </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <h2 id="s14">14. Database &amp; Persistence <span>Peewee ORM snapshots</span></h2>
+    <div class="note-box note-purple">
+        <strong>Why periodic polling for margin accounts?</strong>
+        Binance does NOT push interest accrual events via the user-data WebSocket stream.
+        Interest is charged hourly (or at each loan repayment). The <code>_margin_poll_loop()</code>
+        polls <code>GET /sapi/v1/margin/isolated/account</code> every 60 seconds to keep
+        <code>_accrued_interest</code> current. Without this, the NAV calculation would overstate
+        portfolio value between poll cycles by the amount of unpaid interest.
+    </div>
+
+    <!-- ═══ S16: MarginShadowBook ═══ -->
+    <h2 id="s16">16. MarginShadowBook Ledger <span class="badge-margin">MARGIN NEW</span></h2>
     <p class="desc">
-        Portfolio state is persisted asynchronously to PostgreSQL via Peewee ORM.
-        Both per-strategy <code>ShadowBook</code> snapshots and aggregate <code>Portfolio</code> snapshots
-        are written. The <code>PeriodicTask</code> ensures at most <code>snapshot_interval_s</code> of
-        state can be lost on crash; trade records are written by <code>ShadowBook._async_record_trade()</code>
-        as a fire-and-forget <code>asyncio.create_task()</code> after each terminal order event.
+        <code>MarginShadowBook</code> overrides three key methods from <code>ShadowBook</code> to route
+        fill proceeds, commissions, and balance events to <code>_collateral</code> instead of <code>_cash</code>.
+        This ensures the NAV formula remains consistent between the initial sync from the exchange and the
+        live trading state.
     </p>
     <div class="diagram-card">
         <div class="mermaid">
 flowchart TB
-    subgraph SOURCES["Snapshot Sources"]
-        direction LR
-        SBS2["ShadowBook.save_snapshot()\n(per-strategy)"]
-        PTS2["Portfolio.save_snapshot()\n(aggregate across all strategies)"]
-        PT2["PeriodicTask\ninterval: snapshot_interval_s\n(from trading_config.yaml portfolio section)"]
-        TRD["ShadowBook._async_record_trade()\nasyncio.create_task() on terminal order\nskips orders with 0 filled_qty"]
-        PT2 -->|"triggers"| SBS2
-        PT2 -->|"triggers"| PTS2
-    end
-
-    subgraph MODEL["PortfolioSnapshot (Peewee Model)"]
+    subgraph SYNC["sync_from_exchange() — Startup Initialization"]
         direction TB
-        F1["strategy_id : IntegerField"]
-        F2["venue : EnumField(Venue)"]
-        F3["nav : FloatField"]
-        F4["cash : FloatField"]
-        F5["unrealized_pnl : FloatField"]
-        F6["realized_pnl : FloatField"]
-        F7["total_commission : FloatField"]
-        F8["peak_equity : FloatField"]
-        F9["max_drawdown : FloatField"]
-        F10["current_drawdown : FloatField"]
-        F11["gross_exposure / net_exposure : FloatField"]
-        F12["positions : JSONField"]
-        F13["weights : JSONField"]
-        F14["mark_prices : JSONField"]
-        F15["num_fills : IntegerField"]
-        F16["datetime : DateTimeField (UTC+8)"]
+        SY1["Flatten exchange._collateral[symbol][asset]\n→ self._collateral[asset] (STABLECOINS only)\nBase assets go to _positions (not _collateral)"]
+        SY2["Flatten exchange._borrowed[symbol][asset]\n→ self._borrowed[asset]"]
+        SY3["Flatten exchange._accrued_interest[symbol][asset]\n→ self._accrued_interest[asset]"]
+        SY4["For each symbol: net_qty = base_collateral − borrowed_base\n→ Position(symbol, qty=net_qty, avg_entry=feed.latest_price)"]
+        SY5["_refresh_derived(): compute NAV using margin formula"]
+        SY1 --> SY2 --> SY3 --> SY4 --> SY5
     end
 
-    subgraph TRADE_MODEL["CexTrade (Peewee Model)"]
+    subgraph OVERRIDES["Method Overrides vs ShadowBook"]
         direction TB
-        CT1["strategy_id / strategy_name"]
-        CT2["venue / asset_type / symbol"]
-        CT3["side / base_amount / quote_amount / price"]
-        CT4["commission_asset / total_commission"]
-        CT5["order_id / status / order_type"]
-        CT6["datetime (UTC+8)"]
+        O1["total_value(mark_prices):\n  collateral_usdt = Σ(collateral[asset] × prices.get(asset,1.0))\n  long_pos_usdt = Σ(pos.qty × prices[sym])\n    for pos in _positions.values() if pos.qty > 0\n  borrowed_usdt = Σ(borrowed[asset] × _price_for_asset(asset))\n  interest_usdt = Σ(interest[asset] × _price_for_asset(asset))\n  return collateral_usdt + long_pos_usdt - borrowed_usdt - interest_usdt"]
+        O2["free_cash:\n  quote = _collateral.get('USDT',0) + _collateral.get('BUSD',0)\n  return max(0.0, quote - _locked_cash)"]
+        O3["_adjust_cash(qty_delta, price, quote_asset):\n  notional = abs(qty_delta) × price\n  if BUY: _collateral[quote_asset] -= notional\n  if SELL: _collateral[quote_asset] += notional\n  (NOT _cash — overrides parent)"]
+        O4["_track_commission(pos, comm_asset, commission, quote_asset):\n  if stablecoin: _collateral[comm_asset] -= commission\n    (NOT _cash — overrides parent)\n  if non-stablecoin: reduce position qty\n    (same as parent)"]
+        O5["_on_balance_update(event: BalanceUpdateEvent):\n  if stablecoin: _collateral[event.asset] += event.delta\n  else: resolve to symbol, update _positions[symbol].qty\n  (NOT _cash — overrides parent)"]
+        O1 --> O2 --> O3 --> O4 --> O5
     end
 
-    subgraph DB["PostgreSQL (elysian_postgres)\nReconnectPooledPostgresqlDatabase\nmax_connections=20\nstale_timeout=300\nsynchronous_commit=off"]
-        SQLITE["portfolio_snapshots\ncex_trades\naccount_snapshots"]
+    subgraph MARGIN_HEALTH["Margin Health Metrics"]
+        direction TB
+        MH1["margin_level(prices):\n  asset_value = Σ(collateral × price)\n              + Σ(long_pos.qty × price)\n  liability = Σ((borrowed + interest) × price)\n  return asset_value / liability\n  (∞ when no liabilities)"]
+        MH2["liquidation_price(symbol, mmr=0.10):\n  Binance liquidates when margin_level < 1 + mmr\n  For short (long_qty=0, borrowed_qty>0):\n    p = collateral_usdt / ((1+mmr) × borrowed_qty)\n  For mixed (long_qty>0):\n    p = collateral_usdt / ((1+mmr)×borrowed_qty − long_qty)"]
     end
 
-    SBS2 -->|"PortfolioSnapshot.create(**data)"| MODEL
-    PTS2 -->|"PortfolioSnapshot.create(**data)"| MODEL
-    TRD -->|"CexTrade.create(**data)"| TRADE_MODEL
-    MODEL -->|"Peewee ORM"| DB
-    TRADE_MODEL -->|"Peewee ORM"| DB
+    SYNC --> OVERRIDES --> MARGIN_HEALTH
 
-    style SOURCES fill:#fefce8,stroke:#ca8a04,color:#713f12
-    style MODEL fill:#eff6ff,stroke:#2563eb,color:#1e40af
-    style TRADE_MODEL fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
-    style DB fill:#f0fdf4,stroke:#16a34a,color:#166534
+    style SYNC fill:#f0fdf4,stroke:#16a34a,color:#166534
+    style OVERRIDES fill:#faf5ff,stroke:#a855f7,color:#3b0764
+    style MARGIN_HEALTH fill:#eff6ff,stroke:#2563eb,color:#1e40af
         </div>
     </div>
-    <div class="note-box">
-        <strong>synchronous_commit=off on PostgreSQL</strong>
-        The <code>docker/postgres/init.sql</code> sets <code>synchronous_commit = 'off'</code> for the
-        Elysian database. This dramatically increases write throughput for the high-frequency snapshot
-        and trade recording inserts. The trade-off is that up to one WAL flush interval (~200ms) of
-        writes may be lost on a hard crash. Since ShadowBook is the authoritative in-memory state and
-        DB writes are for audit/analytics only, this is acceptable.
+
+    <!-- ═══ S17: SubAccountPipeline ═══ -->
+    <h2 id="s17">17. Multi-Sub-Account Pipeline <span class="badge-margin">MARGIN NEW</span></h2>
+    <p class="desc">
+        <code>SubAccountKey</code> and <code>SubAccountPipeline</code> are the core routing primitives for
+        multi-sub-account strategies. Each pipeline owns a complete Stage 3-5 stack for one
+        (asset_type, venue, sub_account_id) combination. MarginStrategy holds a dict of these and dispatches
+        to each independently.
+    </p>
+    <div class="diagram-card">
+        <div class="mermaid">
+classDiagram
+    class SubAccountKey {
+        +int strategy_id
+        +AssetType asset_type
+        +Venue venue
+        +int sub_account_id
+        +__str__() "s2:Spot:Binance:0"
+    }
+
+    class SubAccountPipeline {
+        +SubAccountKey key
+        +SpotExchangeConnector exchange
+        +EventBus private_event_bus
+        +ShadowBook shadow_book
+        +PortfolioOptimizer optimizer
+        +ExecutionEngine execution_engine
+        +RebalanceFSM rebalance_fsm
+        +List symbols
+    }
+
+    class MarginStrategy {
+        +Dict _pipelines
+        +request_rebalance(sub_account_key, **ctx)
+        +suspend_rebalancing()
+        +resume_rebalancing()
+        +_dispatch_order(event) routes by SubAccountKey
+        +_dispatch_balance(event) routes by SubAccountKey
+        +get_pipeline(key) SubAccountPipeline
+        +shadow_books Dict[SubAccountKey, ShadowBook]
+    }
+
+    SubAccountKey -- SubAccountPipeline : key
+    MarginStrategy "1" --> "*" SubAccountPipeline : _pipelines
+        </div>
+    </div>
+
+    <div class="note-box note-purple">
+        <strong>RebalanceFSM creation timing for margin pipelines</strong>
+        <code>MarginStrategyRunner._build_margin_pipeline()</code> returns
+        <code>SubAccountPipeline(rebalance_fsm=None)</code>. The FSMs are created in
+        <code>MarginStrategy.start()</code> after all pipelines are injected, so each FSM can hold a
+        reference to the fully initialized strategy instance. This avoids a chicken-and-egg problem
+        where the FSM needs the strategy but the strategy is not yet initialized when pipelines are built.
+    </div>
+
+    <!-- ═══ S18: MarginStrategyRunner ═══ -->
+    <h2 id="s18">18. MarginStrategyRunner Lifecycle <span class="badge-margin">MARGIN NEW</span></h2>
+    <p class="desc">
+        <code>MarginStrategyRunner</code> extends <code>StrategyRunner</code> with only two overrides:
+        <code>setup_strategy()</code> (iterates sub-accounts instead of single strategy) and
+        <code>_compute_channels()</code> (maps MARGIN → SPOT channels). The main run loop is also
+        overridden to call the instance method <code>_compute_channels()</code> instead of the module-level
+        function.
+    </p>
+    <div class="diagram-card">
+        <div class="mermaid">
+flowchart TD
+    subgraph MR["MarginStrategyRunner.setup_strategy()"]
+        direction TB
+        MR1{"strat_cfg.sub_accounts\nempty?"}
+        MR2["Fall through to parent\nStrategyRunner.setup_strategy()\n(standard SPOT single-pipeline)"]
+        MR3["for sub_cfg in strat_cfg.sub_accounts:\n  _build_margin_pipeline(sub_cfg, ...)"]
+        MR4["_build_margin_pipeline(sub_cfg):\n  private_bus = EventBus()\n  exchange_cls = _exchange_connector_callables[\n    (AssetType[sub_cfg.asset_type], Venue[sub_cfg.venue])\n  ]\n  exchange.start(shared_event_bus)\n  await exchange.run()"]
+        MR5["if sub_cfg.asset_type == 'Margin':\n  shadow_book = MarginShadowBook(\n    strategy_id, strategy_name,\n    venue, strategy_config\n  )\nelse:\n  shadow_book = ShadowBook(...)"]
+        MR6["risk_cfg = sub_cfg.risk_config\n  if sub_cfg.risk_config is not None\n  else effective_risk_for(sub_cfg.venue, sub_cfg.asset_type)"]
+        MR7["optimizer = PortfolioOptimizer(risk_cfg, shadow_book)\nexecution_engine = ExecutionEngine(...)\nexecution_engine.start(shared_event_bus)\nreturn SubAccountPipeline(key, ...)"]
+        MR8["strategy._pipelines[key] = pipeline\nstrategy.start() ← creates per-pipeline FSMs"]
+        MR9["_compute_channels() (instance method):\n  for sub_cfg in strat_cfg.sub_accounts:\n    if sub_cfg.asset_type == 'Margin':\n      use AssetType.SPOT for channel mapping\n    strategy_channels(sub_cfg.symbols, venue, effective_type)"]
+
+        MR1 -->|Yes| MR2
+        MR1 -->|No| MR3
+        MR3 --> MR4 --> MR5 --> MR6 --> MR7 --> MR8 --> MR9
+    end
+
+    style MR fill:#faf5ff,stroke:#a855f7,color:#3b0764
+        </div>
+    </div>
+
+    <!-- ═══ S19: MarginStrategy Class Hierarchy ═══ -->
+    <h2 id="s19">19. MarginStrategy Class Hierarchy <span class="badge-margin">MARGIN NEW</span></h2>
+    <p class="desc">
+        <code>MarginStrategy</code> overrides the lifecycle methods of <code>SpotStrategy</code> to manage
+        multiple sub-account pipelines. The <code>_shadow_book</code> property returns the first pipeline's
+        ShadowBook for backward compatibility with <code>RebalanceFSM</code> logging, but strategies should
+        use <code>shadow_books</code> or <code>get_pipeline(key)</code> for per-sub-account reads.
+    </p>
+    <div class="diagram-card">
+        <div class="mermaid">
+classDiagram
+    class SpotStrategy {
+        +Dict _exchanges
+        +EventBus _shared_event_bus
+        +EventBus _private_event_bus
+        +ShadowBook _shadow_book
+        +RebalanceFSM _rebalance_fsm
+        +start() subscribes 5 event types
+        +stop() unsubscribes all
+        +request_rebalance(**ctx) bool
+        +compute_weights(**ctx) dict
+        +on_kline / on_order_update / ...
+        +run_forever()
+    }
+
+    class MarginStrategy {
+        +Dict _pipelines
+        +_shadow_book property → first pipeline ShadowBook
+        +start() creates per-pipeline FSMs\n  subscribes shared bus once\n  subscribes each private bus
+        +stop() unsubscribes all private buses\n  stops each shadow_book
+        +request_rebalance(sub_account_key, **ctx)\n  if key None → gather all FSMs
+        +_dispatch_order routes by SubAccountKey
+        +_dispatch_balance routes by SubAccountKey
+        +shadow_books Dict[SubAccountKey, ShadowBook]
+        +get_pipeline(key) SubAccountPipeline
+    }
+
+    class MarginNeutralStrategy {
+        +compute_weights(**ctx) dict
+        +on_kline(event)
+        +on_start()
+    }
+
+    SpotStrategy <|-- MarginStrategy
+    MarginStrategy <|-- MarginNeutralStrategy
+        </div>
+    </div>
+
+    <h3>Key Lifecycle Differences: SpotStrategy vs MarginStrategy</h3>
+    <table>
+        <thead>
+            <tr><th>Operation</th><th>SpotStrategy</th><th>MarginStrategy</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>start()</td><td>Subscribe 5 events; create 1 FSM</td><td>Subscribe shared bus once; create 1 FSM <em>per pipeline</em>; subscribe each private bus</td></tr>
+            <tr><td>stop()</td><td>Unsubscribe shared + private bus; stop 1 shadow_book</td><td>Unsubscribe shared bus; unsubscribe each private bus; stop each shadow_book</td></tr>
+            <tr><td>_dispatch_order</td><td>asyncio.gather(on_order_update, shadow_book._on_order_update)</td><td>Build SubAccountKey → lookup pipeline → asyncio.gather with pipeline.shadow_book</td></tr>
+            <tr><td>request_rebalance</td><td>Delegates to _rebalance_fsm.request()</td><td>If key provided: target 1 pipeline. If None: asyncio.gather across all pipeline FSMs</td></tr>
+            <tr><td>compute_weights</td><td>No sub_account_key in ctx</td><td>ctx['sub_account_key'] injected by FSM; strategy dispatches per-pipeline weights</td></tr>
+        </tbody>
+    </table>
+
+    <!-- ═══ S20: Margin Order Placement ═══ -->
+    <h2 id="s20">20. Margin Order Placement &amp; SideEffect Flow <span class="badge-margin">MARGIN NEW</span></h2>
+    <p class="desc">
+        The complete flow from <code>ExecutionEngine.compute_order_intents()</code> through to
+        the Binance API call, showing how <code>MarginSideEffect</code> flows through the pipeline
+        and how the borrow/repay lifecycle is managed by Binance automatically.
+    </p>
+    <div class="diagram-card">
+        <div class="mermaid">
+flowchart TD
+    subgraph EE_COMPUTE["ExecutionEngine.compute_order_intents()"]
+        direction TB
+        EC1["_asset_type = self.asset_type or AssetType.SPOT"]
+        EC2["if _asset_type == AssetType.MARGIN:\n  _side_effect = MarginSideEffect.AUTO_BORROW_REPAY\nelse:\n  _side_effect = None"]
+        EC3["OrderIntent(\n  symbol=BTCUSDT,\n  venue=Venue.BINANCE,\n  side=Side.SELL,\n  quantity=0.01,\n  order_type=OrderType.LIMIT,\n  price=95000.0,\n  strategy_id=2,\n  asset_type=AssetType.MARGIN,\n  sub_account_id=1,\n  side_effect=MarginSideEffect.AUTO_BORROW_REPAY\n)"]
+        EC1 --> EC2 --> EC3
+    end
+
+    subgraph EE_SUBMIT["ExecutionEngine._submit_order()"]
+        direction TB
+        ES1["exchange = _exchanges[intent.venue]\n→ BinanceMarginExchange"]
+        ES2["extra = {}\nif intent.side_effect is not None:\n  extra['side_effect'] = intent.side_effect\n→ extra = {'side_effect': AUTO_BORROW_REPAY}"]
+        ES3["await exchange.place_limit_order(\n  symbol=BTCUSDT, side=SELL,\n  quantity=0.01, price=95000,\n  strategy_id=2,\n  **extra  # side_effect kwarg\n)"]
+        ES1 --> ES2 --> ES3
+    end
+
+    subgraph BME_PLACE["BinanceMarginExchange.place_limit_order()"]
+        direction TB
+        BM_1["qty = round_step_size(0.01, step_size)"]
+        BM_2["await _client.create_margin_order(\n  symbol=BTCUSDT,\n  side='SELL',\n  type='LIMIT',\n  timeInForce='GTC',\n  quantity=0.01,\n  price='95000',\n  isIsolated='TRUE',\n  sideEffectType='AUTO_BORROW_REPAY',\n  strategyId=2\n)"]
+        BM_3["Binance server:\n  1. Check if account has 0.01 BTC free\n  2. If not: borrow 0.01 BTC from margin pool\n  3. Place SELL limit order at 95000\n  4. Returns {orderId, status=NEW, ...}"]
+        BM_4["Register Order in _open_orders[BTCUSDT]"]
+        BM_1 --> BM_2 --> BM_3 --> BM_4
+    end
+
+    subgraph SB_LOCK["ShadowBook.lock_for_order() — AFTER place_limit_order returns"]
+        direction TB
+        SL1["order_id returned from exchange"]
+        SL2["ActiveLimitOrder.initialize_reservation()\n  side=SELL: reserved_qty = 0.01\n  position.locked_quantity += 0.01"]
+        SL3["_active_orders[order_id] = active_limit_order"]
+        SL1 --> SL2 --> SL3
+    end
+
+    EE_COMPUTE --> EE_SUBMIT --> BME_PLACE --> SB_LOCK
+
+    style EE_COMPUTE fill:#eff6ff,stroke:#2563eb,color:#1e40af
+    style EE_SUBMIT fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
+    style BME_PLACE fill:#faf5ff,stroke:#c4b5fd,color:#3b0764
+    style SB_LOCK fill:#fefce8,stroke:#ca8a04,color:#713f12
+        </div>
+    </div>
+
+    <div class="note-box note-orange">
+        <strong>AUTO_BORROW_REPAY vs explicit borrow/repay</strong>
+        The default <code>AUTO_BORROW_REPAY</code> sideEffectType handles the full loan lifecycle:
+        on a SELL, Binance borrows base asset automatically if free balance is insufficient;
+        on repayment from subsequent buys, Binance repays the loan from proceeds automatically.
+        For strategies requiring explicit control (e.g. setting collateral levels precisely before trading),
+        use <code>MarginSideEffect.NO_SIDE_EFFECT</code> and call <code>exchange.borrow()</code>,
+        <code>exchange.transfer_in()</code>, <code>exchange.repay()</code> directly. The
+        <code>BinanceMarginExchange</code> exposes all four operations for explicit control.
     </div>
 
 </div><!-- /container -->

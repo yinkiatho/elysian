@@ -24,15 +24,12 @@
     </script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-
         body {
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             background: #f0f4f8;
             color: #1a1a2e;
             line-height: 1.6;
         }
-
-        /* ── Header ── */
         .header {
             background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #1d4ed8 100%);
             padding: 52px 40px 44px;
@@ -45,41 +42,15 @@
             position: absolute;
             inset: 0;
             background: repeating-linear-gradient(
-                45deg,
-                transparent,
-                transparent 60px,
-                rgba(37, 99, 235, 0.07) 60px,
-                rgba(37, 99, 235, 0.07) 61px
+                45deg, transparent, transparent 60px,
+                rgba(37, 99, 235, 0.07) 60px, rgba(37, 99, 235, 0.07) 61px
             );
         }
         .header-inner { position: relative; z-index: 1; }
-
-        .header h1 {
-            font-size: 2.6rem;
-            font-weight: 300;
-            letter-spacing: 3px;
-            color: #e0eaff;
-            margin-bottom: 10px;
-        }
-        .header h1 span {
-            color: #60a5fa;
-            font-weight: 700;
-        }
-        .header .subtitle {
-            color: #93c5fd;
-            font-size: 1.05rem;
-            letter-spacing: 1px;
-            margin-bottom: 28px;
-        }
-
-        /* ── Nav pills ── */
-        .nav-pills {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            gap: 10px;
-            margin-top: 10px;
-        }
+        .header h1 { font-size: 2.6rem; font-weight: 300; letter-spacing: 3px; color: #e0eaff; margin-bottom: 10px; }
+        .header h1 span { color: #60a5fa; font-weight: 700; }
+        .header .subtitle { color: #93c5fd; font-size: 1.05rem; letter-spacing: 1px; margin-bottom: 28px; }
+        .nav-pills { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 10px; }
         .nav-pills a {
             background: rgba(255,255,255,0.12);
             border: 1px solid rgba(96,165,250,0.4);
@@ -91,39 +62,39 @@
             letter-spacing: 0.5px;
             transition: background 0.2s, color 0.2s;
         }
-        .nav-pills a:hover {
-            background: rgba(37,99,235,0.4);
-            color: #fff;
-        }
-        .nav-pills a.new {
-            border-color: rgba(134,239,172,0.5);
-            color: #86efac;
-            background: rgba(22,163,74,0.15);
-        }
-        .nav-pills a.updated {
-            border-color: rgba(253,224,71,0.5);
-            color: #fde047;
-            background: rgba(202,138,4,0.15);
-        }
-
-        /* ── Main layout ── */
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 48px 24px 80px;
-        }
-
-        /* ── Section ── */
-        .section {
-            margin-bottom: 64px;
-        }
-
-        .section-header {
+        .nav-pills a:hover { background: rgba(37,99,235,0.4); color: #fff; }
+        .nav-pills a.new { border-color: rgba(134,239,172,0.5); color: #86efac; background: rgba(22,163,74,0.15); }
+        .nav-pills a.updated { border-color: rgba(253,224,71,0.5); color: #fde047; background: rgba(202,138,4,0.15); }
+        .nav-pills a.margin { border-color: rgba(196,181,253,0.5); color: #d8b4fe; background: rgba(168,85,247,0.15); }
+        /* Download bar */
+        .download-bar {
+            background: #0f172a;
+            padding: 12px 40px;
             display: flex;
-            align-items: flex-start;
-            gap: 18px;
-            margin-bottom: 20px;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 16px;
+            border-bottom: 1px solid #1e3a5f;
         }
+        .download-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: #fff;
+            text-decoration: none;
+            padding: 8px 20px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+        }
+        .download-btn:hover { opacity: 0.85; }
+        .download-label { color: #64748b; font-size: 0.82rem; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 48px 24px 80px; }
+        .section { margin-bottom: 64px; }
+        .section-header { display: flex; align-items: flex-start; gap: 18px; margin-bottom: 20px; }
         .section-badge {
             background: linear-gradient(135deg, #2563eb, #1d4ed8);
             color: #fff;
@@ -135,300 +106,85 @@
             white-space: nowrap;
             margin-top: 6px;
         }
-        .section-badge.new {
-            background: linear-gradient(135deg, #16a34a, #15803d);
-        }
-        .section-badge.updated {
-            background: linear-gradient(135deg, #b45309, #92400e);
-        }
-        .section-title-block h2 {
-            font-size: 1.65rem;
-            font-weight: 600;
-            color: #1e3a5f;
-            letter-spacing: 0.5px;
-        }
-        .section-title-block .file-path {
-            font-size: 0.82rem;
-            color: #2563eb;
-            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
-            margin-top: 2px;
-            opacity: 0.85;
-        }
-
-        /* ── Card ── */
-        .card {
-            background: #ffffff;
-            border-radius: 14px;
-            box-shadow: 0 2px 12px rgba(30,58,95,0.09), 0 1px 3px rgba(30,58,95,0.06);
-            overflow: hidden;
-            margin-bottom: 24px;
-        }
-        .card-header {
-            background: linear-gradient(90deg, #eff6ff 0%, #dbeafe 100%);
-            border-bottom: 1px solid #bfdbfe;
-            padding: 14px 24px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .card-header.green-header {
-            background: linear-gradient(90deg, #f0fdf4 0%, #dcfce7 100%);
-            border-bottom-color: #86efac;
-        }
-        .card-header.orange-header {
-            background: linear-gradient(90deg, #fff7ed 0%, #fed7aa 100%);
-            border-bottom-color: #fdba74;
-        }
-        .card-header .dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-        }
-        .dot-blue   { background: #2563eb; }
-        .dot-green  { background: #16a34a; }
+        .section-badge.new { background: linear-gradient(135deg, #16a34a, #15803d); }
+        .section-badge.updated { background: linear-gradient(135deg, #b45309, #92400e); }
+        .section-badge.margin { background: linear-gradient(135deg, #7c3aed, #5b21b6); }
+        .section-title-block h2 { font-size: 1.65rem; font-weight: 600; color: #1e3a5f; letter-spacing: 0.5px; }
+        .section-title-block .file-path { font-size: 0.82rem; color: #2563eb; font-family: 'Cascadia Code','Fira Code','Consolas',monospace; margin-top: 2px; opacity: 0.85; }
+        .card { background: #ffffff; border-radius: 14px; box-shadow: 0 2px 12px rgba(30,58,95,0.09),0 1px 3px rgba(30,58,95,0.06); overflow: hidden; margin-bottom: 24px; }
+        .card-header { background: linear-gradient(90deg, #eff6ff 0%, #dbeafe 100%); border-bottom: 1px solid #bfdbfe; padding: 14px 24px; display: flex; align-items: center; gap: 10px; }
+        .card-header.purple-header { background: linear-gradient(90deg, #faf5ff 0%, #ede9fe 100%); border-bottom-color: #c4b5fd; }
+        .card-header.green-header { background: linear-gradient(90deg, #f0fdf4 0%, #dcfce7 100%); border-bottom-color: #86efac; }
+        .card-header.orange-header { background: linear-gradient(90deg, #fff7ed 0%, #fed7aa 100%); border-bottom-color: #fdba74; }
+        .card-header .dot { width: 10px; height: 10px; border-radius: 50%; }
+        .dot-blue { background: #2563eb; }
+        .dot-green { background: #16a34a; }
         .dot-orange { background: #ea580c; }
-        .card-header h3 {
-            font-size: 0.95rem;
-            font-weight: 600;
-            color: #1e3a5f;
-            letter-spacing: 0.3px;
-        }
-        .card-body {
-            padding: 28px 24px;
-        }
-        .card-body.diagram-body {
-            padding: 24px;
-            overflow-x: auto;
-            display: flex;
-            justify-content: center;
-        }
-
-        /* ── Description text ── */
-        .description {
-            color: #374151;
-            font-size: 0.95rem;
-            line-height: 1.75;
-            margin-bottom: 20px;
-        }
-        .description strong {
-            color: #1e3a5f;
-        }
-
-        /* ── Trait grid ── */
-        .trait-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 14px;
-            margin-top: 16px;
-        }
-        .trait-item {
-            background: #f0f7ff;
-            border: 1px solid #bfdbfe;
-            border-radius: 8px;
-            padding: 12px 16px;
-        }
-        .trait-item .trait-label {
-            font-size: 0.72rem;
-            font-weight: 700;
-            letter-spacing: 1px;
-            color: #2563eb;
-            text-transform: uppercase;
-            margin-bottom: 4px;
-        }
-        .trait-item .trait-value {
-            font-size: 0.88rem;
-            color: #1e3a5f;
-        }
-
-        /* ── State table ── */
-        .state-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.88rem;
-            margin-top: 8px;
-        }
-        .state-table th {
-            background: #dbeafe;
-            color: #1e3a5f;
-            font-weight: 600;
-            padding: 10px 14px;
-            text-align: left;
-            border-bottom: 2px solid #93c5fd;
-        }
-        .state-table td {
-            padding: 9px 14px;
-            border-bottom: 1px solid #e5e7eb;
-            vertical-align: top;
-        }
+        .dot-purple { background: #7c3aed; }
+        .card-header h3 { font-size: 0.95rem; font-weight: 600; color: #1e3a5f; letter-spacing: 0.3px; }
+        .card-body { padding: 28px 24px; }
+        .card-body.diagram-body { padding: 24px; overflow-x: auto; }
+        .description { color: #374151; font-size: 0.95rem; line-height: 1.75; margin-bottom: 20px; }
+        .description strong { color: #1e3a5f; }
+        .trait-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 16px; }
+        .trait-item { background: #f0f7ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px 16px; }
+        .trait-item.margin { background: #faf5ff; border-color: #c4b5fd; }
+        .trait-item .trait-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 1px; color: #2563eb; text-transform: uppercase; margin-bottom: 4px; }
+        .trait-item.margin .trait-label { color: #7c3aed; }
+        .trait-item .trait-value { font-size: 0.88rem; color: #1e3a5f; }
+        .state-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-top: 8px; }
+        .state-table th { background: #dbeafe; color: #1e3a5f; font-weight: 600; padding: 10px 14px; text-align: left; border-bottom: 2px solid #93c5fd; }
+        .state-table.margin-table th { background: #ede9fe; }
+        .state-table td { padding: 9px 14px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
         .state-table tr:last-child td { border-bottom: none; }
         .state-table tr:hover td { background: #f8faff; }
-
-        .state-pill {
-            display: inline-block;
-            padding: 2px 10px;
-            border-radius: 12px;
-            font-size: 0.78rem;
-            font-weight: 600;
-            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
-            letter-spacing: 0.3px;
-        }
-        .pill-active    { background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; }
-        .pill-terminal  { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
-        .pill-warning   { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
-        .pill-neutral   { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
-        .pill-purple    { background: #ede9fe; color: #5b21b6; border: 1px solid #c4b5fd; }
-        .pill-green     { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
-
-        .trigger-arrow {
-            color: #2563eb;
-            font-weight: 700;
-            margin: 0 4px;
-        }
-
-        /* ── Code block ── */
-        .code-block {
-            background: #0f172a;
-            color: #e2e8f0;
-            border-radius: 8px;
-            padding: 18px 20px;
-            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
-            font-size: 0.83rem;
-            line-height: 1.7;
-            overflow-x: auto;
-            margin: 12px 0;
-        }
-        .code-block .kw  { color: #7dd3fc; }
+        .state-pill { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.78rem; font-weight: 600; font-family: 'Cascadia Code','Fira Code','Consolas',monospace; letter-spacing: 0.3px; }
+        .pill-active { background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; }
+        .pill-terminal { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
+        .pill-warning { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+        .pill-neutral { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+        .pill-purple { background: #ede9fe; color: #5b21b6; border: 1px solid #c4b5fd; }
+        .pill-green { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+        .trigger-arrow { color: #2563eb; font-weight: 700; margin: 0 4px; }
+        .code-block { background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 18px 20px; font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 0.83rem; line-height: 1.7; overflow-x: auto; margin: 12px 0; }
+        .code-block .kw { color: #7dd3fc; }
         .code-block .str { color: #86efac; }
-        .code-block .cm  { color: #64748b; }
-        .code-block .fn  { color: #fde68a; }
-
-        /* ── Callout ── */
-        .callout {
-            border-left: 4px solid #2563eb;
-            background: #eff6ff;
-            border-radius: 0 8px 8px 0;
-            padding: 14px 18px;
-            font-size: 0.9rem;
-            color: #1e40af;
-            margin: 16px 0;
-        }
-        .callout.callout-warn {
-            border-left-color: #ea580c;
-            background: #fff7ed;
-            color: #7c2d12;
-        }
-        .callout.callout-green {
-            border-left-color: #16a34a;
-            background: #f0fdf4;
-            color: #14532d;
-        }
+        .code-block .cm { color: #64748b; }
+        .code-block .fn { color: #fde68a; }
+        .callout { border-left: 4px solid #2563eb; background: #eff6ff; border-radius: 0 8px 8px 0; padding: 14px 18px; font-size: 0.9rem; color: #1e40af; margin: 16px 0; }
+        .callout.callout-warn { border-left-color: #ea580c; background: #fff7ed; color: #7c2d12; }
+        .callout.callout-green { border-left-color: #16a34a; background: #f0fdf4; color: #14532d; }
+        .callout.callout-purple { border-left-color: #7c3aed; background: #faf5ff; color: #3b0764; }
         .callout strong { font-weight: 700; }
-
-        /* ── Change list ── */
-        .change-list {
-            background: #f8faff;
-            border: 1px solid #bfdbfe;
-            border-radius: 8px;
-            padding: 14px 18px;
-            margin: 12px 0 20px;
-            font-size: 0.88rem;
-        }
+        .change-list { background: #f8faff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 14px 18px; margin: 12px 0 20px; font-size: 0.88rem; }
+        .change-list.margin-list { background: #faf5ff; border-color: #c4b5fd; }
         .change-list h4 { color: #1e40af; margin-bottom: 8px; font-size: 0.9rem; }
+        .change-list.margin-list h4 { color: #5b21b6; }
         .change-list ul { padding-left: 18px; }
         .change-list ul li { margin-bottom: 4px; color: #374151; }
         .change-list ul li strong { color: #1e3a5f; }
-
-        /* ── Divider ── */
-        .divider {
-            height: 1px;
-            background: linear-gradient(90deg, transparent, #bfdbfe 30%, #bfdbfe 70%, transparent);
-            margin: 48px 0;
-        }
-
-        /* ── TOC ── */
-        .toc-card {
-            background: #fff;
-            border-radius: 14px;
-            box-shadow: 0 2px 12px rgba(30,58,95,0.09);
-            padding: 28px 32px;
-            margin-bottom: 52px;
-        }
-        .toc-card h3 {
-            font-size: 1rem;
-            font-weight: 700;
-            color: #1e3a5f;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-            margin-bottom: 18px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #dbeafe;
-        }
-        .toc-list {
-            list-style: none;
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 8px;
-        }
-        .toc-list li a {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            text-decoration: none;
-            color: #1e3a5f;
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-size: 0.92rem;
-            transition: background 0.15s;
-        }
-        .toc-list li a:hover {
-            background: #dbeafe;
-        }
-        .toc-list li a .toc-num {
-            background: #2563eb;
-            color: #fff;
-            font-size: 0.72rem;
-            font-weight: 700;
-            width: 22px;
-            height: 22px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-        }
+        .divider { height: 1px; background: linear-gradient(90deg, transparent, #bfdbfe 30%, #bfdbfe 70%, transparent); margin: 48px 0; }
+        .toc-card { background: #fff; border-radius: 14px; box-shadow: 0 2px 12px rgba(30,58,95,0.09); padding: 28px 32px; margin-bottom: 52px; }
+        .toc-card h3 { font-size: 1rem; font-weight: 700; color: #1e3a5f; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 18px; padding-bottom: 10px; border-bottom: 2px solid #dbeafe; }
+        .toc-list { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; }
+        .toc-list li a { display: flex; align-items: center; gap: 10px; text-decoration: none; color: #1e3a5f; padding: 8px 12px; border-radius: 6px; font-size: 0.92rem; transition: background 0.15s; }
+        .toc-list li a:hover { background: #dbeafe; }
+        .toc-list li a .toc-num { background: #2563eb; color: #fff; font-size: 0.72rem; font-weight: 700; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .toc-list li a .toc-num.new { background: #16a34a; }
         .toc-list li a .toc-num.updated { background: #b45309; }
-        .badge-inline {
-            font-size: 0.65rem;
-            font-weight: 700;
-            padding: 1px 5px;
-            border-radius: 3px;
-            letter-spacing: 0.3px;
-        }
+        .toc-list li a .toc-num.margin { background: #7c3aed; }
+        .badge-inline { font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 3px; letter-spacing: 0.3px; }
         .badge-new { background: #dcfce7; color: #15803d; }
         .badge-updated { background: #fef3c7; color: #b45309; }
-
-        /* ── Footer ── */
-        .footer {
-            background: #0f172a;
-            color: #64748b;
-            text-align: center;
-            padding: 28px;
-            font-size: 0.83rem;
-            letter-spacing: 0.5px;
-        }
+        .badge-margin { background: #ede9fe; color: #5b21b6; }
+        .footer { background: #0f172a; color: #64748b; text-align: center; padding: 28px; font-size: 0.83rem; letter-spacing: 0.5px; }
         .footer span { color: #60a5fa; }
-
-        /* ── Mermaid override ── */
         .mermaid { max-width: 100%; }
         .mermaid svg { max-width: 100%; height: auto; }
     </style>
 </head>
 <body>
 
-<!-- ════════════════════════════════════
-     HEADER
-════════════════════════════════════ -->
 <div class="header">
     <div class="header-inner">
         <h1><span>Elysian</span> Trading System — State Transitions</h1>
@@ -444,36 +200,44 @@
             <a href="#shadow-book" class="updated">ShadowBook ↑</a>
             <a href="#base-fsm">BaseFSM Engine</a>
             <a href="#periodic-task">PeriodicTask</a>
+            <a href="#margin-strategy-state" class="margin">MarginStrategy MARGIN</a>
+            <a href="#margin-shadow-book" class="margin">MarginShadowBook MARGIN</a>
+            <a href="#margin-user-data" class="margin">MarginUserData MARGIN</a>
+            <a href="#margin-poll-loop" class="margin">MarginPollLoop MARGIN</a>
         </div>
     </div>
 </div>
 
-<!-- ════════════════════════════════════
-     MAIN
-════════════════════════════════════ -->
+<div class="download-bar">
+    <span class="download-label">Save this reference document:</span>
+    <a class="download-btn" href="state_transitions.html" download="elysian_state_transitions.html">
+        ⬇ Download HTML
+    </a>
+</div>
+
 <div class="container">
 
-    <!-- TOC -->
     <div class="toc-card">
         <h3>Table of Contents</h3>
         <ul class="toc-list">
             <li><a href="#order-fsm"><span class="toc-num">1</span>OrderFSM — Order Lifecycle</a></li>
             <li><a href="#rebalance-fsm"><span class="toc-num">2</span>RebalanceFSM — Rebalance Cycle</a></li>
-            <li><a href="#strategy-state"><span class="toc-num updated">3</span>StrategyState — Strategy Lifecycle <span class="badge-inline badge-updated">UPDATED</span></a></li>
-            <li><a href="#runner-state"><span class="toc-num updated">4</span>RunnerState — StrategyRunner Lifecycle <span class="badge-inline badge-updated">UPDATED</span></a></li>
+            <li><a href="#strategy-state"><span class="toc-num updated">3</span>StrategyState <span class="badge-inline badge-updated">UPDATED</span></a></li>
+            <li><a href="#runner-state"><span class="toc-num updated">4</span>RunnerState <span class="badge-inline badge-updated">UPDATED</span></a></li>
             <li><a href="#mds-lifecycle"><span class="toc-num new">5</span>MarketDataService Lifecycle <span class="badge-inline badge-new">NEW</span></a></li>
             <li><a href="#redis-subscriber"><span class="toc-num new">6</span>RedisEventBusSubscriber Loop <span class="badge-inline badge-new">NEW</span></a></li>
             <li><a href="#reservation-lifecycle"><span class="toc-num">7</span>ActiveLimitOrder Reservation Lifecycle</a></li>
-            <li><a href="#shadow-book"><span class="toc-num updated">8</span>ShadowBook Derived State Refresh <span class="badge-inline badge-updated">UPDATED</span></a></li>
-            <li><a href="#base-fsm"><span class="toc-num">9</span>BaseFSM — Core State Machine Engine</a></li>
+            <li><a href="#shadow-book"><span class="toc-num updated">8</span>ShadowBook Derived State <span class="badge-inline badge-updated">UPDATED</span></a></li>
+            <li><a href="#base-fsm"><span class="toc-num">9</span>BaseFSM — Core Engine</a></li>
             <li><a href="#periodic-task"><span class="toc-num">10</span>PeriodicTask Lifecycle</a></li>
+            <li><a href="#margin-strategy-state"><span class="toc-num margin">11</span>MarginStrategy Lifecycle <span class="badge-inline badge-margin">MARGIN</span></a></li>
+            <li><a href="#margin-shadow-book"><span class="toc-num margin">12</span>MarginShadowBook State <span class="badge-inline badge-margin">MARGIN</span></a></li>
+            <li><a href="#margin-user-data"><span class="toc-num margin">13</span>MarginUserData Reader Loop <span class="badge-inline badge-margin">MARGIN</span></a></li>
+            <li><a href="#margin-poll-loop"><span class="toc-num margin">14</span>Margin Poll Loop <span class="badge-inline badge-margin">MARGIN</span></a></li>
         </ul>
     </div>
 
-
-    <!-- ══════════════════════════════
-         1. OrderFSM
-    ══════════════════════════════ -->
+    <!-- ══════════ 1. OrderFSM ══════════ -->
     <div class="section" id="order-fsm">
         <div class="section-header">
             <div class="section-badge">FSM 1</div>
@@ -482,148 +246,83 @@
                 <div class="file-path">elysian_core/core/order_fsm.py &nbsp;|&nbsp; elysian_core/core/order.py</div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>Overview</h3>
-            </div>
+            <div class="card-header"><div class="dot dot-blue"></div><h3>Overview</h3></div>
             <div class="card-body">
                 <p class="description">
-                    The <strong>OrderFSM</strong> manages the complete lifecycle of a single exchange order from submission
-                    through to a terminal state. It operates in <strong>warn-mode</strong>: invalid transitions are logged
-                    but still applied, because the exchange is the authoritative source of truth for order state.
-                    The <code>OrderFSM</code> class wraps a <code>_VALID_TRANSITIONS</code> dict and is instantiated
-                    per-order. Module-level functions <code>validate_order_transition()</code> and
-                    <code>is_terminal()</code> are provided for backward compatibility.
+                    The <strong>OrderFSM</strong> manages the complete lifecycle of a single exchange order.
+                    It operates in <strong>warn-mode</strong>: invalid transitions are logged but still applied
+                    because the exchange is the authoritative source of truth. The same FSM is used for
+                    both SPOT and MARGIN orders — <code>ActiveLimitOrder</code> carries reservation state
+                    for both. Margin orders with <code>AUTO_BORROW_REPAY</code> pass through the same
+                    PENDING → OPEN → FILLED flow; the borrow/repay is invisible at the FSM level.
                 </p>
-                <div class="callout callout-warn">
-                    <strong>Warn-mode:</strong> If an unexpected state transition arrives from the exchange feed
-                    (e.g. FILLED arriving on a CANCELLED order), the FSM logs a warning and still applies the
-                    transition rather than raising. The exchange is always authoritative.
-                </div>
                 <div class="trait-grid">
-                    <div class="trait-item">
-                        <div class="trait-label">Active states</div>
-                        <div class="trait-value">PENDING, OPEN, PARTIALLY_FILLED, TRIGGERED</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Terminal states</div>
-                        <div class="trait-value">FILLED, CANCELLED, REJECTED, EXPIRED</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Key properties</div>
-                        <div class="trait-value">is_active, can_fill, is_conditional, is_terminal</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Fill tracking</div>
-                        <div class="trait-value">sync_from_event() via _prev_filled delta</div>
-                    </div>
+                    <div class="trait-item"><div class="trait-label">Active states</div><div class="trait-value">PENDING, OPEN, PARTIALLY_FILLED, TRIGGERED</div></div>
+                    <div class="trait-item"><div class="trait-label">Terminal states</div><div class="trait-value">FILLED, CANCELLED, REJECTED, EXPIRED</div></div>
+                    <div class="trait-item"><div class="trait-label">Margin note</div><div class="trait-value">MARGIN orders: same FSM. AUTO_BORROW_REPAY is transparent to the order lifecycle.</div></div>
+                    <div class="trait-item"><div class="trait-label">Fill tracking</div><div class="trait-value">sync_from_event() via _prev_filled delta</div></div>
                 </div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>State Diagram</h3>
-            </div>
+            <div class="card-header"><div class="dot dot-blue"></div><h3>State Diagram</h3></div>
             <div class="card-body diagram-body">
                 <div class="mermaid">
-stateDiagram-v2
-    direction TB
+                stateDiagram-v2
+                    direction TB
+                    [*] --> PENDING : order submitted\n(SPOT or MARGIN AUTO_BORROW_REPAY)
 
-    [*] --> PENDING : order submitted
+                    PENDING --> OPEN           : exchange acknowledged
+                    PENDING --> REJECTED       : exchange rejected
+                    PENDING --> CANCELLED      : client-side cancel before ack
+                    PENDING --> FILLED         : market order fills instantly
 
-    state "Active States" as active_group {
-        PENDING
-        OPEN
-        PARTIALLY_FILLED
-        TRIGGERED
-    }
+                    OPEN --> PARTIALLY_FILLED  : first partial fill
+                    OPEN --> FILLED            : fully filled in one shot
+                    OPEN --> CANCELLED         : cancelled
+                    OPEN --> EXPIRED           : GTT/IOC lapsed
+                    OPEN --> TRIGGERED         : SL/TP trigger price hit
 
-    state "Terminal States" as terminal_group {
-        FILLED
-        CANCELLED
-        REJECTED
-        EXPIRED
-    }
+                    PARTIALLY_FILLED --> PARTIALLY_FILLED : additional partials
+                    PARTIALLY_FILLED --> FILLED           : final fill
+                    PARTIALLY_FILLED --> CANCELLED        : remaining qty cancelled
+                    PARTIALLY_FILLED --> EXPIRED          : remainder expired
 
-    PENDING --> OPEN           : exchange acknowledged\n(order resting)
-    PENDING --> REJECTED       : exchange rejected outright
-    PENDING --> CANCELLED      : client-side cancel before ack
-    PENDING --> FILLED         : market order fills instantly
+                    TRIGGERED --> OPEN             : resting limit placed
+                    TRIGGERED --> PARTIALLY_FILLED : began filling
+                    TRIGGERED --> FILLED           : fully filled
+                    TRIGGERED --> CANCELLED        : cancelled before fill
+                    TRIGGERED --> EXPIRED          : IOC expired
 
-    OPEN --> PARTIALLY_FILLED  : first partial fill arrived
-    OPEN --> FILLED            : fully filled in one shot
-    OPEN --> CANCELLED         : user or system cancelled
-    OPEN --> EXPIRED           : GTT/IOC time-in-force lapsed
-    OPEN --> TRIGGERED         : SL/TP trigger price hit
-
-    PARTIALLY_FILLED --> PARTIALLY_FILLED : additional partial fills
-    PARTIALLY_FILLED --> FILLED           : final fill completes order
-    PARTIALLY_FILLED --> CANCELLED        : remaining qty cancelled
-    PARTIALLY_FILLED --> EXPIRED          : GTT/IOC remainder expired
-
-    TRIGGERED --> OPEN             : placed as resting limit
-    TRIGGERED --> PARTIALLY_FILLED : began filling immediately
-    TRIGGERED --> FILLED           : fully filled immediately
-    TRIGGERED --> CANCELLED        : cancelled before fill
-    TRIGGERED --> EXPIRED          : IOC child expired before fill
-
-    FILLED    --> [*]
-    CANCELLED --> [*]
-    REJECTED  --> [*]
-    EXPIRED   --> [*]
-
-    note right of TRIGGERED
-        Conditional orders (Stop-Loss /
-        Take-Profit) enter TRIGGERED
-        when their trigger price is hit.
-    end note
-
-    note right of PARTIALLY_FILLED
-        Self-loop: exchange may send
-        multiple partial fill events
-        before the order completes.
-    end note
+                    FILLED    --> [*]
+                    CANCELLED --> [*]
+                    REJECTED  --> [*]
+                    EXPIRED   --> [*]
                 </div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>Full Transition Table</h3>
-            </div>
+            <div class="card-header"><div class="dot dot-blue"></div><h3>Full Transition Table</h3></div>
             <div class="card-body">
                 <table class="state-table">
-                    <thead>
-                        <tr>
-                            <th>From</th>
-                            <th>To</th>
-                            <th>Condition / Event</th>
-                        </tr>
-                    </thead>
+                    <thead><tr><th>From</th><th>To</th><th>Condition / Event</th></tr></thead>
                     <tbody>
-                        <tr><td><span class="state-pill pill-active">PENDING</span></td><td><span class="state-pill pill-active">OPEN</span></td><td>Exchange acknowledged; order resting on book</td></tr>
-                        <tr><td><span class="state-pill pill-active">PENDING</span></td><td><span class="state-pill pill-terminal">REJECTED</span></td><td>Exchange rejected outright (invalid params, insufficient margin)</td></tr>
-                        <tr><td><span class="state-pill pill-active">PENDING</span></td><td><span class="state-pill pill-terminal">CANCELLED</span></td><td>Client-side cancel sent before exchange acknowledged</td></tr>
-                        <tr><td><span class="state-pill pill-active">PENDING</span></td><td><span class="state-pill pill-terminal">FILLED</span></td><td>Market order fills instantly — never rests</td></tr>
+                        <tr><td><span class="state-pill pill-active">PENDING</span></td><td><span class="state-pill pill-active">OPEN</span></td><td>Exchange acknowledged; order resting on book (SPOT or MARGIN)</td></tr>
+                        <tr><td><span class="state-pill pill-active">PENDING</span></td><td><span class="state-pill pill-terminal">REJECTED</span></td><td>Exchange rejected outright (invalid params, insufficient margin, margin level too low)</td></tr>
+                        <tr><td><span class="state-pill pill-active">PENDING</span></td><td><span class="state-pill pill-terminal">CANCELLED</span></td><td>Client-side cancel before exchange acknowledged</td></tr>
+                        <tr><td><span class="state-pill pill-active">PENDING</span></td><td><span class="state-pill pill-terminal">FILLED</span></td><td>Market order fills instantly</td></tr>
                         <tr><td><span class="state-pill pill-active">OPEN</span></td><td><span class="state-pill pill-active">PARTIALLY_FILLED</span></td><td>First partial fill event arrived</td></tr>
-                        <tr><td><span class="state-pill pill-active">OPEN</span></td><td><span class="state-pill pill-terminal">FILLED</span></td><td>Fully filled in a single fill event</td></tr>
-                        <tr><td><span class="state-pill pill-active">OPEN</span></td><td><span class="state-pill pill-terminal">CANCELLED</span></td><td>User or system (risk check) cancelled</td></tr>
+                        <tr><td><span class="state-pill pill-active">OPEN</span></td><td><span class="state-pill pill-terminal">FILLED</span></td><td>Fully filled in single event</td></tr>
+                        <tr><td><span class="state-pill pill-active">OPEN</span></td><td><span class="state-pill pill-terminal">CANCELLED</span></td><td>User or system cancelled</td></tr>
                         <tr><td><span class="state-pill pill-active">OPEN</span></td><td><span class="state-pill pill-terminal">EXPIRED</span></td><td>GTT/IOC time-in-force lapsed</td></tr>
-                        <tr><td><span class="state-pill pill-active">OPEN</span></td><td><span class="state-pill pill-warning">TRIGGERED</span></td><td>Conditional SL/TP: trigger price hit</td></tr>
-                        <tr><td><span class="state-pill pill-active">PARTIALLY_FILLED</span></td><td><span class="state-pill pill-active">PARTIALLY_FILLED</span></td><td>Additional partial fill events (self-loop)</td></tr>
-                        <tr><td><span class="state-pill pill-active">PARTIALLY_FILLED</span></td><td><span class="state-pill pill-terminal">FILLED</span></td><td>Final fill — order completely consumed</td></tr>
-                        <tr><td><span class="state-pill pill-active">PARTIALLY_FILLED</span></td><td><span class="state-pill pill-terminal">CANCELLED</span></td><td>Remaining unfilled qty cancelled</td></tr>
-                        <tr><td><span class="state-pill pill-active">PARTIALLY_FILLED</span></td><td><span class="state-pill pill-terminal">EXPIRED</span></td><td>GTT/IOC: unfilled remainder expired</td></tr>
-                        <tr><td><span class="state-pill pill-warning">TRIGGERED</span></td><td><span class="state-pill pill-active">OPEN</span></td><td>Child order placed as resting limit on book</td></tr>
-                        <tr><td><span class="state-pill pill-warning">TRIGGERED</span></td><td><span class="state-pill pill-active">PARTIALLY_FILLED</span></td><td>Child order began filling immediately at market</td></tr>
-                        <tr><td><span class="state-pill pill-warning">TRIGGERED</span></td><td><span class="state-pill pill-terminal">FILLED</span></td><td>Child order fully filled immediately at market</td></tr>
-                        <tr><td><span class="state-pill pill-warning">TRIGGERED</span></td><td><span class="state-pill pill-terminal">CANCELLED</span></td><td>Triggered but explicitly cancelled before any fill</td></tr>
-                        <tr><td><span class="state-pill pill-warning">TRIGGERED</span></td><td><span class="state-pill pill-terminal">EXPIRED</span></td><td>IOC child order expired before fill</td></tr>
+                        <tr><td><span class="state-pill pill-active">OPEN</span></td><td><span class="state-pill pill-warning">TRIGGERED</span></td><td>Conditional SL/TP trigger price hit</td></tr>
+                        <tr><td><span class="state-pill pill-active">PARTIALLY_FILLED</span></td><td><span class="state-pill pill-active">PARTIALLY_FILLED</span></td><td>Additional partial fills (self-loop)</td></tr>
+                        <tr><td><span class="state-pill pill-active">PARTIALLY_FILLED</span></td><td><span class="state-pill pill-terminal">FILLED</span></td><td>Final fill completes order</td></tr>
+                        <tr><td><span class="state-pill pill-active">PARTIALLY_FILLED</span></td><td><span class="state-pill pill-terminal">CANCELLED</span></td><td>Remaining qty cancelled (margin: AUTO_REPAY on cancel)</td></tr>
+                        <tr><td><span class="state-pill pill-active">PARTIALLY_FILLED</span></td><td><span class="state-pill pill-terminal">EXPIRED</span></td><td>GTT/IOC remainder expired</td></tr>
+                        <tr><td><span class="state-pill pill-warning">TRIGGERED</span></td><td><span class="state-pill pill-active">OPEN</span></td><td>Child order placed as resting limit</td></tr>
+                        <tr><td><span class="state-pill pill-warning">TRIGGERED</span></td><td><span class="state-pill pill-terminal">FILLED</span></td><td>Child order fully filled immediately</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -632,9 +331,7 @@ stateDiagram-v2
 
     <div class="divider"></div>
 
-    <!-- ══════════════════════════════
-         2. RebalanceFSM
-    ══════════════════════════════ -->
+    <!-- ══════════ 2. RebalanceFSM ══════════ -->
     <div class="section" id="rebalance-fsm">
         <div class="section-header">
             <div class="section-badge">FSM 2</div>
@@ -643,156 +340,148 @@ stateDiagram-v2
                 <div class="file-path">elysian_core/core/rebalance_fsm.py</div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>Overview</h3>
-            </div>
+            <div class="card-header"><div class="dot dot-blue"></div><h3>Overview &amp; Margin Notes</h3></div>
             <div class="card-body">
                 <p class="description">
-                    The <strong>RebalanceFSM</strong> drives the full signal-to-execution pipeline. Starting from
-                    <strong>IDLE</strong>, it orchestrates weight computation, validation, execution, and cooldown
-                    in a strict ordered cycle. A wildcard <code>"suspend"</code> trigger from any state enters
-                    <strong>SUSPENDED</strong>, implementing a drawdown breaker or maintenance pause.
+                    The <strong>RebalanceFSM</strong> is instantiated once per sub-account pipeline in margin strategies
+                    (one FSM per <code>SubAccountPipeline</code>). Each FSM carries its own
+                    <code>sub_account_key</code> which is injected into <code>ctx</code> in
+                    <code>_on_enter_computing()</code> so <code>compute_weights()</code> can identify which
+                    pipeline is requesting weights. The FSM is otherwise identical in structure for SPOT and
+                    MARGIN pipelines — the differences are in the optimizer (margin level pre-check) and
+                    the execution engine (side_effect kwarg).
                 </p>
-                <div class="callout">
-                    <strong>Re-entrancy guard:</strong> <code>BaseFSM</code> queues transitions that arrive while
-                    one is already in-progress using a <code>deque</code>. This prevents lost events when
-                    callbacks trigger further transitions synchronously.
+                <div class="callout callout-purple">
+                    <strong>Per-pipeline FSM for MarginStrategy:</strong>
+                    <code>MarginStrategy.start()</code> creates one <code>RebalanceFSM</code> per pipeline:
+                    <code>pipeline.rebalance_fsm = RebalanceFSM(strategy=self, optimizer=pipeline.optimizer, execution_engine=pipeline.execution_engine, sub_account_key=key)</code>.
+                    The strategy's <code>request_rebalance(sub_account_key=key)</code> targets a specific pipeline's FSM.
+                    Calling <code>request_rebalance()</code> with no key triggers all pipelines concurrently via
+                    <code>asyncio.gather(*[p.rebalance_fsm.request() for p in _pipelines.values()])</code>.
                 </div>
                 <div class="trait-grid">
-                    <div class="trait-item">
-                        <div class="trait-label">Pipeline stages</div>
-                        <div class="trait-value">IDLE → COMPUTING → VALIDATING → EXECUTING → COOLDOWN</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Error recovery</div>
-                        <div class="trait-value">ERROR + "retry" → IDLE (auto-retry after cooldown_s)</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Suspend trigger</div>
-                        <div class="trait-value">Wildcard from any state → SUSPENDED</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Cooldown</div>
-                        <div class="trait-value">asyncio.call_later(cooldown_s); immediate if 0</div>
-                    </div>
+                    <div class="trait-item"><div class="trait-label">Pipeline stages</div><div class="trait-value">IDLE → COMPUTING → VALIDATING → EXECUTING → COOLDOWN</div></div>
+                    <div class="trait-item"><div class="trait-label">Margin: margin level check</div><div class="trait-value">VALIDATING: PortfolioOptimizer calls MarginShadowBook.margin_level() before constraint pipeline</div></div>
+                    <div class="trait-item margin"><div class="trait-label">sub_account_key injection</div><div class="trait-value">_on_enter_computing injects ctx['sub_account_key'] for MarginStrategy pipelines</div></div>
+                    <div class="trait-item margin"><div class="trait-label">Concurrent FSMs</div><div class="trait-value">MarginStrategy.request_rebalance() with no key → asyncio.gather all pipeline FSMs</div></div>
                 </div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>State Diagram</h3>
-            </div>
+            <div class="card-header"><div class="dot dot-blue"></div><h3>State Diagram</h3></div>
             <div class="card-body diagram-body">
                 <div class="mermaid">
-stateDiagram-v2
-    direction LR
+                stateDiagram-v2
+                    direction LR
 
-    [*] --> IDLE
+                    [*] --> IDLE
 
-    IDLE --> COMPUTING    : signal\n_on_enter_computing
-    COMPUTING --> VALIDATING : weights_ready\n_on_enter_validating
-    COMPUTING --> IDLE       : no_signal\n(empty / None weights returned)
-    VALIDATING --> EXECUTING : accepted\n_on_enter_executing
-    VALIDATING --> COOLDOWN  : rejected\n_on_enter_cooldown
-    EXECUTING --> COOLDOWN   : complete\n_on_enter_cooldown
-    EXECUTING --> ERROR      : failed\n_on_enter_error
-    COOLDOWN --> IDLE        : cooldown_done
-    ERROR --> IDLE           : retry\n(after cooldown_s)
+                    IDLE --> COMPUTING
+                    COMPUTING --> VALIDATING
+                    COMPUTING --> IDLE
+                    VALIDATING --> EXECUTING
+                    VALIDATING --> COOLDOWN
+                    EXECUTING --> COOLDOWN
+                    EXECUTING --> ERROR
+                    COOLDOWN --> IDLE
+                    ERROR --> IDLE
 
-    IDLE --> SUSPENDED         : suspend (wildcard)\n_on_enter_suspended
-    COMPUTING --> SUSPENDED    : suspend (wildcard)
-    VALIDATING --> SUSPENDED   : suspend (wildcard)
-    EXECUTING --> SUSPENDED    : suspend (wildcard)
-    COOLDOWN --> SUSPENDED     : suspend (wildcard)
-    ERROR --> SUSPENDED        : suspend (wildcard)
+                    IDLE --> SUSPENDED
+                    COMPUTING --> SUSPENDED
+                    VALIDATING --> SUSPENDED
+                    EXECUTING --> SUSPENDED
+                    COOLDOWN --> SUSPENDED
+                    ERROR --> SUSPENDED
+                    SUSPENDED --> IDLE
 
-    SUSPENDED --> IDLE         : resume\n_on_resume
+                    note right of IDLE
+                    Start state
 
-    note right of COMPUTING
-        strategy.compute_weights(**ctx)
-        Supports sync or async.
-        Enriches ctx["target_weights"].
-        Publishes RebalanceCycleEvent.
-    end note
+                    Can transition to COMPUTING when a signal arrives
+                    Can transition to SUSPENDED on suspend
+                    end note
 
-    note right of EXECUTING
-        ExecutionEngine.execute()
-        ShadowBook.lock_for_order()
-        Publishes RebalanceCompleteEvent
-        on private EventBus.
-    end note
+                    note right of COMPUTING
+                    Triggered by signal
 
-    note right of SUSPENDED
-        Drawdown breaker / maintenance.
-        Wildcard trigger matches
-        any source state.
-    end note
+                    On enter:
+                    injects ctx['sub_account_key']
+                    for MarginStrategy pipelines
+
+                    Transitions:
+                    to VALIDATING when weights_ready
+                    to IDLE when no_signal
+                    to SUSPENDED on suspend
+                    end note
+
+                    note right of VALIDATING
+                    Weights accepted for checking
+
+                    MARGIN:
+                    PortfolioOptimizer pre-checks margin_level
+                    via MarginShadowBook before constraints
+
+                    Transitions:
+                    to EXECUTING when accepted
+                    to COOLDOWN when rejected
+                    to SUSPENDED on suspend
+                    end note
+
+                    note right of EXECUTING
+                    Order execution phase
+
+                    Transitions:
+                    to COOLDOWN when complete
+                    to ERROR when failed
+                    to SUSPENDED on suspend
+                    end note
+
+                    note right of COOLDOWN
+                    Cooldown before returning to IDLE
+
+                    Transitions:
+                    to IDLE when cooldown_done
+                    to SUSPENDED on suspend
+                    end note
+
+                    note right of ERROR
+                    Failure state
+
+                    Transitions:
+                    to IDLE on retry
+                    to SUSPENDED on suspend
+                    end note
+
+                    note right of SUSPENDED
+                    System paused
+
+                    Transitions:
+                    back to IDLE on resume
+                    end note
                 </div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>Stage Callbacks Detail</h3>
-            </div>
+            <div class="card-header"><div class="dot dot-blue"></div><h3>Stage Callbacks — Margin-Specific Details</h3></div>
             <div class="card-body">
                 <table class="state-table">
-                    <thead>
-                        <tr>
-                            <th>Callback</th>
-                            <th>Triggered on</th>
-                            <th>Actions</th>
-                            <th>Next trigger fired</th>
-                        </tr>
-                    </thead>
+                    <thead><tr><th>Callback</th><th>Triggered on</th><th>Margin-Specific Actions</th></tr></thead>
                     <tbody>
                         <tr>
                             <td><code>_on_enter_computing</code></td>
-                            <td>IDLE <span class="trigger-arrow">→</span> COMPUTING</td>
-                            <td>Logs pre-compute ShadowBook snapshot (NAV, cash, weights). Calls <code>strategy.compute_weights(**ctx)</code> (sync or async). Injects <code>ctx["strategy_id"]</code> and <code>ctx["target_weights"]</code>.</td>
-                            <td><code>"weights_ready"</code> or <code>"no_signal"</code></td>
+                            <td>IDLE → COMPUTING</td>
+                            <td>If <code>self._sub_account_key is not None</code>: injects <code>ctx['sub_account_key'] = self._sub_account_key</code> before calling <code>compute_weights(**ctx)</code>. Strategy uses this key to return per-pipeline weights.</td>
                         </tr>
                         <tr>
                             <td><code>_on_enter_validating</code></td>
-                            <td>COMPUTING <span class="trigger-arrow">→</span> VALIDATING</td>
-                            <td>Wraps weights in <code>TargetWeights</code> (adds <code>liquidate</code> flag from ctx). Calls <code>PortfolioOptimizer.validate(TargetWeights)</code>. Enriches <code>ctx["validated_weights"]</code>.</td>
-                            <td><code>"accepted"</code> or <code>"rejected"</code></td>
+                            <td>COMPUTING → VALIDATING</td>
+                            <td>Wraps weights in <code>TargetWeights</code>. PortfolioOptimizer's <code>_check_margin_level()</code> fires before the constraint pipeline — rejects if <code>MarginShadowBook.margin_level() &lt; min_margin_level</code>.</td>
                         </tr>
                         <tr>
                             <td><code>_on_enter_executing</code></td>
-                            <td>VALIDATING <span class="trigger-arrow">→</span> EXECUTING</td>
-                            <td>Logs pre-execute ShadowBook snapshot. Calls <code>ExecutionEngine.execute(ValidatedWeights)</code>. Calls <code>ShadowBook.lock_for_order()</code> per submitted LIMIT order. Publishes <code>RebalanceCompleteEvent</code> on private EventBus. Enriches <code>ctx["rebalance_result"]</code>.</td>
-                            <td><code>"complete"</code> or <code>"failed"</code></td>
-                        </tr>
-                        <tr>
-                            <td><code>_on_enter_cooldown</code></td>
-                            <td>VALIDATING <span class="trigger-arrow">→</span> COOLDOWN<br>EXECUTING <span class="trigger-arrow">→</span> COOLDOWN</td>
-                            <td>Schedules <code>asyncio.call_later(cooldown_s, fire_cooldown_done)</code>. If <code>cooldown_s == 0</code>, fires immediately.</td>
-                            <td><code>"cooldown_done"</code> (deferred)</td>
-                        </tr>
-                        <tr>
-                            <td><code>_on_enter_error</code></td>
-                            <td>EXECUTING <span class="trigger-arrow">→</span> ERROR</td>
-                            <td>Logs error. Schedules auto-retry via <code>call_later(cooldown_s)</code>.</td>
-                            <td><code>"retry"</code> (deferred)</td>
-                        </tr>
-                        <tr>
-                            <td><code>_on_enter_suspended</code></td>
-                            <td>ANY <span class="trigger-arrow">→</span> SUSPENDED</td>
-                            <td>Pauses all rebalancing. Triggered by drawdown breaker or external risk system via <code>strategy.suspend_rebalancing()</code>.</td>
-                            <td>None (waits for <code>"resume"</code>)</td>
-                        </tr>
-                        <tr>
-                            <td><code>_on_resume</code></td>
-                            <td>SUSPENDED <span class="trigger-arrow">→</span> IDLE</td>
-                            <td>Restores normal operation. Called via <code>strategy.resume_rebalancing()</code>.</td>
-                            <td>None (back to IDLE)</td>
+                            <td>VALIDATING → EXECUTING</td>
+                            <td>ExecutionEngine calls <code>MarginShadowBook.total_value()</code> (collateral−borrowed−interest formula). <code>OrderIntent.side_effect = AUTO_BORROW_REPAY</code> for MARGIN intents. Calls <code>BinanceMarginExchange.place_limit_order(**extra)</code>.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -802,161 +491,161 @@ stateDiagram-v2
 
     <div class="divider"></div>
 
-    <!-- ══════════════════════════════
-         3. StrategyState
-    ══════════════════════════════ -->
+    <!-- ══════════ 3. StrategyState ══════════ -->
     <div class="section" id="strategy-state">
         <div class="section-header">
             <div class="section-badge updated">FSM 3 ↑</div>
             <div class="section-title-block">
                 <h2>StrategyState — Strategy Lifecycle <span class="badge-inline badge-updated">UPDATED</span></h2>
-                <div class="file-path">elysian_core/core/enums.py &nbsp;|&nbsp; elysian_core/strategy/base_strategy.py</div>
+                <div class="file-path">elysian_core/core/enums.py &nbsp;|&nbsp; elysian_core/strategy/base_strategy.py &nbsp;|&nbsp; elysian_core/strategy/margin_strategy.py</div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>Overview</h3>
-            </div>
+            <div class="card-header"><div class="dot dot-blue"></div><h3>Overview</h3></div>
             <div class="card-body">
                 <p class="description">
-                    <strong>StrategyState</strong> tracks the lifecycle of a running trading strategy from creation
-                    through to graceful shutdown. The architecture is unchanged in state names, but
-                    <strong>STARTING</strong> now subscribes across both the shared Redis-backed bus and the
-                    private in-process bus. Critically, ORDER_UPDATE and BALANCE_UPDATE dispatched to the
-                    ShadowBook happen via <code>asyncio.gather()</code> in the strategy's dispatch methods rather
-                    than via a ShadowBook subscription — giving the strategy user hook and the ShadowBook handler
-                    concurrent execution.
+                    Both <code>SpotStrategy</code> and <code>MarginStrategy</code> use the same
+                    <strong>StrategyState</strong> enum. The transition logic in <code>start()</code>
+                    differs: <code>MarginStrategy.start()</code> creates per-pipeline FSMs and subscribes
+                    to each pipeline's private bus, while <code>SpotStrategy.start()</code> creates one
+                    FSM and subscribes to one private bus.
                 </p>
-
-                <div class="change-list">
-                    <h4>Changes from Previous Architecture</h4>
+                <div class="change-list margin-list">
+                    <h4>MarginStrategy.start() vs SpotStrategy.start()</h4>
                     <ul>
-                        <li><strong>Shared bus is now Redis-backed</strong> — <code>_shared_event_bus</code> is a <code>RedisEventBusSubscriber</code>; same interface, different transport</li>
-                        <li><strong>5 subscriptions unchanged</strong> — KLINE + OB on shared bus; ORDER_UPDATE + BALANCE_UPDATE + REBALANCE_COMPLETE on private in-process bus</li>
-                        <li><strong>_dispatch_order uses asyncio.gather()</strong> — <code>on_order_update()</code> and <code>shadow_book._on_order_update()</code> run concurrently per fill event</li>
-                        <li><strong>_dispatch_balance uses asyncio.gather()</strong> — same concurrent pattern for balance updates</li>
-                        <li><strong>_dispatch_kline filters by strategy symbols</strong> — checks <code>event.symbol in strategy_config.symbols</code> before dispatching</li>
+                        <li><strong>Shared bus</strong>: subscribed once (KLINE + OB) — same for both</li>
+                        <li><strong>Private bus</strong>: SpotStrategy subscribes 1 private bus; MarginStrategy subscribes N private buses (one per pipeline)</li>
+                        <li><strong>RebalanceFSM</strong>: SpotStrategy creates 1; MarginStrategy creates 1 per pipeline in <code>_pipelines</code></li>
+                        <li><strong>_symbols</strong>: MarginStrategy collects union of all pipeline symbols</li>
+                        <li><strong>venues</strong>: MarginStrategy collects union of all pipeline venues</li>
+                        <li><strong>stop()</strong>: MarginStrategy unsubscribes each private bus; stops each shadow_book</li>
                     </ul>
                 </div>
-
-                <div class="trait-grid">
-                    <div class="trait-item">
-                        <div class="trait-label">Shared bus type</div>
-                        <div class="trait-value">RedisEventBusSubscriber (market data from Redis)</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Private bus type</div>
-                        <div class="trait-value">EventBus (in-process, account events only)</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Fill dispatch</div>
-                        <div class="trait-value">asyncio.gather(on_order_update, shadow_book._on_order_update)</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">RUNNING trigger</div>
-                        <div class="trait-value">_mark_running() on first dispatched kline event</div>
-                    </div>
-                </div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>State Diagram</h3>
-            </div>
+            <div class="card-header"><div class="dot dot-blue"></div><h3>State Diagram — SpotStrategy vs MarginStrategy</h3></div>
             <div class="card-body diagram-body">
                 <div class="mermaid">
-stateDiagram-v2
-    direction LR
+                stateDiagram-v2
+                    direction LR
 
-    [*] --> CREATED
+                    [*] --> CREATED
 
-    CREATED --> STARTING   : start() called
-    STARTING --> READY     : on_start() completes\nSubscriptions registered (5 event types)\nRebalanceFSM initialized\n_symbols loaded from strategy_config
-    READY --> RUNNING      : first kline event dispatched\n_mark_running()
-    RUNNING --> STOPPING   : stop() called
-    STOPPING --> STOPPED   : on_stop() completes\nexecutor shutdown\nshadow_book.stop()\n_stop_event.set()
+                    CREATED --> STARTING
+                    STARTING --> READY
+                    READY --> RUNNING
+                    RUNNING --> STOPPING
+                    STOPPING --> STOPPED
 
-    CREATED  --> FAILED    : unhandled exception
-    STARTING --> FAILED    : unhandled exception
-    READY    --> FAILED    : unhandled exception
-    RUNNING  --> FAILED    : unhandled exception
-    STOPPING --> FAILED    : unhandled exception
+                    CREATED --> FAILED
+                    STARTING --> FAILED
+                    RUNNING --> FAILED
+                    STOPPED --> [*]
+                    FAILED --> [*]
 
-    STOPPED  --> [*]
-    FAILED   --> [*]
+                    note right of CREATED
+                    Initial state
+                    Strategy not yet initialized
+                    end note
 
-    note right of STARTING
-        Shared bus (Redis):
-          KLINE, ORDERBOOK_UPDATE
-        Private bus (in-process):
-          ORDER_UPDATE,
-          BALANCE_UPDATE,
-          REBALANCE_COMPLETE
-        RebalanceFSM init if optimizer wired.
-        _symbols from strategy_config.symbols
-        or cfg.symbols.symbols_for(venue, type).
-    end note
+                    note right of STARTING
+                    start() called
 
-    note right of STOPPING
-        on_stop() can call
-        request_rebalance(convert_all_base=True)
-        to liquidate before shutdown.
-        shadow_book.stop() unsubscribes
-        KLINE from shared bus.
-    end note
+                    Initialization phase
+                    end note
+
+                    note right of READY
+                    System ready after setup
+
+                    SpotStrategy:
+                    - subscribe shared bus: KLINE, OB
+                    - subscribe private bus: ORDER, BALANCE, REBALANCE
+                    - create 1 RebalanceFSM
+                    - on_start()
+
+                    MarginStrategy:
+                    - subscribe shared bus: KLINE, OB
+                    - per pipeline:
+                    - subscribe private bus
+                    - create RebalanceFSM(sub_account_key)
+                    - union of symbols + venues
+                    - on_start()
+                    end note
+
+                    note right of RUNNING
+                    First kline event received
+                    _mark_running() triggered
+                    end note
+
+                    note right of STOPPING
+                    stop() called
+
+                    Spot:
+                    - unsubscribe shared/private bus
+                    - stop shadow_book
+                    - 1 FSM shutdown
+
+                    Margin:
+                    - unsubscribe N private buses
+                    - stop N shadow_books
+
+                    executor.shutdown()
+                    _stop_event.set()
+                    end note
+
+                    note right of STOPPED
+                    Clean shutdown completed
+                    end note
+
+                    note right of FAILED
+                    Unhandled exception occurred
+                    System terminated
+                    end note
                 </div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>EventBus Subscriptions &amp; Dispatch Detail</h3>
-            </div>
+            <div class="card-header"><div class="dot dot-blue"></div><h3>EventBus Subscriptions — SPOT vs MARGIN</h3></div>
             <div class="card-body">
                 <table class="state-table">
-                    <thead>
-                        <tr>
-                            <th>Bus</th>
-                            <th>Event Type</th>
-                            <th>Strategy Handler</th>
-                            <th>ShadowBook Action</th>
-                        </tr>
-                    </thead>
+                    <thead><tr><th>Bus</th><th>Event Type</th><th>SpotStrategy Handler</th><th>MarginStrategy Handler</th></tr></thead>
                     <tbody>
                         <tr>
                             <td><span class="state-pill pill-neutral">Shared (Redis)</span></td>
                             <td><code>KLINE</code></td>
                             <td><code>_dispatch_kline</code> → filters venue + symbols → <code>on_kline()</code></td>
-                            <td>ShadowBook subscribes directly: <code>_on_kline()</code> updates mark prices</td>
+                            <td>Same — dispatches to <code>on_kline()</code> (all pipelines share one on_kline call)</td>
                         </tr>
                         <tr>
                             <td><span class="state-pill pill-neutral">Shared (Redis)</span></td>
                             <td><code>ORDERBOOK_UPDATE</code></td>
-                            <td><code>_dispatch_ob</code> → filters venue → <code>on_orderbook_update()</code></td>
-                            <td>None (ShadowBook does not subscribe to OB events)</td>
+                            <td><code>_dispatch_ob</code> → <code>on_orderbook_update()</code></td>
+                            <td>Same</td>
                         </tr>
                         <tr>
-                            <td><span class="state-pill pill-purple">Private (in-proc)</span></td>
+                            <td><span class="state-pill pill-purple">Private A (in-proc)</span></td>
                             <td><code>ORDER_UPDATE</code></td>
-                            <td><code>_dispatch_order</code> → <code>asyncio.gather(on_order_update(), shadow_book._on_order_update())</code></td>
-                            <td>Concurrent via gather — fills position, releases lock</td>
+                            <td><code>asyncio.gather(on_order_update, shadow_book._on_order_update)</code></td>
+                            <td><code>_dispatch_order</code>: builds SubAccountKey → looks up pipeline → <code>asyncio.gather(on_order_update, pipeline.shadow_book._on_order_update)</code></td>
                         </tr>
                         <tr>
-                            <td><span class="state-pill pill-purple">Private (in-proc)</span></td>
+                            <td><span class="state-pill pill-purple">Private B (in-proc)</span></td>
+                            <td><code>ORDER_UPDATE</code></td>
+                            <td>N/A (single private bus)</td>
+                            <td>Each pipeline's private bus is subscribed — routes by <code>event.asset_type + event.sub_account_id</code></td>
+                        </tr>
+                        <tr>
+                            <td><span class="state-pill pill-purple">Private</span></td>
                             <td><code>BALANCE_UPDATE</code></td>
-                            <td><code>_dispatch_balance</code> → <code>asyncio.gather(on_balance_update(), shadow_book._on_balance_update())</code></td>
-                            <td>Concurrent via gather — updates _cash_dict / _cash or position qty</td>
+                            <td><code>asyncio.gather(on_balance_update, shadow_book._on_balance_update)</code></td>
+                            <td>Same routing via SubAccountKey → correct MarginShadowBook</td>
                         </tr>
                         <tr>
-                            <td><span class="state-pill pill-purple">Private (in-proc)</span></td>
+                            <td><span class="state-pill pill-purple">Private</span></td>
                             <td><code>REBALANCE_COMPLETE</code></td>
-                            <td><code>_dispatch_rebalance</code> → <code>on_rebalance_complete()</code></td>
-                            <td>None (RebalanceCompleteEvent does not touch ShadowBook)</td>
+                            <td><code>on_rebalance_complete()</code></td>
+                            <td>Same — broadcast to <code>on_rebalance_complete()</code></td>
                         </tr>
                     </tbody>
                 </table>
@@ -966,139 +655,134 @@ stateDiagram-v2
 
     <div class="divider"></div>
 
-    <!-- ══════════════════════════════
-         4. RunnerState
-    ══════════════════════════════ -->
+    <!-- ══════════ 4. RunnerState ══════════ -->
     <div class="section" id="runner-state">
         <div class="section-header">
             <div class="section-badge updated">FSM 4 ↑</div>
             <div class="section-title-block">
                 <h2>RunnerState — StrategyRunner Lifecycle <span class="badge-inline badge-updated">UPDATED</span></h2>
-                <div class="file-path">elysian_core/core/enums.py &nbsp;|&nbsp; elysian_core/run_strategy.py</div>
+                <div class="file-path">elysian_core/core/enums.py &nbsp;|&nbsp; elysian_core/run_strategy.py &nbsp;|&nbsp; elysian_core/run_strategy_margin.py</div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>Overview</h3>
-            </div>
+            <div class="card-header"><div class="dot dot-blue"></div><h3>Overview</h3></div>
             <div class="card-body">
                 <p class="description">
-                    <strong>RunnerState</strong> represents the top-level lifecycle of a single-strategy container.
-                    The state names are unchanged but the <strong>CONNECTING</strong> and <strong>SYNCING</strong>
-                    stages have fundamentally changed: there are no WebSocket client managers to connect in the
-                    strategy container (those live in MarketDataService). CONNECTING now refers to
-                    constructing the <code>RedisEventBusSubscriber</code>, and SYNCING includes
-                    <code>sync_from_exchange()</code> + <code>start_listener(channels)</code> to activate
-                    the Redis subscription before the main loop begins.
+                    The same <strong>RunnerState</strong> enum is used by both <code>StrategyRunner</code>
+                    and <code>MarginStrategyRunner</code>. The SYNCING stage differs: margin runner builds
+                    one <code>SubAccountPipeline</code> per sub-account entry, while the standard runner
+                    builds one pipeline for the whole strategy. The RUNNING stage is identical — both gather
+                    the Redis listener task and <code>run_forever()</code>.
                 </p>
-
-                <div class="change-list">
-                    <h4>Changes from Previous StrategyRunner</h4>
+                <div class="change-list margin-list">
+                    <h4>MarginStrategyRunner differences from StrategyRunner</h4>
                     <ul>
-                        <li><strong>CONNECTING</strong>: now constructs <code>RedisEventBusSubscriber</code> instead of creating WebSocket managers</li>
-                        <li><strong>SYNCING</strong>: <code>setup_pipeline()</code> + <code>setup_strategy()</code> + <code>start_listener(channels)</code></li>
-                        <li><strong>RUNNING</strong>: <code>asyncio.gather(redis_listener_task, strategy.run_forever())</code> — two coroutines only</li>
-                        <li><strong>No feed tasks</strong>: removed <code>run_multiplex_feeds()</code> tasks — those run in MarketDataService container</li>
-                        <li><strong>Single strategy</strong>: reads <code>STRATEGY_CONFIG_YAML</code> env var; runs exactly one strategy per container</li>
+                        <li><strong>SYNCING</strong>: iterates <code>strat_cfg.sub_accounts</code>; calls <code>_build_margin_pipeline(sub_cfg)</code> per entry</li>
+                        <li><strong>Exchange type</strong>: selects <code>BinanceMarginExchange</code> vs <code>BinanceSpotExchange</code> based on <code>sub_cfg.asset_type</code></li>
+                        <li><strong>ShadowBook type</strong>: selects <code>MarginShadowBook</code> vs <code>ShadowBook</code> based on <code>sub_cfg.asset_type</code></li>
+                        <li><strong>Risk config</strong>: uses <code>sub_cfg.risk_config</code> (sub-account level) with fallback to <code>effective_risk_for()</code></li>
+                        <li><strong>_compute_channels()</strong>: instance method override; maps MARGIN → SPOT channel format</li>
+                        <li><strong>Cleanup</strong>: calls <code>exchange.cleanup()</code> for each sub-account exchange (keyed by <code>{strategy_id}_{sub_account_id}</code>)</li>
                     </ul>
                 </div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>State Diagram</h3>
-            </div>
+            <div class="card-header"><div class="dot dot-blue"></div><h3>State Diagram</h3></div>
             <div class="card-body diagram-body">
                 <div class="mermaid">
-stateDiagram-v2
-    direction LR
+                    stateDiagram-v2
+                        direction LR
 
-    [*] --> CREATED
+                        [*] --> CREATED
 
-    CREATED     --> CONFIGURING : __init__() begins\nload_app_config()\nread STRATEGY_CONFIG_YAML env var
-    CONFIGURING --> CONNECTING  : RedisEventBusSubscriber constructed\n(redis_url from REDIS_HOST / REDIS_PORT)
-    CONNECTING  --> SYNCING     : setup_pipeline() → Portfolio + PeriodicTasks\nsetup_strategy() → ShadowBook + Optimizer + ExecutionEngine\nsync_from_exchange() → hydrate ShadowBook\n_compute_channels() → Redis channel list
-    SYNCING     --> RUNNING     : strategy.start() subscriptions registered\nstart_listener(channels) → Redis loop active\nasyncio.gather(listener_task, run_forever())
-    RUNNING     --> STOPPING    : shutdown signal / asyncio.CancelledError
-    STOPPING    --> STOPPED     : strategy.stop()\nexchange.cleanup()\nsnapshot_tasks.stop()\nshared_event_bus.close()
+                        CREATED --> CONFIGURING
+                        CONFIGURING --> CONNECTING
+                        CONNECTING --> SYNCING
+                        SYNCING --> RUNNING
+                        RUNNING --> STOPPING
+                        STOPPING --> STOPPED
 
-    CREATED     --> FAILED      : fatal exception
-    CONFIGURING --> FAILED      : fatal exception
-    CONNECTING  --> FAILED      : fatal exception
-    SYNCING     --> FAILED      : fatal exception
-    RUNNING     --> FAILED      : fatal exception
-    STOPPING    --> FAILED      : fatal exception
+                        CONFIGURING --> FAILED
+                        CONNECTING --> FAILED
+                        SYNCING --> FAILED
+                        RUNNING --> FAILED
 
-    STOPPED --> [*]
-    FAILED  --> [*]
+                        STOPPED --> [*]
+                        FAILED --> [*]
 
-    note right of CONNECTING
-        NEW: RedisEventBusSubscriber
-        replaces in-process EventBus
-        for shared market data.
-        No WebSocket managers here —
-        those live in MarketDataService.
-    end note
+                        note right of CREATED
+                        Entry point of StrategyRunner
+                        end note
 
-    note right of SYNCING
-        setup_strategy() wires:
-          private_exchange + private_bus
-          ShadowBook (sync from exchange)
-          PortfolioOptimizer
-          ExecutionEngine.start(shared_bus)
-          strategy.start()
-        Then start_listener(channels)
-        begins Redis subscription.
-    end note
+                        note right of CONFIGURING
+                        __init__()
+                        load_app_config()
+                        read STRATEGY_CONFIG_YAML
+                        end note
 
-    note right of RUNNING
-        asyncio.gather() runs two
-        concurrent coroutines:
-          1. listener_task (Redis loop)
-          2. strategy.run_forever()
-        When either exits, both cancelled.
-    end note
+                        note right of CONNECTING
+                        RedisEventBusSubscriber(redis_url)
+
+                        Initial infrastructure wiring
+                        end note
+
+                        note right of SYNCING
+                        StrategyRunner:
+                        - setup_pipeline()
+                        - setup_strategy → 1 pipeline
+
+                        MarginStrategyRunner:
+                        - setup_pipeline()
+                        - setup_strategy → N pipelines (per sub_account)
+                        - compute_channels maps MARGIN → SPOT
+
+                        Pipeline creation:
+                        - private_bus per sub_account
+                        - BinanceSpotExchange / BinanceMarginExchange
+                        - ShadowBook / MarginShadowBook
+                        - optimizer with sub risk config
+                        - execution_engine
+
+                        Result:
+                        strategy._pipelines[key] = pipeline
+                        strategy.start() → N FSMs created
+                        end note
+
+                        note right of RUNNING
+                        start_listener(channels)
+
+                        asyncio.gather:
+                        - listener_task
+                        - strategy.run_forever()
+                        end note
+
+                        note right of STOPPING
+                        shutdown triggered (or CancelledError)
+
+                        Cleanup:
+                        - strategy.stop()
+                        - exchange.cleanup × N (margin)
+                        - snapshot_tasks.stop()
+                        - shared_event_bus.close()
+                        end note
+
+                        note right of STOPPED
+                        Clean shutdown completed
+                        end note
+
+                        note right of FAILED
+                        Unhandled exception
+                        System terminated
+                    end note
                 </div>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>Stage Responsibilities</h3>
-            </div>
-            <div class="card-body">
-                <table class="state-table">
-                    <thead>
-                        <tr>
-                            <th>State</th>
-                            <th>Entry trigger</th>
-                            <th>Key actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr><td><span class="state-pill pill-active">CONFIGURING</span></td><td><code>__init__()</code> begins</td><td>Load app config from YAML + env; set up logging; create <code>create_tables(safe=True)</code></td></tr>
-                        <tr><td><span class="state-pill pill-active">CONNECTING</span></td><td>Config complete</td><td>Construct <code>RedisEventBusSubscriber(redis_url)</code> as shared_event_bus</td></tr>
-                        <tr><td><span class="state-pill pill-active">SYNCING</span></td><td>Redis subscriber ready</td><td><code>setup_pipeline()</code> (Portfolio + PeriodicTasks), <code>setup_strategy()</code> (exchange + ShadowBook + Optimizer + ExecutionEngine + strategy.start()), <code>_compute_channels()</code>, <code>start_listener(channels)</code></td></tr>
-                        <tr><td><span class="state-pill pill-active">RUNNING</span></td><td>All wired, listener active</td><td><code>asyncio.gather(listener_task, strategy.run_forever())</code></td></tr>
-                        <tr><td><span class="state-pill pill-warning">STOPPING</span></td><td>Shutdown signal</td><td><code>strategy.stop()</code>, <code>exchange.cleanup()</code>, snapshot_tasks.stop(), shared_event_bus.close()</td></tr>
-                        <tr><td><span class="state-pill pill-terminal">STOPPED</span></td><td>Clean shutdown</td><td>Terminal — container exits cleanly</td></tr>
-                        <tr><td><span class="state-pill pill-terminal">FAILED</span></td><td>Fatal exception</td><td>Terminal — logged, container exits non-zero</td></tr>
-                    </tbody>
-                </table>
             </div>
         </div>
     </div>
 
     <div class="divider"></div>
 
-    <!-- ══════════════════════════════
-         5. MarketDataService Lifecycle (NEW)
-    ══════════════════════════════ -->
+    <!-- ══════════ 5. MarketDataService ══════════ -->
     <div class="section" id="mds-lifecycle">
         <div class="section-header">
             <div class="section-badge new">NEW 5</div>
@@ -1107,81 +791,40 @@ stateDiagram-v2
                 <div class="file-path">elysian_core/services/market_data_service.py &nbsp;|&nbsp; elysian_core/run_market_data.py</div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-green"></div>
-                <h3>Overview</h3>
-            </div>
-            <div class="card-body">
-                <p class="description">
-                    <strong>MarketDataService</strong> is a new dedicated service that owns all WebSocket feed
-                    connections. It runs as <code>elysian_market_data</code> in Docker and is a prerequisite
-                    for all strategy containers (via <code>depends_on: condition: service_healthy</code>).
-                    It has no strategies, no sub-account exchanges, no risk/execution components, and no
-                    Postgres connection (<code>SKIP_DB_INIT=true</code>).
-                </p>
-                <div class="callout callout-green">
-                    <strong>Pure publisher — no subscriber logic:</strong> MarketDataService only
-                    <em>publishes</em> to Redis via <code>RedisEventBusPublisher</code>. It never subscribes
-                    to Redis, has no strategy callbacks, and does not consume any events it produces.
-                    The <code>publish()</code> method on the publisher is a simple Redis PUBLISH call.
-                </div>
-                <div class="trait-grid">
-                    <div class="trait-item">
-                        <div class="trait-label">Startup sequence</div>
-                        <div class="trait-value">Config → Publishers → Register feeds → Start managers → Fetch OB snapshots → Run</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">OB snapshot timing</div>
-                        <div class="trait-value">10s sleep after WS connect; then asyncio.gather(snapshot per feed)</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Health endpoint</div>
-                        <div class="trait-value">GET :8080/health → {status, feeds, uptime_s}</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Main coroutines</div>
-                        <div class="trait-value">asyncio.gather(*multiplex_tasks, _health_server())</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="card-header card-header green-header">
-                <div class="dot dot-green"></div>
-                <h3>Lifecycle Flow</h3>
-            </div>
+            <div class="card-header card-header green-header"><div class="dot dot-green"></div><h3>Lifecycle Flow (unchanged — margin symbols merged into spot)</h3></div>
             <div class="card-body diagram-body">
                 <div class="mermaid">
 flowchart TD
-    A(["MarketDataService.run() called"]) --> B["_setup_config()\nLoad symbol lists from config.json\nbinance_token_symbols, aster_token_symbols, ..."]
-    B --> C["_inject_publishers()\nCreate RedisEventBusPublisher per (venue, asset_type)\nCall manager.set_event_bus(publisher)"]
-    C --> D["Register feeds per symbol\n_register_binance_spot_feeds()\n_register_aster_spot_feeds()\netc.\n(BinanceKlineFeed, BinanceOrderBookFeed, ...)"]
-    D --> E["Start all managers\nbinance_kline_manager.start()\nbinance_ob_manager.start()\n(Creates AsyncClient + BinanceSocketManager)"]
-    E --> F["Launch multiplex tasks\nasyncio.create_task(\n  manager.run_multiplex_feeds()\n)"]
-    F --> G{"Any OB feeds\nregistered?"}
-    G -->|"Yes"| H["await asyncio.sleep(10.0)\n(Wait for WS connections to stabilise\nbefore fetching REST snapshots)"]
-    H --> I["await asyncio.gather(\n  *[feed.get_initial_snapshot() for feed in ob_feeds]\n)\n(REST depth fetch + buffer replay)"]
-    I --> J["asyncio.gather(\n  *multiplex_tasks,\n  _health_server()\n)"]
-    G -->|"No"| J
-    J --> K(["Running — publishing events to Redis indefinitely"])
+    A(["MarketDataService.run()"]) --> B["_setup_config()\nspot_syms = symbols_for('binance','spot')\nmargin_syms = symbols_for('binance','margin')\nbinance_token_symbols = dedup(spot + margin)"]
+    B --> C["_inject_publishers()\nOne publisher per (venue, asset_type)"]
+    C --> D["_register_binance_spot_feeds()\n(covers spot + margin symbols via same manager)"]
+    D --> E["manager.start() × venue"]
+    E --> F["asyncio.create_task(run_multiplex_feeds()) × manager"]
+    F --> G{"Any OB feeds?"}
+    G -->|Yes| H["await asyncio.sleep(10.0)"]
+    H --> I["asyncio.gather(*[feed.get_initial_snapshot()])"]
+    I --> J["asyncio.gather(*multiplex_tasks, _health_server())"]
+    G -->|No| J
+    J --> K(["Running — publishing to Redis"])
 
     style A fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
     style K fill:#dcfce7,stroke:#16a34a,color:#14532d
-    style H fill:#fefce8,stroke:#ca8a04,color:#713f12
-    style I fill:#fefce8,stroke:#ca8a04,color:#713f12
+    style B fill:#faf5ff,stroke:#a855f7,color:#3b0764
                 </div>
             </div>
+        </div>
+        <div class="callout callout-purple">
+            <strong>Margin symbols share Binance Spot feeds:</strong>
+            <code>_setup_config()</code> merges <code>symbols_for('binance','margin')</code> into
+            <code>binance_token_symbols</code> so the same <code>BinanceKlineClientManager</code>
+            serves both SPOT and MARGIN strategies. No extra WebSocket connections are opened for margin.
         </div>
     </div>
 
     <div class="divider"></div>
 
-    <!-- ══════════════════════════════
-         6. RedisEventBusSubscriber Loop (NEW)
-    ══════════════════════════════ -->
+    <!-- ══════════ 6. Redis Subscriber ══════════ -->
     <div class="section" id="redis-subscriber">
         <div class="section-header">
             <div class="section-badge new">NEW 6</div>
@@ -1190,164 +833,77 @@ flowchart TD
                 <div class="file-path">elysian_core/transport/redis_event_bus.py</div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>Overview</h3>
-            </div>
-            <div class="card-body">
-                <p class="description">
-                    The <strong>RedisEventBusSubscriber</strong> replaces the in-process <code>EventBus</code>
-                    as the shared market-data bus inside strategy containers. Its <code>_listener_loop()</code>
-                    runs as a persistent background <code>asyncio.Task</code> and is the primary source of
-                    <code>KlineEvent</code> and <code>OrderBookUpdateEvent</code> for the strategy.
-                    Backpressure is preserved because callbacks are awaited sequentially — a slow strategy
-                    hook stalls the listener loop, just as the original in-process EventBus did.
-                </p>
-                <div class="callout">
-                    <strong>Backpressure preserved:</strong> Redis pub/sub messages are consumed one at a time
-                    from <code>ps.listen()</code>. Each message's callbacks are awaited sequentially before
-                    the next message is consumed. This matches the original in-process EventBus backpressure
-                    semantics — a slow <code>on_kline()</code> slows message consumption from Redis.
-                </div>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>Listener Loop State Machine</h3>
-            </div>
+            <div class="card-header"><div class="dot dot-blue"></div><h3>Listener Loop State Machine</h3></div>
             <div class="card-body diagram-body">
                 <div class="mermaid">
 flowchart TD
-    A(["start_listener(channels) called\nfrom StrategyRunner.run()"]) --> B["asyncio.create_task(_listener_loop(channels))\nStored as self._listener_task"]
-
-    B --> C["aioredis.from_url(redis_url)\n(new connection per loop)"]
-    C --> D["async with redis_conn.pubsub() as ps:\nawait ps.subscribe(*channels)"]
+    A(["start_listener(channels)\nfrom StrategyRunner or MarginStrategyRunner"]) --> B["asyncio.create_task(_listener_loop(channels))"]
+    B --> C["aioredis.from_url(redis_url)"]
+    C --> D["pubsub.subscribe(*channels)\n(MARGIN channels mapped to spot prefixes)"]
     D --> E["async for message in ps.listen()"]
-
-    E --> F{"message type\n== 'message'?"}
-    F -->|"No (subscription ack etc.)"| E
-    F -->|"Yes"| G["deserialize_event(message['data'])\n→ KlineEvent | OrderBookUpdateEvent"]
-
-    G --> H{"Deserialize\nsuccessful?"}
-    H -->|"Error"| I["log error\n→ continue (next message)"]
-    I --> E
-
-    H -->|"OK"| J["callbacks = _subscribers[event.event_type]"]
-    J --> K["for cb in callbacks:\nawait cb(event)\n(sequential — backpressure)"]
+    E --> F{"type == 'message'?"}
+    F -->|No| E
+    F -->|Yes| G["deserialize_event(message['data'])"]
+    G --> H{"OK?"}
+    H -->|Error| I["log, continue"] --> E
+    H -->|KlineEvent| J["callbacks = _subscribers[KLINE]\nfor cb in callbacks: await cb(event)"]
+    J --> E
+    H -->|OBUpdateEvent| K["callbacks = _subscribers[OB]\nfor cb in callbacks: await cb(event)"]
     K --> E
-
-    E --> L{"asyncio.CancelledError\nor connection error?"}
-    L -->|"CancelledError"| M(["Loop exits cleanly\n(shutdown path)"])
-    L -->|"connection error"| N["log error\nawait redis_conn.aclose()"]
-    N --> O(["Loop exits\n(StrategyRunner handles restart)"])
+    E --> L{"CancelledError / error?"}
+    L -->|CancelledError| M(["Loop exits cleanly"])
+    L -->|Error| N(["Loop exits — runner handles"])
 
     style A fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
     style M fill:#dcfce7,stroke:#16a34a,color:#14532d
-    style O fill:#fee2e2,stroke:#ef4444,color:#991b1b
-    style K fill:#fefce8,stroke:#ca8a04,color:#713f12
+    style N fill:#fee2e2,stroke:#ef4444,color:#991b1b
                 </div>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>Interface Compatibility with in-process EventBus</h3>
-            </div>
-            <div class="card-body">
-                <table class="state-table">
-                    <thead>
-                        <tr><th>Method</th><th>In-process EventBus</th><th>RedisEventBusSubscriber</th></tr>
-                    </thead>
-                    <tbody>
-                        <tr><td><code>subscribe(event_type, cb)</code></td><td>Appends to <code>_subscribers[event_type]</code></td><td>Same — appends to <code>_subscribers[event_type]</code></td></tr>
-                        <tr><td><code>unsubscribe(event_type, cb)</code></td><td>Removes from list</td><td>Same — removes from list</td></tr>
-                        <tr><td><code>publish(event)</code></td><td>Dispatches to all callbacks</td><td>No-op — strategy containers never publish to shared bus</td></tr>
-                        <tr><td><code>start_listener(channels)</code></td><td>N/A</td><td>Creates background asyncio Task connecting to Redis; must be called before events flow</td></tr>
-                        <tr><td><code>close()</code></td><td>N/A</td><td>Cancels listener task; cleanup on shutdown</td></tr>
-                        <tr><td><code>_listener_task</code></td><td>N/A</td><td>The background Task; gathered by StrategyRunner as one of the main coroutines</td></tr>
-                    </tbody>
-                </table>
             </div>
         </div>
     </div>
 
     <div class="divider"></div>
 
-    <!-- ══════════════════════════════
-         7. Reservation Lifecycle
-    ══════════════════════════════ -->
+    <!-- ══════════ 7. Reservation Lifecycle ══════════ -->
     <div class="section" id="reservation-lifecycle">
         <div class="section-header">
             <div class="section-badge">SUB-FSM 7</div>
             <div class="section-title-block">
                 <h2>ActiveLimitOrder — Balance Reservation Lifecycle</h2>
-                <div class="file-path">elysian_core/core/order.py &nbsp;|&nbsp; elysian_core/core/shadow_book.py</div>
+                <div class="file-path">elysian_core/core/order.py &nbsp;|&nbsp; elysian_core/core/shadow_book.py &nbsp;|&nbsp; elysian_core/core/margin_shadow_book.py</div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>Overview</h3>
-            </div>
+            <div class="card-header"><div class="dot dot-blue"></div><h3>Overview</h3></div>
             <div class="card-body">
                 <p class="description">
-                    When a LIMIT order is submitted, the <strong>ShadowBook</strong> locks the required capital before
-                    the order reaches the exchange. This prevents over-commitment when multiple strategies share the
-                    same account. For <strong>BUY</strong> orders, USDT (quote) is locked as <code>reserved_cash</code>.
-                    For <strong>SELL</strong> orders, the base asset quantity is locked as <code>reserved_qty</code> in
-                    the position's <code>locked_quantity</code>. Reservations are released incrementally as fills arrive
-                    and fully released when the order reaches a terminal state.
+                    When a LIMIT order is submitted, the ShadowBook (or MarginShadowBook) locks capital immediately.
+                    For <strong>SPOT BUY</strong>: locks USDT as <code>reserved_cash → _locked_cash</code>.
+                    For <strong>SPOT SELL</strong>: locks base asset as <code>reserved_qty → position.locked_quantity</code>.
+                    For <strong>MARGIN SELL</strong> (short entry): same as SPOT SELL pattern — reserved_qty on any existing
+                    long position, or if none, the lock is nominal since AUTO_BORROW_REPAY means Binance
+                    will borrow the base asset. The reservation is released incrementally as fills arrive.
                 </p>
-                <div class="callout">
-                    <strong>Capital safety:</strong> The reservation system prevents two strategies from both seeing
-                    the same free cash and each placing orders that together exceed available capital. The lock is
-                    placed synchronously inside <code>execute()</code> before the function returns, immediately after
-                    the exchange acknowledges the order ID.
-                </div>
                 <div class="trait-grid">
-                    <div class="trait-item">
-                        <div class="trait-label">BUY lock</div>
-                        <div class="trait-value">reserved_cash = quantity × price (USDT locked)</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">SELL lock</div>
-                        <div class="trait-value">reserved_qty = quantity (base asset locked)</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Partial release</div>
-                        <div class="trait-value">release_partial(delta_filled) on each fill event</td>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Full release</div>
-                        <div class="trait-value">release_all() on terminal order (FILLED / CANCELLED / EXPIRED)</div>
-                    </div>
+                    <div class="trait-item"><div class="trait-label">BUY lock (SPOT)</div><div class="trait-value">reserved_cash = qty × price → _locked_cash += reserved_cash</div></div>
+                    <div class="trait-item"><div class="trait-label">SELL lock (SPOT/MARGIN)</div><div class="trait-value">reserved_qty = qty → position.locked_quantity += qty</div></div>
+                    <div class="trait-item"><div class="trait-label">Partial release</div><div class="trait-value">release_partial(delta_filled) on each fill event</div></div>
+                    <div class="trait-item"><div class="trait-label">Full release</div><div class="trait-value">release_all() on terminal order — drains remaining lock</div></div>
                 </div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>Reservation State Diagram</h3>
-            </div>
+            <div class="card-header"><div class="dot dot-blue"></div><h3>Reservation State Diagram</h3></div>
             <div class="card-body diagram-body">
                 <div class="mermaid">
 flowchart TD
-    A([UNRESERVED]) -->|"ExecutionEngine.execute()\n→ ShadowBook.lock_for_order(order_id, intent)\n→ ActiveLimitOrder.initialize_reservation()"| B([RESERVED])
-
-    B -->|"release_partial(delta_filled)\non each partial fill event\n(_process_fill_delta in shadow_book)"| C([PARTIALLY_RELEASED])
-    B -->|"order cancelled/expired\nbefore any fill\n_finalize_terminal_order → release_all()"| D([FULLY_RELEASED])
-
-    C -->|"release_partial() on\neach subsequent fill"| C
-    C -->|"active.is_terminal == True\n_finalize_terminal_order → release_all()"| D
-
-    D -->|"_active_orders.pop(order_id)\n_completed_order_ids.add(order_id)\n_locked_cash decremented\nposition.locked_quantity decremented\nasyncio.create_task(_async_record_trade)"| E([ARCHIVED])
+    A([UNRESERVED]) -->|"ExecutionEngine.execute()\n→ ShadowBook.lock_for_order()\n→ ActiveLimitOrder.initialize_reservation()"| B([RESERVED])
+    B -->|"release_partial(delta_filled)\nper partial fill\n_process_fill_delta"| C([PARTIALLY_RELEASED])
+    B -->|"order terminal before any fill\n_finalize_terminal_order → release_all()"| D([FULLY_RELEASED])
+    C -->|"additional fills"| C
+    C -->|"active.is_terminal\n_finalize_terminal_order → release_all()"| D
+    D -->|"_active_orders.pop()\n_locked_cash decremented\nposition.locked_quantity decremented\nasyncio.create_task(_async_record_trade)"| E([ARCHIVED])
 
     style A fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
     style B fill:#fef3c7,stroke:#d97706,color:#92400e
@@ -1361,71 +917,34 @@ flowchart TD
 
     <div class="divider"></div>
 
-    <!-- ══════════════════════════════
-         8. ShadowBook Derived State (UPDATED)
-    ══════════════════════════════ -->
+    <!-- ══════════ 8. ShadowBook ══════════ -->
     <div class="section" id="shadow-book">
         <div class="section-header">
             <div class="section-badge updated">REACTIVE 8 ↑</div>
             <div class="section-title-block">
                 <h2>ShadowBook — Derived State Refresh <span class="badge-inline badge-updated">UPDATED</span></h2>
-                <div class="file-path">elysian_core/core/shadow_book.py</div>
+                <div class="file-path">elysian_core/core/shadow_book.py &nbsp;|&nbsp; elysian_core/core/margin_shadow_book.py</div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>Overview</h3>
-            </div>
-            <div class="card-body">
-                <p class="description">
-                    The <strong>ShadowBook</strong> maintains a locally consistent mirror of the account state.
-                    This is not a traditional FSM but a <strong>reactive computed-state pattern</strong>: whenever any
-                    input changes, <code>_refresh_derived()</code> is called to recompute all derived quantities
-                    atomically. Two new fields have been added: <code>_asset_symbol_map</code> and
-                    <code>_position_deducted_comm</code> to support precise non-stablecoin commission tracking.
-                    The start() method wiring has also changed — ORDER_UPDATE and BALANCE_UPDATE are no longer
-                    subscribed internally; they are dispatched by the strategy via <code>asyncio.gather()</code>.
-                </p>
-
-                <div class="change-list">
-                    <h4>Changes from Previous ShadowBook</h4>
-                    <ul>
-                        <li><strong>start() signature</strong>: now requires both <code>event_bus</code> (shared) and <code>private_event_bus</code> explicitly; KLINE subscribed internally, ORDER+BALANCE dispatched externally</li>
-                        <li><strong>_asset_symbol_map</strong>: new field mapping base asset (e.g. "BNB") → trading symbol (e.g. "BNBUSDT"); populated in <code>apply_fill()</code></li>
-                        <li><strong>_position_deducted_comm</strong>: new field tracking non-stablecoin commission quantities already deducted from positions; excluded from <code>total_commission()</code> to avoid double-counting in <code>net_pnl()</code></li>
-                        <li><strong>_klines dict</strong>: new field storing latest Kline per symbol (updated in <code>_on_kline()</code>)</li>
-                        <li><strong>avg_entry_price patching</strong>: positions synced at startup with <code>avg_entry_price=0.0</code> are patched on first KLINE event to use mark price, avoiding inflated unrealized PnL</li>
-                        <li><strong>apply_fill signature</strong>: now takes <code>base_asset</code> and <code>quote_asset</code> explicitly (required for commission mapping)</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>Trigger Map — _refresh_derived()</h3>
-            </div>
+            <div class="card-header"><div class="dot dot-blue"></div><h3>Trigger Map — _refresh_derived()</h3></div>
             <div class="card-body diagram-body">
                 <div class="mermaid">
 flowchart LR
-    subgraph Triggers ["Triggers calling _refresh_derived()"]
-        T1["_on_kline(event)\nmark price update\n+ patch avg_entry_price\n+ update _klines"]
-        T2["apply_fill()\nposition / cash change\n+ commission tracking\n+ _asset_symbol_map update"]
-        T3["mark_to_market(prices)\nmanual mark price update"]
-        T4["update_mark_prices(prices)\nstrategy kline dispatch"]
-        T5["_on_balance_update(event)\nbalance change from exchange"]
-        T6["init_from_portfolio_cash()\ninitialization"]
-        T7["sync_from_exchange()\nstartup sync"]
+    subgraph Triggers["Triggers → _refresh_derived()"]
+        T1["_on_kline(event)\nmark price + patch avg_entry + _klines"]
+        T2["apply_fill()\nposition / cash or collateral change"]
+        T3["mark_to_market() / update_mark_prices()"]
+        T4["_on_balance_update()\nShadowBook: updates _cash\nMarginShadowBook: updates _collateral"]
+        T5["init_from_portfolio_cash() / sync_from_exchange()"]
     end
 
-    subgraph Refresh ["_refresh_derived()"]
-        R1["_nav = cash + Σ(qty × mark_price)"]
+    subgraph Refresh["_refresh_derived()"]
+        R1["ShadowBook:\n_nav = _cash + Σ(pos.qty × mark_price)\n\nMarginShadowBook:\n_nav = Σ(collateral×price)\n     + Σ(long_pos.qty×price)\n     − Σ(borrowed×price)\n     − Σ(interest×price)"]
         R2["_weights = qty×price / nav\n(non-flat positions only)"]
         R3["_peak_equity = max(peak, nav)"]
-        R4["_max_drawdown = max(dd, (peak-nav)/peak)"]
+        R4["_max_drawdown updated"]
+        R1 --> R2 --> R3 --> R4
     end
 
     T1 --> R1
@@ -1433,72 +952,57 @@ flowchart LR
     T3 --> R1
     T4 --> R1
     T5 --> R1
-    T6 --> R1
-    T7 --> R1
 
-    R1 --> R2
-    R2 --> R3
-    R3 --> R4
-
-    style T1 fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
-    style T2 fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
-    style T3 fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
-    style T4 fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
-    style T5 fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
-    style T6 fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
-    style T7 fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
-    style R1 fill:#fef3c7,stroke:#d97706,color:#92400e
-    style R2 fill:#fef3c7,stroke:#d97706,color:#92400e
-    style R3 fill:#fef3c7,stroke:#d97706,color:#92400e
-    style R4 fill:#fef3c7,stroke:#d97706,color:#92400e
+    style Triggers fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
+    style Refresh fill:#fef3c7,stroke:#d97706,color:#92400e
                 </div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>Commission Tracking — Non-Stablecoin Fees</h3>
-            </div>
+            <div class="card-header card-header purple-header"><div class="dot dot-purple"></div><h3>MarginShadowBook Method Override Summary</h3></div>
             <div class="card-body">
-                <p class="description">
-                    Non-stablecoin commissions (e.g. BNB fees on BNBUSDT trades) require special handling.
-                    The <code>_track_commission()</code> method resolves the commission asset to a trading symbol
-                    via <code>_asset_symbol_map</code> and deducts the commission quantity from the position,
-                    mirroring what actually happens on the exchange. The deducted amount is recorded in
-                    <code>_position_deducted_comm</code> so it is excluded from <code>total_commission()</code>
-                    (which converts to USDT) — preventing double-counting in <code>net_pnl()</code>.
-                </p>
-                <div class="code-block">
-<span class="cm"># apply_fill() commission flow</span>
-<span class="kw">if</span> commission_asset <span class="kw">not in</span> STABLECOINS:
-    <span class="cm"># Non-stablecoin fee: deduct from the position</span>
-    comm_symbol = _asset_symbol_map.get(commission_asset)
-    <span class="kw">if</span> comm_symbol <span class="kw">in</span> _positions:
-        _positions[comm_symbol].quantity -= commission
-        _position_deducted_comm[commission_asset] += commission
-    <span class="kw">else</span>:
-        <span class="kw">raise</span> ValueError(<span class="str">f"Commission asset not found in positions"</span>)
-<span class="kw">else</span>:
-    <span class="cm"># Stablecoin fee: deduct from cash</span>
-    _cash -= commission
-    _cash_dict[commission_asset] -= commission
-
-<span class="cm"># total_commission() excludes position-deducted amounts</span>
-<span class="kw">def</span> <span class="fn">total_commission</span>(self, mark_prices=None) -> float:
-    <span class="kw">for</span> asset, gross_qty <span class="kw">in</span> _total_commission_dict.items():
-        net_qty = max(0.0, gross_qty - _position_deducted_comm.get(asset, 0.0))
-        <span class="cm"># Only net_qty × price contributes to reported commission</span>
-                </div>
+                <table class="state-table margin-table">
+                    <thead><tr><th>Method</th><th>ShadowBook (SPOT)</th><th>MarginShadowBook (MARGIN)</th></tr></thead>
+                    <tbody>
+                        <tr>
+                            <td><code>total_value()</code></td>
+                            <td><code>_cash + Σ(pos.qty × mark)</code></td>
+                            <td><code>Σ(collateral×price) + Σ(long_pos×price) − Σ(borrowed×price) − Σ(interest×price)</code></td>
+                        </tr>
+                        <tr>
+                            <td><code>free_cash</code></td>
+                            <td><code>max(0, _cash − _locked_cash)</code></td>
+                            <td><code>max(0, _collateral[USDT] + _collateral[BUSD] − _locked_cash)</code></td>
+                        </tr>
+                        <tr>
+                            <td><code>_adjust_cash()</code></td>
+                            <td>Modifies <code>_cash</code> and <code>_cash_dict</code></td>
+                            <td>Modifies <code>_collateral[quote_asset]</code> (not <code>_cash</code>)</td>
+                        </tr>
+                        <tr>
+                            <td><code>_track_commission()</code></td>
+                            <td>Stablecoin fee: <code>_cash -= commission</code></td>
+                            <td>Stablecoin fee: <code>_collateral[asset] -= commission</code></td>
+                        </tr>
+                        <tr>
+                            <td><code>_on_balance_update()</code></td>
+                            <td>Stablecoin: <code>_cash_dict[asset] += delta</code></td>
+                            <td>Stablecoin: <code>_collateral[asset] += delta</code>; Base: updates <code>_positions[symbol].qty</code></td>
+                        </tr>
+                        <tr>
+                            <td><code>sync_from_exchange()</code></td>
+                            <td>Reads <code>exchange._balances</code>; sets <code>_cash</code> and <code>_positions</code></td>
+                            <td>Flattens exchange <code>_collateral/_borrowed/_accrued_interest</code> per symbol → per asset; net_qty = base_collateral − borrowed_base</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
 
     <div class="divider"></div>
 
-    <!-- ══════════════════════════════
-         9. BaseFSM
-    ══════════════════════════════ -->
+    <!-- ══════════ 9. BaseFSM ══════════ -->
     <div class="section" id="base-fsm">
         <div class="section-header">
             <div class="section-badge">ENGINE 9</div>
@@ -1507,82 +1011,33 @@ flowchart LR
                 <div class="file-path">elysian_core/core/fsm.py</div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>Overview</h3>
-            </div>
-            <div class="card-body">
-                <p class="description">
-                    <strong>BaseFSM</strong> is the shared infrastructure that both <code>OrderFSM</code> and
-                    <code>RebalanceFSM</code> (and any future FSMs) are built on. It provides a declarative
-                    transition table, a re-entrancy guard, terminal state enforcement, wildcard trigger support,
-                    and both sync and async callback dispatch.
-                </p>
-                <div class="callout">
-                    <strong>Re-entrancy guard:</strong> If a callback triggers a further <code>trigger()</code> call
-                    while a transition is already executing (the <code>_transitioning</code> flag is set),
-                    the new trigger is queued onto <code>_pending</code> (a <code>deque</code>) and drained
-                    after the current transition completes. This prevents lost events without needing locks.
-                </div>
-                <div class="trait-grid">
-                    <div class="trait-item">
-                        <div class="trait-label">Transition table</div>
-                        <div class="trait-value">Dict[(State, trigger_str), (NextState, callback_name)]</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Wildcard key</div>
-                        <div class="trait-value">("*", trigger_str) matches any source state</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Async callbacks</div>
-                        <div class="trait-value">Both sync and async callbacks supported via await</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Terminal states</div>
-                        <div class="trait-value">Raise InvalidTransition on any further trigger</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>trigger() Execution Flow</h3>
-            </div>
+            <div class="card-header"><div class="dot dot-blue"></div><h3>trigger() Execution Flow</h3></div>
             <div class="card-body diagram-body">
                 <div class="mermaid">
 flowchart TD
-    A(["trigger(event, **ctx) called"]) --> B{"_transitioning\nflag set?"}
-    B -->|Yes| C["Queue to _pending deque\n(re-entrancy guard)"]
+    A(["trigger(event, **ctx)"]) --> B{"_transitioning?"}
+    B -->|Yes| C["Queue to _pending\n(re-entrancy guard)"]
     B -->|No| D["Set _transitioning = True"]
     D --> E["_do_transition(event, **ctx)"]
-    E --> F{"Lookup (state, event)\nin _TRANSITIONS"}
-    F -->|Not found| G{"Lookup wildcard\n('*', event)"}
-    G -->|Not found| H{"Is terminal\nstate?"}
-    H -->|Yes| I["Raise InvalidTransition"]
-    H -->|No| J["Log warning (warn-mode) or raise"]
-    G -->|Found| K["Resolve next_state\nand callback_name"]
+    E --> F{"Lookup (state,event)\nin _TRANSITIONS"}
+    F -->|Not found| G{"Wildcard ('*',event)?"}
+    G -->|Not found| H["Raise InvalidTransition\nor log warning (warn-mode)"]
+    G -->|Found| K["next_state, callback_name"]
     F -->|Found| K
-    K --> L["_state = next_state"]
-    L --> M["Inject _fsm_old_state\ninto ctx"]
-    M --> N{"callback_name\nis not None?"}
-    N -->|No| O["Skip callback"]
-    N -->|Yes| P{"Callback is\nasync?"}
-    P -->|Yes| Q["await callback(**ctx)"]
-    P -->|No| R["callback(**ctx)"]
-    Q --> S
+    K --> L["_state = next_state\nInject _fsm_old_state into ctx"]
+    L --> N{"async callback?"}
+    N -->|Yes| Q["await callback(**ctx)"]
+    N -->|No| R["callback(**ctx)"]
+    Q --> S["Set _transitioning = False"]
     R --> S
-    O --> S["Set _transitioning = False"]
-    S --> T{"_pending\ndeque non-empty?"}
-    T -->|Yes| U["Pop next pending trigger\n→ recurse _do_transition"]
+    S --> T{"_pending non-empty?"}
+    T -->|Yes| U["Pop → _do_transition"]
     T -->|No| V([Done])
     U --> V
 
     style A fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
-    style I fill:#fee2e2,stroke:#b91c1c,color:#991b1b
+    style H fill:#fee2e2,stroke:#b91c1c,color:#991b1b
     style V fill:#dcfce7,stroke:#16a34a,color:#14532d
                 </div>
             </div>
@@ -1591,84 +1046,123 @@ flowchart TD
 
     <div class="divider"></div>
 
-    <!-- ══════════════════════════════
-         10. PeriodicTask
-    ══════════════════════════════ -->
+    <!-- ══════════ 10. PeriodicTask ══════════ -->
     <div class="section" id="periodic-task">
         <div class="section-header">
             <div class="section-badge">UTIL 10</div>
             <div class="section-title-block">
                 <h2>PeriodicTask — Background Scheduler Lifecycle</h2>
-                <div class="file-path">elysian_core/core/fsm.py &nbsp;|&nbsp; elysian_core/run_strategy.py (usage)</div>
+                <div class="file-path">elysian_core/core/fsm.py</div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>Overview</h3>
-            </div>
-            <div class="card-body">
-                <p class="description">
-                    <strong>PeriodicTask</strong> is a lightweight asyncio utility that runs a callback on a fixed
-                    interval. It is used in the StrategyRunner to schedule <code>save_snapshot()</code> for both
-                    the <code>Portfolio</code> and each <code>ShadowBook</code> at regular intervals.
-                    The internal loop sleeps first, then calls the callback, ensuring the first invocation is
-                    delayed by one full interval from startup.
-                </p>
-                <div class="trait-grid">
-                    <div class="trait-item">
-                        <div class="trait-label">Primary usages</div>
-                        <div class="trait-value">portfolio.save_snapshot(); shadow_book.save_snapshot()</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Start</div>
-                        <div class="trait-value">start() creates asyncio Task wrapping _loop()</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Stop</div>
-                        <div class="trait-value">stop() calls task.cancel() — clean cancellation</div>
-                    </div>
-                    <div class="trait-item">
-                        <div class="trait-label">Loop order</div>
-                        <div class="trait-value">while True: sleep(interval_s) → callback()</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="card-header">
-                <div class="dot dot-blue"></div>
-                <h3>State Diagram</h3>
-            </div>
+            <div class="card-header"><div class="dot dot-blue"></div><h3>State Diagram</h3></div>
             <div class="card-body diagram-body">
                 <div class="mermaid">
 stateDiagram-v2
     direction LR
-
     [*] --> STOPPED : instantiated
-
     STOPPED --> RUNNING : start()\ncreate_task(_loop())
 
     state RUNNING {
         direction TB
         [*] --> Sleeping
         Sleeping --> Executing : sleep(interval_s) elapsed
-        Executing --> Sleeping : callback() returned (or raised — error logged, loop continues)
+        Executing --> Sleeping : callback() returned\n(errors logged, loop continues)
     }
 
     RUNNING --> STOPPED : stop()\ntask.cancel()
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><div class="dot dot-blue"></div><h3>Usages in Elysian</h3></div>
+            <div class="card-body">
+                <table class="state-table">
+                    <thead><tr><th>Callback</th><th>Tag</th><th>Interval</th><th>Used By</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>portfolio.save_snapshot()</code></td><td><code>{portfolio.name}</code></td><td><code>snapshot_interval_s</code></td><td>StrategyRunner, MarginStrategyRunner</td></tr>
+                        <tr><td><code>shadow_book.save_snapshot()</code></td><td><code>shadow_book_{strategy_id}</code></td><td><code>snapshot_interval_s</code></td><td>StrategyRunner, MarginStrategyRunner</td></tr>
+                        <tr><td><code>margin_shadow_book.save_snapshot()</code></td><td><code>shadow_book_{id}_{sub_id}</code></td><td><code>snapshot_interval_s</code></td><td>MarginStrategyRunner per sub-account</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 
-    note right of RUNNING
-        _loop():
-        while True:
-            await asyncio.sleep(interval_s)
-            result = callback()
-            if iscoroutine(result): await result
-        Errors are logged but do NOT
-        stop the loop.
-    end note
+    <div class="divider"></div>
+
+    <!-- ══════════ 11. MarginStrategy Lifecycle (NEW) ══════════ -->
+    <div class="section" id="margin-strategy-state">
+        <div class="section-header">
+            <div class="section-badge margin">MARGIN 11</div>
+            <div class="section-title-block">
+                <h2>MarginStrategy — Full Lifecycle State Machine <span class="badge-inline badge-margin">MARGIN NEW</span></h2>
+                <div class="file-path">elysian_core/strategy/margin_strategy.py</div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header card-header purple-header"><div class="dot dot-purple"></div><h3>Overview</h3></div>
+            <div class="card-body">
+                <p class="description">
+                    <strong>MarginStrategy</strong> extends <code>SpotStrategy</code> and adds
+                    multi-pipeline management. It overrides <code>start()</code>, <code>stop()</code>,
+                    <code>request_rebalance()</code>, <code>_dispatch_order()</code>, and
+                    <code>_dispatch_balance()</code> to route events to the correct pipeline.
+                    The <code>_shadow_book</code> property is a backward-compatibility shim that returns
+                    the first pipeline's ShadowBook — used by RebalanceFSM logging only.
+                </p>
+                <div class="callout callout-purple">
+                    <strong>_pipelines dict is populated BEFORE start() is called:</strong>
+                    MarginStrategyRunner calls <code>_build_margin_pipeline()</code> for each sub-account,
+                    stores the results in <code>strategy._pipelines</code>, then calls <code>strategy.start()</code>.
+                    Inside <code>start()</code>, FSMs are created from the already-populated pipelines.
+                    This ordering is mandatory — FSMs require references to pipeline components.
+                </div>
+                <div class="trait-grid">
+                    <div class="trait-item margin"><div class="trait-label">_pipelines</div><div class="trait-value">Dict[SubAccountKey, SubAccountPipeline] — populated by runner before start()</div></div>
+                    <div class="trait-item margin"><div class="trait-label">_shadow_book property</div><div class="trait-value">Returns first pipeline's ShadowBook (backward compat only — read-only, no setter has effect)</div></div>
+                    <div class="trait-item margin"><div class="trait-label">request_rebalance(key=None)</div><div class="trait-value">key=None → asyncio.gather all FSMs. key=SubAccountKey → target 1 FSM.</div></div>
+                    <div class="trait-item margin"><div class="trait-label">shadow_books property</div><div class="trait-value">Dict[SubAccountKey, ShadowBook] — read per-pipeline book for strategy logic</div></div>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header card-header purple-header"><div class="dot dot-purple"></div><h3>MarginStrategy start() Sequence</h3></div>
+            <div class="card-body diagram-body">
+                <div class="mermaid">
+flowchart TD
+    A(["start() called by MarginStrategyRunner"]) --> B["Assert state == CREATED\nSet state = STARTING\nget running loop"]
+    B --> C["Collect symbols union from all pipelines\nCollect venues union from all pipelines"]
+    C --> D["Subscribe shared_event_bus:\n  KLINE → _dispatch_kline\n  OB → _dispatch_ob"]
+    D --> E["For each pipeline in _pipelines:"]
+    E --> F["pipeline.rebalance_fsm = RebalanceFSM(\n  strategy=self,\n  optimizer=pipeline.optimizer,\n  execution_engine=pipeline.execution_engine,\n  event_bus=pipeline.private_event_bus,\n  sub_account_key=pipeline.key\n)"]
+    F --> G["pipeline.private_event_bus.subscribe(\n  ORDER_UPDATE → _dispatch_order\n  BALANCE_UPDATE → _dispatch_balance\n  REBALANCE_COMPLETE → _dispatch_rebalance\n)"]
+    G --> H{"More pipelines?"}
+    H -->|Yes| E
+    H -->|No| I["await on_start()"]
+    I --> J["Set state = READY"]
+
+    style A fill:#faf5ff,stroke:#a855f7,color:#3b0764
+    style J fill:#dcfce7,stroke:#16a34a,color:#14532d
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header card-header purple-header"><div class="dot dot-purple"></div><h3>ORDER_UPDATE Routing in MarginStrategy</h3></div>
+            <div class="card-body diagram-body">
+                <div class="mermaid">
+flowchart TD
+    A(["ORDER_UPDATE event arrives\non pipeline N's private EventBus"]) --> B["_dispatch_order(event: OrderUpdateEvent)"]
+    B --> C["SubAccountKey(\n  strategy_id=self.strategy_id,\n  asset_type=event.asset_type,\n  venue=event.venue,\n  sub_account_id=event.sub_account_id\n)"]
+    C --> D{"pipeline = _pipelines.get(key)\npipeline found?"}
+    D -->|No| E["log warning\nevent dropped"]
+    D -->|Yes| F["asyncio.gather(\n  self.on_order_update(event),\n  pipeline.shadow_book._on_order_update(event)\n)"]
+    F --> G["pipeline.shadow_book:\n  MarginShadowBook._on_order_update()\n  → _process_fill_delta()\n  → _adjust_cash() → _collateral update\n  → _finalize_terminal_order()"]
+
+    style A fill:#faf5ff,stroke:#a855f7,color:#3b0764
+    style E fill:#fee2e2,stroke:#b91c1c,color:#991b1b
+    style G fill:#faf5ff,stroke:#c4b5fd,color:#3b0764
                 </div>
             </div>
         </div>
@@ -1676,115 +1170,301 @@ stateDiagram-v2
 
     <div class="divider"></div>
 
-    <!-- ══════════════════════════════
-         System-Wide Interaction Map
-    ══════════════════════════════ -->
-    <div class="section" id="system-overview">
+    <!-- ══════════ 12. MarginShadowBook State (NEW) ══════════ -->
+    <div class="section" id="margin-shadow-book">
         <div class="section-header">
-            <div class="section-badge updated">OVERVIEW ↑</div>
+            <div class="section-badge margin">MARGIN 12</div>
             <div class="section-title-block">
-                <h2>System-Wide FSM Interaction Map <span class="badge-inline badge-updated">UPDATED</span></h2>
-                <div class="file-path">Cross-cutting — all modules</div>
+                <h2>MarginShadowBook — Ledger State Transitions <span class="badge-inline badge-margin">MARGIN NEW</span></h2>
+                <div class="file-path">elysian_core/core/margin_shadow_book.py</div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-green"></div>
-                <h3>How the FSMs interact at runtime across containers</h3>
+            <div class="card-header card-header purple-header"><div class="dot dot-purple"></div><h3>Ledger State after a Short SELL fill (MARGIN)</h3></div>
+            <div class="card-body diagram-body">
+                <div class="mermaid">
+flowchart LR
+    subgraph BEFORE["Before SELL fill\n(SHORT entry via AUTO_BORROW_REPAY)"]
+        B1["_collateral: {USDT: 1000.0}\n_borrowed: {}\n_positions: {}\n_mark_prices: {BTCUSDT: 95000}\n_nav = 1000 + 0 - 0 - 0 = 1000"]
+    end
+
+    subgraph FILL["apply_fill(\n  symbol=BTCUSDT,\n  base_asset=BTC,\n  quote_asset=USDT,\n  qty_delta=-0.01,  ← SELL\n  price=95000,\n  commission=0.0095,  ← BNB fee\n  commission_asset=BNB\n)"]
+        direction TB
+        F1["_update_position_on_fill:\n  old_qty=0, delta=-0.01\n  same_direction (both ≤ 0): True\n  pos.qty = -0.01\n  pos.avg_entry = 95000"]
+        F2["_track_commission:\n  BNB not in STABLECOINS\n  → find BNBUSDT in _positions\n  → not found → raise ValueError\n  (no BNB position pre-existing)\n  Strategy must hold BNB before\n  taking BNB-fee margin short"]
+        F3["_adjust_cash (override):\n  SELL: _collateral[USDT] += 0.01 × 95000\n  _collateral[USDT] = 1000 + 950 = 1950"]
+        F1 --> F2 --> F3
+    end
+
+    subgraph AFTER["After SELL fill"]
+        A1["_collateral: {USDT: 1950.0}\n_borrowed: {BTC: 0.01}  ← from exchange poll\n_positions: {BTCUSDT: qty=-0.01}\n_nav = 1950 + 0\n       − 0.01×95000 − 0\n     = 1950 − 950 = 1000\n(NAV unchanged: correct)"]
+    end
+
+    BEFORE --> FILL --> AFTER
+
+    style BEFORE fill:#f0fdf4,stroke:#16a34a,color:#166534
+    style FILL fill:#faf5ff,stroke:#a855f7,color:#3b0764
+    style AFTER fill:#eff6ff,stroke:#2563eb,color:#1e40af
+                </div>
             </div>
+        </div>
+        <div class="card">
+            <div class="card-header card-header purple-header"><div class="dot dot-purple"></div><h3>MarginShadowBook Ledger Consistency Rules</h3></div>
+            <div class="card-body">
+                <table class="state-table margin-table">
+                    <thead><tr><th>Invariant</th><th>Rule</th><th>Enforced Where</th></tr></thead>
+                    <tbody>
+                        <tr><td>Short positions excluded from NAV</td><td><code>total_value()</code> only sums positions with <code>qty &gt; 0</code></td><td><code>MarginShadowBook.total_value()</code></td></tr>
+                        <tr><td>USDT proceeds from short sale in _collateral</td><td><code>_adjust_cash(SELL)</code> routes to <code>_collateral[USDT]</code></td><td><code>MarginShadowBook._adjust_cash()</code></td></tr>
+                        <tr><td>Stablecoin fees deducted from _collateral</td><td>USDT commission → <code>_collateral[USDT] -= commission</code></td><td><code>MarginShadowBook._track_commission()</code></td></tr>
+                        <tr><td>Borrowed amounts from periodic poll only</td><td>WS stream does not push loan amounts; <code>refresh_margin_account()</code> must be called</td><td><code>BinanceMarginExchange._margin_poll_loop()</code></td></tr>
+                        <tr><td>_cash always 0.0</td><td>MarginShadowBook never modifies <code>_cash</code>; all stablecoins in <code>_collateral</code></td><td>All overriding methods in <code>MarginShadowBook</code></td></tr>
+                        <tr><td>Non-stablecoin fee must exist as a position</td><td>BNB fee on a margin order requires a BNB long position to deduct from</td><td><code>MarginShadowBook._track_commission()</code> raises ValueError if not found</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header card-header purple-header"><div class="dot dot-purple"></div><h3>Margin Health Metrics Flow</h3></div>
+            <div class="card-body diagram-body">
+                <div class="mermaid">
+flowchart LR
+    subgraph INPUTS["Inputs to margin_level()"]
+        I1["_collateral: {USDT: 1950}"]
+        I2["_positions: {BTCUSDT: qty=-0.01}"]
+        I3["_borrowed: {BTC: 0.01}\n(from periodic poll)"]
+        I4["_accrued_interest: {BTC: 0.00001}\n(from periodic poll)"]
+        I5["_mark_prices: {BTCUSDT: 95000}"]
+    end
+
+    subgraph FORMULA["margin_level(prices)"]
+        F1["asset_value:\n  Σ(collateral × price) = 1950 × 1.0 = 1950\n  Σ(long_pos.qty × price) = 0 (short, skip)"]
+        F2["liability_value:\n  (borrowed + interest) × price\n  = (0.01 + 0.00001) × 95000\n  = 0.01001 × 95000 = 950.95"]
+        F3["margin_level = 1950 / 950.95 ≈ 2.05\n(healthy: Binance triggers at ~1.1)"]
+        F1 --> F2 --> F3
+    end
+
+    subgraph LIQ["liquidation_price(BTCUSDT, mmr=0.10)"]
+        L1["long_qty = max(0, -0.01) = 0\nborrowed_qty = 0.01\ncollateral_usdt = 1950\n\np = 1950 / ((1+0.10) × 0.01)\np = 1950 / 0.011 = 177,273\n(unreachable — short is safe)"]
+    end
+
+    INPUTS --> FORMULA
+    INPUTS --> LIQ
+
+    style INPUTS fill:#f0fdf4,stroke:#16a34a,color:#166534
+    style FORMULA fill:#faf5ff,stroke:#a855f7,color:#3b0764
+    style LIQ fill:#eff6ff,stroke:#2563eb,color:#1e40af
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ══════════ 13. MarginUserData Reader Loop (NEW) ══════════ -->
+    <div class="section" id="margin-user-data">
+        <div class="section-header">
+            <div class="section-badge margin">MARGIN 13</div>
+            <div class="section-title-block">
+                <h2>BinanceMarginUserDataClientManager — Reader Loop <span class="badge-inline badge-margin">MARGIN NEW</span></h2>
+                <div class="file-path">elysian_core/connectors/binance/BinanceMarginDataConnectors.py</div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header card-header purple-header"><div class="dot dot-purple"></div><h3>Overview</h3></div>
             <div class="card-body">
                 <p class="description">
-                    The diagram below shows the causal relationships between all FSMs and lifecycle components
-                    during a single live rebalance cycle across the two-container architecture. The
-                    <strong>MarketDataService container</strong> publishes events to Redis; the
-                    <strong>Strategy container</strong> consumes them via the <code>RedisEventBusSubscriber</code>
-                    listener loop, which drives the <strong>StrategyState</strong> FSM. Within the strategy container,
-                    <strong>RebalanceFSM</strong> orchestrates the pipeline; each submitted order gets its own
-                    <strong>OrderFSM</strong> lifecycle tracked by the <strong>ShadowBook</strong>.
+                    Unlike <code>BinanceUserDataClientManager</code> (which uses a single global WebSocket
+                    via <code>userDataStream.subscribe.signature</code>), the margin manager uses a
+                    <strong>per-symbol listen key</strong> approach. Each isolated margin symbol gets its
+                    own <code>POST /sapi/v1/userDataStream/isolated</code> call and its own
+                    WebSocket reader task. A single keepalive task covers all symbols.
                 </p>
+                <div class="trait-grid">
+                    <div class="trait-item margin"><div class="trait-label">Reader tasks</div><div class="trait-value">One asyncio Task per symbol (_reader_tasks dict)</div></div>
+                    <div class="trait-item margin"><div class="trait-label">Listen key endpoint</div><div class="trait-value">POST/PUT/DELETE /sapi/v1/userDataStream/isolated?symbol=X&listenKey=K</div></div>
+                    <div class="trait-item margin"><div class="trait-label">WS URL</div><div class="trait-value">wss://stream.binance.com:9443/ws/{listenKey}</div></div>
+                    <div class="trait-item margin"><div class="trait-label">Keepalive</div><div class="trait-value">One task for all symbols; PUT every 55 min (expires at 60 min)</div></div>
+                    <div class="trait-item margin"><div class="trait-label">Event tagging</div><div class="trait-value">OrderUpdateEvent(asset_type=AssetType.MARGIN, sub_account_id=N)</div></div>
+                    <div class="trait-item margin"><div class="trait-label">Reconnect</div><div class="trait-value">Exponential backoff 1s → 60s; fresh listen key on each reconnect</div></div>
+                </div>
             </div>
         </div>
-
         <div class="card">
-            <div class="card-header">
-                <div class="dot dot-green"></div>
-                <h3>Runtime Interaction Diagram</h3>
+            <div class="card-header card-header purple-header"><div class="dot dot-purple"></div><h3>Per-Symbol Reader Loop State Machine</h3></div>
+            <div class="card-body diagram-body">
+                <div class="mermaid">
+                flowchart TD
+
+                    A(["start() called for symbols=[BTCUSDT, ETHUSDT]"]) --> B["create asyncio tasks per symbol"]
+                    B --> C["start keepalive loop"]
+
+                    subgraph READER["reader loop (per symbol)"]
+
+                    R1["reconnect_delay = 1"]
+                    R2["get listen_key via REST"]
+                    R3["store _listen_keys[symbol]"]
+                    R4["ws_url = wss://stream.binance.com/ws/{listen_key}"]
+                    R5["websocket connection loop"]
+                    R6["async for raw message"]
+                    R7["json.loads(raw)"]
+                    R8["subscriber callbacks"]
+                    R9["_parse_event(symbol, msg)"]
+                    R10["dispatch to event bus"]
+                    R11["emit OrderUpdateEvent + BalanceUpdateEvent"]
+                    R12["exponential backoff reconnect (max 60s)"]
+
+                    R1 --> R2 --> R3 --> R4 --> R5 --> R6 --> R7 --> R8 --> R9 --> R10 --> R11 --> R12
+                    R12 --> R5
+
+                    end
+
+                    subgraph KEEPALIVE["keepalive loop"]
+                    K1["sleep 55 minutes"]
+                    K2["PUT listenKey refresh"]
+                    K1 --> K2 --> K1
+                    end
+
+                    C --> KEEPALIVE
+                    B --> READER
+                </div>
             </div>
+        </div>
+        <div class="card">
+            <div class="card-header card-header purple-header"><div class="dot dot-purple"></div><h3>Comparison: Spot vs Margin User Data Managers</h3></div>
+            <div class="card-body">
+                <table class="state-table margin-table">
+                    <thead><tr><th>Aspect</th><th>BinanceUserDataClientManager (Spot)</th><th>BinanceMarginUserDataClientManager (Margin)</th></tr></thead>
+                    <tbody>
+                        <tr><td>WS connection</td><td>One global WS to <code>wss://ws-api.binance.com:443/ws-api/v3</code></td><td>One WS per symbol to <code>wss://stream.binance.com:9443/ws/{listenKey}</code></td></tr>
+                        <tr><td>Authentication</td><td><code>userDataStream.subscribe.signature</code> (HMAC, no Ed25519 needed)</td><td>Per-symbol listen keys via REST; no WS auth needed</td></tr>
+                        <tr><td>Listen key management</td><td>None (signature-based auth)</td><td>POST to get, PUT to extend (55 min), DELETE on stop</td></tr>
+                        <tr><td>Reader tasks</td><td>1 reader task (<code>_reader_task</code>)</td><td>N reader tasks (<code>_reader_tasks[symbol]</code>)</td></tr>
+                        <tr><td>Event envelope</td><td><code>{"subscriptionId": 0, "event": {...}}</code></td><td>Raw event dict (<code>{"e": "executionReport", ...}</code>)</td></tr>
+                        <tr><td>Event tagging</td><td><code>asset_type=AssetType.SPOT</code></td><td><code>asset_type=AssetType.MARGIN</code></td></tr>
+                        <tr><td>stop()</td><td>Cancel 1 reader task; close WS</td><td>Cancel N reader tasks + 1 keepalive; DELETE all listen keys</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ══════════ 14. Margin Poll Loop (NEW) ══════════ -->
+    <div class="section" id="margin-poll-loop">
+        <div class="section-header">
+            <div class="section-badge margin">MARGIN 14</div>
+            <div class="section-title-block">
+                <h2>Margin Poll Loop — Background State Sync <span class="badge-inline badge-margin">MARGIN NEW</span></h2>
+                <div class="file-path">elysian_core/connectors/base_margin.py &nbsp;|&nbsp; elysian_core/connectors/binance/BinanceMarginExchange.py</div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header card-header purple-header"><div class="dot dot-purple"></div><h3>Overview</h3></div>
+            <div class="card-body">
+                <p class="description">
+                    The <strong>margin poll loop</strong> is the only mechanism available for keeping
+                    <code>_accrued_interest</code> current. Binance charges interest hourly on borrowed
+                    amounts but does not push these charges via the user-data WebSocket stream. Without
+                    periodic polling, the MarginShadowBook NAV would overstate value between interest cycles.
+                    The loop is started by <code>BinanceMarginExchange.run()</code> via
+                    <code>_start_margin_poll()</code> and stopped by <code>cleanup()</code> via
+                    <code>_stop_margin_poll()</code>.
+                </p>
+                <div class="callout callout-purple">
+                    <strong>Interest accrual gap:</strong>
+                    Between poll cycles (up to 60 seconds), the MarginShadowBook may overstate NAV by the amount of
+                    accrued interest since the last poll. For typical margin sizes and rates, this is negligible
+                    (Binance daily rates are 0.02–0.05% annually for BTC/ETH). For strategies sensitive to
+                    sub-second NAV accuracy, reduce <code>INTEREST_POLL_INTERVAL_S</code> in
+                    <code>IsolatedMarginExchangeConnector</code>.
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header card-header purple-header"><div class="dot dot-purple"></div><h3>Poll Loop State Diagram</h3></div>
+            <div class="card-body diagram-body">
+                <div class="mermaid">
+stateDiagram-v2
+    direction LR
+    [*] --> STOPPED : _margin_poll_task = None
+
+    STOPPED --> RUNNING : _start_margin_poll()\nasyncio.create_task(_margin_poll_loop())
+
+    state RUNNING {
+        direction TB
+        [*] --> Sleeping
+        Sleeping --> Polling : sleep(60s)\n(INTEREST_POLL_INTERVAL_S)
+        Polling --> Updating : GET /sapi/v1/margin/isolated/account\nfor each symbol in _symbols
+        Updating --> Sleeping : Update _collateral / _borrowed\n_accrued_interest / _margin_level\ncall MarginShadowBook._refresh_derived()
+        Updating --> ErrorLogged : Exception caught
+        ErrorLogged --> Sleeping : log error, continue
+    }
+
+    RUNNING --> STOPPED : _stop_margin_poll()\ntask.cancel(); await
+
+    note right of Polling
+        refresh_margin_account():
+        for symbol in self._symbols:
+          account = get_isolated_margin_account(
+            symbols=symbol)
+          for asset in (baseAsset, quoteAsset):
+            _collateral[symbol][asset] = free+locked
+            _borrowed[symbol][asset] = borrowed
+            _accrued_interest[symbol][asset] = interest
+            _margin_level[symbol] = marginLevel
+    end note
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header card-header purple-header"><div class="dot dot-purple"></div><h3>What Triggers a MarginShadowBook Refresh</h3></div>
+            <div class="card-body">
+                <table class="state-table margin-table">
+                    <thead><tr><th>Event</th><th>Update Path</th><th>Frequency</th></tr></thead>
+                    <tbody>
+                        <tr><td>Order fill (SELL)</td><td>WS → executionReport → <code>_on_order_update()</code> → <code>_adjust_cash</code> → <code>_collateral[USDT] +=</code> → <code>_refresh_derived()</code></td><td>Per fill event</td></tr>
+                        <tr><td>Balance update (deposits)</td><td>WS → balanceUpdate → <code>_on_balance_update()</code> → <code>_collateral[asset] +=</code> → <code>_refresh_derived()</code></td><td>Per event</td></tr>
+                        <tr><td>Kline close price</td><td>Redis → KlineEvent → <code>_on_kline()</code> → <code>_mark_prices[sym] = close</code> → <code>_refresh_derived()</code></td><td>Per second (1s klines)</td></tr>
+                        <tr><td>Interest accrual</td><td>Poll → <code>refresh_margin_account()</code> → <code>_accrued_interest</code> updated (not in MarginShadowBook directly — exchange stores it; MarginShadowBook reads from exchange during sync_from_exchange)</td><td>Every 60s via poll loop</td></tr>
+                        <tr><td>Loan state (borrow/repay)</td><td>Same poll path as interest; <code>_borrowed</code> from <code>GET /sapi/v1/margin/isolated/account</code></td><td>Every 60s via poll loop</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header card-header purple-header"><div class="dot dot-purple"></div><h3>Full Isolated Margin State Interaction Map</h3></div>
             <div class="card-body diagram-body">
                 <div class="mermaid">
 flowchart TD
-    subgraph MDS["MarketDataService Container"]
-        WS_MGR["WebSocket Client Managers\n(BinanceKlineClientManager etc.)"]
-        PUB3["RedisEventBusPublisher\nelysian:md:binance:spot:kline:SYMBOL"]
-        WS_MGR -->|"KlineEvent / OBUpdateEvent"| PUB3
+    subgraph BINANCE_API["Binance Exchange APIs"]
+        REST["REST API\nGET /sapi/v1/margin/isolated/account\nPOST create_margin_order\nPOST create_margin_loan\nPUT transfer"]
+        WS["WebSocket\nwss://stream.binance.com:9443/ws/{listenKey}\nexecutionReport / balanceUpdate\noutboundAccountPosition"]
     end
 
-    subgraph REDIS4["Redis Broker"]
-        CHAN4["pub/sub channels"]
+    subgraph BME["BinanceMarginExchange"]
+        POLL["_margin_poll_loop() every 60s\n→ refresh_margin_account()\n→ _collateral / _borrowed / _accrued_interest\n   stored on exchange instance"]
+        USER_DATA["BinanceMarginUserDataClientManager\nN reader tasks (one per symbol)\n→ raw callback: _handle_user_data()\n→ _balances, _open_orders updated\n→ typed event bus publish:\n   OrderUpdateEvent(MARGIN)\n   BalanceUpdateEvent(MARGIN)"]
     end
 
-    subgraph StrategyContainer["Strategy Container (one per strategy)"]
-        direction TB
-
-        subgraph RunnerFSM["RunnerState (RUNNING)"]
-            subgraph RedisSub["RedisEventBusSubscriber\n_listener_loop()"]
-                DESER2["deserialize_event(msg)\n→ KlineEvent"]
-                DISPATCH["dispatch to _subscribers\n(sequential, backpressure)"]
-                DESER2 --> DISPATCH
-            end
-
-            subgraph StrategyFSM["StrategyState (RUNNING)"]
-                SS2["BaseStrategy\n_dispatch_kline()"]
-                RFSM2["RebalanceFSM\nIDLE → COMPUTING\n→ VALIDATING → EXECUTING\n→ COOLDOWN → IDLE"]
-                SS2 -->|"signal trigger\n(on kline / timer)"| RFSM2
-            end
-
-            subgraph Shadow["ShadowBook"]
-                SB_KLINE["_on_kline()\nupdate _mark_prices\n_refresh_derived()"]
-                SB_LOCK2["lock_for_order()\nReservation Lifecycle"]
-                SB_FILL2["_on_order_update()\n(via asyncio.gather)"]
-                SB_NAV2["_nav / _weights\n_peak_equity / _max_drawdown"]
-                SB_KLINE --> SB_NAV2
-                SB_LOCK2 --> SB_NAV2
-                SB_FILL2 --> SB_NAV2
-            end
-
-            subgraph Orders["Per-Order (N instances)"]
-                OFSM2["OrderFSM\nPENDING → OPEN\n→ PARTIALLY_FILLED\n→ FILLED"]
-                OFSM2 -->|"is_terminal → release_all()\n_async_record_trade()"| SB_FILL2
-            end
-
-            DISPATCH -->|"KlineEvent\nshared bus"| SS2
-            DISPATCH -->|"KlineEvent\nshared bus"| SB_KLINE
-            RFSM2 -->|"EXECUTING stage"| SB_LOCK2
-            SB_LOCK2 -->|"new ActiveLimitOrder\n+ OrderFSM"| OFSM2
-        end
-
-        EX2["BinanceSpotExchange\n(sub-account)"]
-        PBUS3["Private EventBus\n(in-process)"]
-        EX2 -->|"user-data WS fills\nOrderUpdateEvent"| PBUS3
-        PBUS3 -->|"_dispatch_order\nasyncio.gather"| SB_FILL2
-        PBUS3 -->|"RebalanceCompleteEvent"| SS2
-        RFSM2 -->|"place_limit/market_order\nREST API"| EX2
+    subgraph STRATEGY_CONTAINER["Strategy Container"]
+        PBUS["Private EventBus\n(in-process per pipeline)"]
+        MARGIN_STRAT["MarginStrategy\n_dispatch_order → route by SubAccountKey\n_dispatch_balance → route by SubAccountKey"]
+        MSB["MarginShadowBook\n_on_order_update() → apply_fill()\n_on_balance_update() → _collateral update\n_on_kline() → _mark_prices update\n_refresh_derived() → NAV recalculated"]
+        REDIS_SUB["RedisEventBusSubscriber\n(shared bus)\nKlineEvent → _on_kline()"]
     end
 
-    PUB3 -->|"r.publish()"| REDIS4
-    REDIS4 -->|"ps.listen()"| RedisSub
+    REST --> POLL
+    WS --> USER_DATA
+    USER_DATA --> PBUS
+    PBUS --> MARGIN_STRAT
+    MARGIN_STRAT --> MSB
+    REDIS_SUB -->|mark prices| MSB
 
-    subgraph SnapshotDB["PostgreSQL (periodic)"]
-        PT3["PeriodicTask\nsave_snapshot()\nevery N seconds"]
-        SB_NAV2 -->|"PortfolioSnapshot.create()"| PT3
-    end
-
-    style MDS fill:#fef2f2,stroke:#ef4444,color:#991b1b
-    style REDIS4 fill:#ecfdf5,stroke:#059669,color:#065f46
-    style StrategyContainer fill:#f0f4ff,stroke:#2563eb,color:#1e3a5f
-    style RunnerFSM fill:#eff6ff,stroke:#93c5fd,color:#1e3a5f
-    style StrategyFSM fill:#eff6ff,stroke:#bfdbfe,color:#1e3a5f
-    style Shadow fill:#fefce8,stroke:#fcd34d,color:#78350f
-    style Orders fill:#f0fdf4,stroke:#86efac,color:#14532d
-    style SnapshotDB fill:#fdf4ff,stroke:#a855f7,color:#6b21a8
+    style BINANCE_API fill:#fef2f2,stroke:#ef4444,color:#991b1b
+    style BME fill:#faf5ff,stroke:#a855f7,color:#3b0764
+    style STRATEGY_CONTAINER fill:#eff6ff,stroke:#2563eb,color:#1e40af
                 </div>
             </div>
         </div>
@@ -1792,12 +1472,9 @@ flowchart TD
 
 </div><!-- /container -->
 
-<!-- ════════════════════════════════════
-     FOOTER
-════════════════════════════════════ -->
 <div class="footer">
     <span>Elysian Trading System</span> &mdash; State Machine Reference &mdash; April 2026
-    &nbsp;&bull;&nbsp; Updated: Redis transport, MarketDataService, StrategyRunner, ShadowBook
+    &nbsp;&bull;&nbsp; Updated: Isolated Margin, MarginShadowBook, MarginStrategy, MarginStrategyRunner, MarginUserData, MarginPollLoop
 </div>
 
 </body>
